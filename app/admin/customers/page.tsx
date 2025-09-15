@@ -21,13 +21,22 @@ export default function CustomersPage() {
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
-  const [newCustomer, setNewCustomer] = useState({
+  const [newCustomer, setNewCustomer] = useState<{
+    name: string;
+    phone: string;
+    address: string;
+    package: string;
+    monthlyFee: number;
+    status: 'active' | 'inactive';
+    collectorId: string;
+    joinDate: string;
+  }>({
     name: '',
     phone: '',
     address: '',
     package: '',
     monthlyFee: 0,
-    status: 'active' as const,
+    status: 'active',
     collectorId: '',
     joinDate: new Date().toISOString().split('T')[0]
   });

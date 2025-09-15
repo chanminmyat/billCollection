@@ -95,12 +95,12 @@ export default function LoginPage() {
               Sign In
             </Button>
           </form>
-          {/* <div className="mt-6 text-sm text-gray-500 text-center">
+          <div className="mt-6 text-sm text-gray-500 text-center">
             <p>Demo credentials:</p>
             <p>Admin: admin/admin123</p>
             <p>Collector: collector1/pass123</p>
             <p>Customer: customer1/pass123</p>
-          </div> */}
+          </div>
         </CardContent>
       </Card>
     </div>
