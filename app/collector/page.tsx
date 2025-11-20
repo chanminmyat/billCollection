@@ -5,11 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Search, DollarSign, FileText, Users, Calendar, Receipt } from 'lucide-react';
+import { Search, DollarSign, FileText, Users, Calendar, Receipt, Eye, Phone, MapPin, CreditCard } from 'lucide-react';
 import { useData } from '../contexts/data-context';
 import { useAuth } from '../contexts/auth-context';
 import Layout from '../components/layout';
@@ -20,6 +19,8 @@ export default function CollectorDashboard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPayment, setSelectedPayment] = useState<any>(null);
   const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [selectedBillDetails, setSelectedBillDetails] = useState<any>(null);
+  const [selectedCustomerDetails, setSelectedCustomerDetails] = useState<any>(null);
 
   if (!user || user.role !== 'collector') {
     return <div>Access denied</div>;
@@ -154,51 +155,53 @@ export default function CollectorDashboard() {
             <CardTitle>Due Bills ({dueBills.length})</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Contact</TableHead>
-                  <TableHead>Bill Month</TableHead>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>Due Date</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {dueBills.map((bill) => {
-                  const customer = customers.find(c => c.id === bill.customerId);
-                  return (
-                    <TableRow key={bill.id}>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">{customer?.name}</div>
-                          <div className="text-sm text-gray-500">{customer?.address.substring(0, 30)}...</div>
-                        </div>
-                      </TableCell>
-                      <TableCell>{customer?.phone}</TableCell>
-                      <TableCell>{bill.billMonth}</TableCell>
-                      <TableCell className="font-bold">${bill.amount}</TableCell>
-                      <TableCell>{bill.dueDate}</TableCell>
-                      <TableCell>
-                        <Badge variant={bill.status === 'overdue' ? 'destructive' : 'secondary'}>
-                          {bill.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          size="sm"
-                          onClick={() => handleCollectPayment({ ...bill, customer })}
-                        >
-                          Collect Payment
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            <div className="space-y-4">
+              {dueBills.map((bill) => {
+                const customer = customers.find(c => c.id === bill.customerId);
+                return (
+                  <div key={bill.id} className="border rounded-lg p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="font-medium text-lg">{customer?.name}</h3>
+                        <p className="text-sm text-gray-500">Bill Month: {bill.billMonth}</p>
+                      </div>
+                      <Badge variant={bill.status === 'overdue' ? 'destructive' : 'secondary'}>
+                        {bill.status}
+                      </Badge>
+                    </div>
+                    
+                    <div className="flex items-center justify-between">
+                      <div className="text-2xl font-bold text-green-600">
+                        ${bill.amount}
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        Due: {bill.dueDate}
+                      </div>
+                    </div>
+
+                    <div className="flex space-x-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => setSelectedBillDetails({ ...bill, customer })}
+                      >
+                        <Eye className="h-4 w-4 mr-2" />
+                        Details
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => handleCollectPayment({ ...bill, customer })}
+                      >
+                        <CreditCard className="h-4 w-4 mr-2" />
+                        Collect
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </CardContent>
         </Card>
 
@@ -208,47 +211,46 @@ export default function CollectorDashboard() {
             <CardTitle>Assigned Customers ({filteredCustomers.length})</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Contact</TableHead>
-                  <TableHead>Package</TableHead>
-                  <TableHead>Monthly Fee</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Last Payment</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredCustomers.map((customer) => {
-                  const lastBill = myBills
-                    .filter(b => b.customerId === customer.id)
-                    .sort((a, b) => new Date(b.billMonth).getTime() - new Date(a.billMonth).getTime())[0];
-                  
-                  return (
-                    <TableRow key={customer.id}>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">{customer.name}</div>
-                          <div className="text-sm text-gray-500">{customer.address.substring(0, 30)}...</div>
-                        </div>
-                      </TableCell>
-                      <TableCell>{customer.phone}</TableCell>
-                      <TableCell>{customer.package}</TableCell>
-                      <TableCell>${customer.monthlyFee}</TableCell>
-                      <TableCell>
-                        <Badge variant={customer.status === 'active' ? 'default' : 'secondary'}>
-                          {customer.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {lastBill?.paidDate || 'No payment yet'}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            <div className="space-y-4">
+              {filteredCustomers.map((customer) => {
+                const lastBill = myBills
+                  .filter(b => b.customerId === customer.id)
+                  .sort((a, b) => new Date(b.billMonth).getTime() - new Date(a.billMonth).getTime())[0];
+                
+                return (
+                  <div key={customer.id} className="border rounded-lg p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="font-medium text-lg">{customer.name}</h3>
+                        <p className="text-sm text-gray-500">{customer.package} Package</p>
+                      </div>
+                      <Badge variant={customer.status === 'active' ? 'default' : 'secondary'}>
+                        {customer.status}
+                      </Badge>
+                    </div>
+                    
+                    <div className="flex items-center justify-between">
+                      <div className="text-lg font-bold">
+                        ${customer.monthlyFee}/month
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        Last Payment: {lastBill?.paidDate || 'None'}
+                      </div>
+                    </div>
+
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => setSelectedCustomerDetails({ ...customer, lastBill })}
+                    >
+                      <Eye className="h-4 w-4 mr-2" />
+                      View Details
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
           </CardContent>
         </Card>
 
@@ -305,6 +307,153 @@ export default function CollectorDashboard() {
                     Generate Receipt
                   </Button>
                 </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Bill Details Dialog */}
+        <Dialog open={!!selectedBillDetails} onOpenChange={(open) => !open && setSelectedBillDetails(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Bill Details</DialogTitle>
+            </DialogHeader>
+            {selectedBillDetails && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Customer Name</Label>
+                    <p className="font-medium">{selectedBillDetails.customer?.name}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Bill ID</Label>
+                    <p className="font-mono text-sm">{selectedBillDetails.id}</p>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Bill Month</Label>
+                    <p>{selectedBillDetails.billMonth}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Due Date</Label>
+                    <p>{selectedBillDetails.dueDate}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Amount</Label>
+                    <p className="text-2xl font-bold text-green-600">${selectedBillDetails.amount}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Status</Label>
+                    <Badge variant={selectedBillDetails.status === 'overdue' ? 'destructive' : 'secondary'}>
+                      {selectedBillDetails.status}
+                    </Badge>
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-sm font-medium text-gray-500">Customer Contact</Label>
+                  <div className="flex items-center space-x-2 mt-1">
+                    <Phone className="h-4 w-4 text-gray-400" />
+                    <span>{selectedBillDetails.customer?.phone}</span>
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-sm font-medium text-gray-500">Address</Label>
+                  <div className="flex items-start space-x-2 mt-1">
+                    <MapPin className="h-4 w-4 text-gray-400 mt-0.5" />
+                    <span className="text-sm">{selectedBillDetails.customer?.address}</span>
+                  </div>
+                </div>
+
+                <Button
+                  onClick={() => {
+                    handleCollectPayment(selectedBillDetails);
+                    setSelectedBillDetails(null);
+                  }}
+                  className="w-full"
+                >
+                  <CreditCard className="h-4 w-4 mr-2" />
+                  Collect Payment
+                </Button>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Customer Details Dialog */}
+        <Dialog open={!!selectedCustomerDetails} onOpenChange={(open) => !open && setSelectedCustomerDetails(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Customer Details</DialogTitle>
+            </DialogHeader>
+            {selectedCustomerDetails && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Customer Name</Label>
+                    <p className="font-medium">{selectedCustomerDetails.name}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Customer ID</Label>
+                    <p className="font-mono text-sm">{selectedCustomerDetails.id}</p>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Package</Label>
+                    <p>{selectedCustomerDetails.package}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Monthly Fee</Label>
+                    <p className="text-lg font-bold">${selectedCustomerDetails.monthlyFee}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Status</Label>
+                    <Badge variant={selectedCustomerDetails.status === 'active' ? 'default' : 'secondary'}>
+                      {selectedCustomerDetails.status}
+                    </Badge>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Join Date</Label>
+                    <p>{selectedCustomerDetails.joinDate}</p>
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-sm font-medium text-gray-500">Phone Number</Label>
+                  <div className="flex items-center space-x-2 mt-1">
+                    <Phone className="h-4 w-4 text-gray-400" />
+                    <span>{selectedCustomerDetails.phone}</span>
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-sm font-medium text-gray-500">Address</Label>
+                  <div className="flex items-start space-x-2 mt-1">
+                    <MapPin className="h-4 w-4 text-gray-400 mt-0.5" />
+                    <span className="text-sm">{selectedCustomerDetails.address}</span>
+                  </div>
+                </div>
+
+                {selectedCustomerDetails.lastBill && (
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Last Payment</Label>
+                    <p className="text-sm">
+                      {selectedCustomerDetails.lastBill.paidDate || 'No payment yet'} 
+                      {selectedCustomerDetails.lastBill.paidDate && ` - $${selectedCustomerDetails.lastBill.amount}`}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
           </DialogContent>
