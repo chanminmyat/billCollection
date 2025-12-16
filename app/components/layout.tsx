@@ -39,18 +39,21 @@ export default function Layout({ children }: LayoutProps) {
           { icon: UserCheck, label: 'Collectors', href: '/admin/collectors' },
           { icon: FileText, label: 'Billing', href: '/admin/billing' },
           { icon: BarChart3, label: 'Reports', href: '/admin/reports' },
+          { icon: Settings, label: 'Profile', href: '/profile' },
         ];
       case 'collector':
         return [
           { icon: LayoutDashboard, label: 'Dashboard', href: '/collector' },
           { icon: UserCheck, label: 'Collections', href: '/collector/collections' },
           { icon: BarChart3, label: 'Performance', href: '/collector/performance' },
+          { icon: Settings, label: 'Profile', href: '/profile' },
         ];
       case 'customer':
         return [
           { icon: LayoutDashboard, label: 'Dashboard', href: '/customer' },
           { icon: FileText, label: 'Bills', href: '/customer/bills' },
           { icon: DollarSign, label: 'Payments', href: '/customer/payments' },
+          { icon: Settings, label: 'Profile', href: '/profile' },
         ];
       default:
         return [];
