@@ -2048,10 +2048,6 @@ export default function CustomersPage({
               <h1 className="text-3xl font-bold text-gray-900">Customer Management</h1>
               <p className="text-gray-600">Manage your customer database</p>
             </div>
-            <Button onClick={() => router.push('/admin/customers/new-customer')}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Customer
-            </Button>
           </div>
         )}
 

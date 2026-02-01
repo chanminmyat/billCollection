@@ -498,7 +498,7 @@ export default function CollectorsPage({
       };
 
       try {
-        const response = await fetch(`${API_BASE_URL}/customers/${editingCollector.id}`, {
+        const response = await fetch(`${API_BASE_URL}/collectors/${editingCollector.id}`, {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json'
@@ -837,10 +837,6 @@ export default function CollectorsPage({
               <h1 className="text-3xl font-bold text-gray-900">Collector Management</h1>
               <p className="text-gray-600">Manage your collection team</p>
             </div>
-            <Button onClick={() => router.push('/admin/collectors/new-collector')}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Collector
-            </Button>
           </div>
         )}
 
