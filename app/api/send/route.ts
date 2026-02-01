@@ -11,7 +11,7 @@ export async function POST(request: Request) {
     }
 
     const API_BASE_URL =
-    process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+      process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
     const backendRes = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
       method: "POST",
@@ -38,16 +38,19 @@ export async function POST(request: Request) {
       );
     }
 
-    
     const origin = new URL(request.url).origin;
-    const resetLink = `${origin}/reset-password?token=${encodeURIComponent(token)}`;
+    const resetLink = `http://localhost:3000/reset-password?token=${encodeURIComponent(
+      token
+    )}`;
 
     const html = getResetPasswordEmailHtml(email, resetLink);
 
-    
     const resendApiKey = process.env.RESEND_API_KEY;
     if (!resendApiKey) {
-      return Response.json({ message: "RESEND_API_KEY missing." }, { status: 500 });
+      return Response.json(
+        { message: "RESEND_API_KEY missing." },
+        { status: 500 }
+      );
     }
 
     const resendRes = await fetch("https://api.resend.com/emails", {
@@ -57,7 +60,7 @@ export async function POST(request: Request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev",
+        from: process.env.RESEND_FROM_EMAIL,
         to: [email],
         subject: "Reset your Bill Pro password",
         html,
@@ -73,7 +76,6 @@ export async function POST(request: Request) {
       );
     }
 
-   
     return Response.json({
       message: "Reset link sent. Please check your email.",
       expiresAt,

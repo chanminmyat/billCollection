@@ -80,7 +80,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isLoading) {
       const isResetRoute = pathname?.startsWith('/reset-password');
-      if (!user && pathname !== '/' && !isResetRoute) {
+      const isSuperAdminRoute = pathname?.startsWith('/super-admin');
+      if (!user && pathname !== '/' && !isResetRoute && !isSuperAdminRoute) {
         router.push('/');
       } else if (user && pathname === '/') {
         const dashboardPath = user.role === 'admin' ? '/admin' : user.role === 'collector' ? '/collector' : '/customer';

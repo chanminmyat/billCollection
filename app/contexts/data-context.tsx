@@ -32,6 +32,20 @@ export interface Collector {
   phone: string;
   email: string;
   area: string;
+  status?: 'enable' | 'disable' | 'takeoff';
+  nrc?: string;
+  address?: string;
+  addressDetails?: {
+    region: string;
+    district: string;
+    township: string;
+    city: string;
+    ward: string;
+    street: string;
+    building: string;
+    postalCode: string;
+    mapLink?: string;
+  };
 }
 
 export interface Payment {
@@ -188,14 +202,42 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       name: 'John Collector',
       phone: '+1-555-0201',
       email: 'john.collector@billflow.com',
-      area: 'Downtown'
+      area: 'Downtown',
+      status: 'enable',
+      nrc: '7/PAKHANA(N)123456',
+      address: '123 Main St, Downtown',
+      addressDetails: {
+        region: 'Yangon Region',
+        district: 'West Yangon(Downtown)',
+        township: 'Latha',
+        city: 'Yangon',
+        ward: '5',
+        street: 'Main St',
+        building: 'No. 1',
+        postalCode: '11111',
+        mapLink: ''
+      }
     },
     {
       id: '2',
       name: 'Mary Collector',
       phone: '+1-555-0202',
       email: 'mary.collector@billflow.com',
-      area: 'Uptown'
+      area: 'Uptown',
+      status: 'enable',
+      nrc: '9/MAKHANA(N)654321',
+      address: '456 Oak Ave, Uptown',
+      addressDetails: {
+        region: 'Mandalay Region',
+        district: 'Mandalay',
+        township: 'Amarapura',
+        city: 'Mandalay',
+        ward: '2',
+        street: 'Oak Ave',
+        building: 'No. 5',
+        postalCode: '22222',
+        mapLink: ''
+      }
     }
   ]);
 
