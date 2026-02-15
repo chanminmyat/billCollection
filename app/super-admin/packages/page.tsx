@@ -38,6 +38,8 @@ export default function SuperAdminPackagesPage() {
   const [formError, setFormError] = useState('');
   const [isLoadingPlans, setIsLoadingPlans] = useState(false);
   const [plansError, setPlansError] = useState('');
+  const handleCurrencyChange = (value: string) => setCurrency(value as 'MMK' | 'USD');
+  const handleStatusChange = (value: string) => setPlanStatus(value as 'active' | 'draft');
 
   const resetForm = () => {
     setPlanCode('');
@@ -284,7 +286,7 @@ export default function SuperAdminPackagesPage() {
             </div>
             <div className="space-y-2">
               <Label>Currency</Label>
-              <Select value={currency} onValueChange={setCurrency}>
+              <Select value={currency} onValueChange={handleCurrencyChange}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select currency" />
                 </SelectTrigger>
@@ -296,7 +298,7 @@ export default function SuperAdminPackagesPage() {
             </div>
             <div className="space-y-2">
               <Label>Status</Label>
-              <Select value={planStatus} onValueChange={(value) => setPlanStatus(value as 'active' | 'draft')}>
+              <Select value={planStatus} onValueChange={handleStatusChange}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select status" />
                 </SelectTrigger>

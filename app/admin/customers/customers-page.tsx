@@ -71,7 +71,7 @@ function SearchableSelect({
       <SelectTrigger id={id}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
-      <SelectContent onOpenAutoFocus={(event) => event.preventDefault()}>
+      <SelectContent>
         <div className="p-2">
           <Input
             ref={inputRef}
