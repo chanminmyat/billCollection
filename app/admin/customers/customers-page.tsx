@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,21 +22,33 @@ import { useToast } from '@/hooks/use-toast';
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 
 type SelectOption = { value: string; label: string };
+type PlanOption = {
+  id: string;
+  planCode: string;
+  planName: string;
+  bandwidthPlan?: string | null;
+  monthlyFee?: number | string;
+  currency?: string;
+  isActive?: boolean;
+};
 
 function SearchableSelect({
   value,
   onValueChange,
   options,
   placeholder,
-  id
+  id,
+  disabled = false
 }: {
   value: string;
   onValueChange: (value: string) => void;
   options: SelectOption[];
   placeholder: string;
   id: string;
+  disabled?: boolean;
 }) {
   const [query, setQuery] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
   const filtered = options.filter((option) =>
     option.label.toLowerCase().includes(query.toLowerCase())
   );
@@ -45,24 +57,34 @@ function SearchableSelect({
     <Select
       value={value}
       onValueChange={onValueChange}
+      disabled={disabled}
       onOpenChange={(open) => {
         if (!open) {
           setQuery('');
+          return;
         }
+        setTimeout(() => {
+          inputRef.current?.focus();
+        }, 0);
       }}
     >
       <SelectTrigger id={id}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent onOpenAutoFocus={(event) => event.preventDefault()}>
         <div className="p-2">
           <Input
+            ref={inputRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={placeholder}
             className="h-8"
+            autoFocus
+            disabled={disabled}
             onKeyDown={(event) => event.stopPropagation()}
+            onKeyDownCapture={(event) => event.stopPropagation()}
             onKeyUp={(event) => event.stopPropagation()}
+            onKeyUpCapture={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
           />
         </div>
@@ -102,10 +124,19 @@ export default function CustomersPage({
   const [hasFetchedCustomers, setHasFetchedCustomers] = useState(false);
   const [customersLoading, setCustomersLoading] = useState(false);
   const [customersError, setCustomersError] = useState('');
+  const [remoteCollectors, setRemoteCollectors] = useState<Array<{ id: string; name: string; code?: string }>>([]);
+  const [hasFetchedCollectors, setHasFetchedCollectors] = useState(false);
+  const [collectorsLoading, setCollectorsLoading] = useState(false);
+  const [collectorsError, setCollectorsError] = useState('');
   const [customerTypeById, setCustomerTypeById] = useState<Record<string, 'individual' | 'business'>>({});
   const [customerTypeFilter, setCustomerTypeFilter] = useState<'all' | 'individual' | 'business'>('all');
   const [isAddingCustomer, setIsAddingCustomer] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState<Record<string, boolean>>({});
+  const [isAssigningCollector, setIsAssigningCollector] = useState<Record<string, boolean>>({});
+  const [plans, setPlans] = useState<PlanOption[]>([]);
+  const [plansLoading, setPlansLoading] = useState(false);
+  const [plansError, setPlansError] = useState('');
+  const [selectedPlanCode, setSelectedPlanCode] = useState('');
   const [customerType, setCustomerType] = useState<'individual' | 'business'>('individual');
   const [userStatus, setUserStatus] = useState<'enable' | 'disable' | 'takeoff'>('enable');
   const [nrcState, setNrcState] = useState('');
@@ -223,9 +254,11 @@ export default function CustomersPage({
     const list = districts?.[billingDistrict] ?? [];
     return [...list].sort();
   }, [billingRegion, billingDistrict]);
+  const activePlans = useMemo(
+    () => plans.filter((plan) => plan.isActive !== false),
+    [plans]
+  );
   const serviceTypeOptions = ['Fiber', 'DSL', 'Wireless'];
-  const packagePlanOptions = ['Basic Plan', 'Standard Plan', 'Premium Plan'];
-  const bandwidthOptions = ['25/5 Mbps', '50/10 Mbps', '100/20 Mbps', '200/50 Mbps'];
   const ipTypeOptions = ['Static', 'Dynamic'];
   const billingCycleOptions = ['Monthly', 'Quarterly', 'Bi-yearly', 'Yearly', 'Custom'];
   const userStatusOptions = [
@@ -286,13 +319,31 @@ export default function CustomersPage({
     () => serviceTypeOptions.map((option) => ({ value: option, label: option })),
     [serviceTypeOptions]
   );
+  const serviceIdSelectOptions = useMemo<SelectOption[]>(
+    () =>
+      activePlans.map((plan) => ({
+        value: plan.planCode,
+        label: `${plan.planCode} • ${plan.planName}`
+      })),
+    [activePlans]
+  );
   const packagePlanSelectOptions = useMemo<SelectOption[]>(
-    () => packagePlanOptions.map((option) => ({ value: option, label: option })),
-    [packagePlanOptions]
+    () =>
+      activePlans.map((plan) => ({
+        value: plan.planCode,
+        label: `${plan.planName} (${plan.planCode})`
+      })),
+    [activePlans]
   );
   const bandwidthSelectOptions = useMemo<SelectOption[]>(
-    () => bandwidthOptions.map((option) => ({ value: option, label: option })),
-    [bandwidthOptions]
+    () => {
+      const list = activePlans
+        .map((plan) => plan.bandwidthPlan)
+        .filter((value): value is string => Boolean(value));
+      const unique = Array.from(new Set(list));
+      return unique.map((option) => ({ value: option, label: option }));
+    },
+    [activePlans]
   );
   const ipTypeSelectOptions = useMemo<SelectOption[]>(
     () => ipTypeOptions.map((option) => ({ value: option, label: option })),
@@ -306,14 +357,27 @@ export default function CustomersPage({
     () => userStatusOptions,
     []
   );
-  const packagePriceMap: Record<string, number> = {
-    'Basic Plan': 12000,
-    'Standard Plan': 18000,
-    'Premium Plan': 25000
-  };
+  const collectorSelectOptions = useMemo<SelectOption[]>(
+    () =>
+      remoteCollectors.map((collector) => ({
+        value: collector.code || collector.id,
+        label: collector.code ? `${collector.name} (${collector.code})` : collector.name
+      })),
+    [remoteCollectors]
+  );
+  const collectorSelectOptionsWithUnassigned = useMemo<SelectOption[]>(
+    () => [{ value: 'unassigned', label: 'Unassigned' }, ...collectorSelectOptions],
+    [collectorSelectOptions]
+  );
+  const selectedPlan = useMemo(
+    () => activePlans.find((plan) => plan.planCode === selectedPlanCode),
+    [activePlans, selectedPlanCode]
+  );
 
   const monthlyFee =
-    packageName && packagePriceMap[packageName] ? packagePriceMap[packageName] : '';
+    selectedPlan?.monthlyFee !== undefined && selectedPlan?.monthlyFee !== null
+      ? String(selectedPlan.monthlyFee)
+      : '';
 
   useEffect(() => {
     if (billingCycle !== 'Custom') {
@@ -380,6 +444,14 @@ export default function CustomersPage({
     );
   };
 
+  const updateRemoteCustomerCollector = (id: string, collectorId: string) => {
+    setRemoteCustomers((prev) =>
+      prev.map((customer) =>
+        customer.id === id ? { ...customer, collectorId } : customer
+      )
+    );
+  };
+
   const customersSource = hasFetchedCustomers ? remoteCustomers : [];
 
   const filteredCustomers = customersSource.filter(customer => {
@@ -419,8 +491,34 @@ export default function CustomersPage({
     }
   };
 
+  const handleAssignCollector = async (customerId: string, collectorCode: string) => {
+    if (isAssigningCollector[customerId]) return;
+    setIsAssigningCollector((prev) => ({ ...prev, [customerId]: true }));
+    const normalizedCollectorCode = collectorCode === 'unassigned' ? '' : collectorCode;
+    updateRemoteCustomerCollector(customerId, normalizedCollectorCode);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/customers/${customerId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ collectorCode: normalizedCollectorCode || null })
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        const message = data?.message ?? 'Failed to assign collector';
+        console.error(message, data);
+      }
+    } catch (error) {
+      console.error('Failed to assign collector', error);
+    } finally {
+      setIsAssigningCollector((prev) => ({ ...prev, [customerId]: false }));
+    }
+  };
+
   useEffect(() => {
-    if (inlineForm) return;
     let isMounted = true;
 
     const fetchCustomers = async () => {
@@ -491,6 +589,9 @@ export default function CustomersPage({
               : 'active';
 
           const id = String(item?.id ?? item?._id ?? index + 1);
+          const collectorIdRaw =
+            item?.collectorCode ?? item?.collectorId ?? item?.collector?.id ?? '';
+          const collectorId = collectorIdRaw ? String(collectorIdRaw) : '';
           typesMap[id] = customerTypeValue;
 
           return {
@@ -502,7 +603,7 @@ export default function CustomersPage({
             package: packageNameValue,
             monthlyFee: Number(monthlyFeeValue) || 0,
             status: statusValue,
-            collectorId: '',
+            collectorId,
             joinDate: item?.createdAt ?? new Date().toISOString().split('T')[0]
           } as Customer & { code?: string };
         });
@@ -531,7 +632,119 @@ export default function CustomersPage({
     return () => {
       isMounted = false;
     };
-  }, [inlineForm]);
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchPlans = async () => {
+      setPlansLoading(true);
+      setPlansError('');
+      try {
+        const response = await fetch(`${API_BASE_URL}/plans`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (!response.ok) {
+          const data = await response.json().catch(() => null);
+          const message = data?.message ?? 'Failed to load plans';
+          throw new Error(message);
+        }
+
+        const data = await response.json().catch(() => ([]));
+        const list = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.plans)
+          ? data.plans
+          : [];
+
+        const normalized = list.map((item: any, index: number) => ({
+          id: String(item?.id ?? index + 1),
+          planCode: String(item?.planCode ?? ''),
+          planName: String(item?.planName ?? ''),
+          bandwidthPlan: item?.bandwidthPlan ?? null,
+          monthlyFee: item?.monthlyFee ?? 0,
+          currency: item?.currency ?? 'MMK',
+          isActive: item?.isActive ?? true
+        })) as PlanOption[];
+
+        if (isMounted) {
+          setPlans(normalized);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setPlansError(error instanceof Error ? error.message : 'Failed to load plans');
+          setPlans([]);
+        }
+      } finally {
+        if (isMounted) {
+          setPlansLoading(false);
+        }
+      }
+    };
+
+    fetchPlans();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchCollectors = async () => {
+      setHasFetchedCollectors(false);
+      setCollectorsLoading(true);
+      setCollectorsError('');
+      try {
+        const response = await fetch(`${API_BASE_URL}/collectors`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (!response.ok) {
+          const data = await response.json().catch(() => null);
+          const message = data?.message ?? 'Failed to load collectors';
+          throw new Error(message);
+        }
+
+        const data = await response.json().catch(() => ([]));
+        const list = Array.isArray(data) ? data : Array.isArray(data?.collectors) ? data.collectors : [];
+        const normalized = list.map((item: any, index: number) => ({
+          id: String(item?.id ?? index + 1),
+          name: item?.user?.name ?? 'Unknown',
+          code: item?.collectorCode ?? item?.user?.username ?? ''
+        }));
+
+        if (isMounted) {
+          setRemoteCollectors(normalized);
+          setHasFetchedCollectors(true);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setCollectorsError(error instanceof Error ? error.message : 'Failed to load collectors');
+          setRemoteCollectors([]);
+          setHasFetchedCollectors(true);
+        }
+      } finally {
+        if (isMounted) {
+          setCollectorsLoading(false);
+        }
+      }
+    };
+
+    fetchCollectors();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   if (!user || user.role !== 'admin') {
     return <div>Access denied</div>;
@@ -622,6 +835,9 @@ export default function CustomersPage({
     }
     if (!bandwidthPlan) {
       nextErrors.bandwidthPlan = 'Select bandwidth.';
+    }
+    if (!selectedPlanCode) {
+      nextErrors.packageName = 'Select package plan.';
     }
     if (!serviceStartDate) {
       nextErrors.serviceStartDate = 'Select service start date.';
@@ -835,6 +1051,7 @@ export default function CustomersPage({
     setServiceId('');
     setServiceType('');
     setPackageName('');
+    setSelectedPlanCode('');
     setBandwidthPlan('');
     setServiceStartDate('');
     setContractStartDate('');
@@ -920,6 +1137,7 @@ export default function CustomersPage({
     setServiceId('');
     setServiceType('');
     setPackageName('');
+    setSelectedPlanCode('');
     setBandwidthPlan('');
     setServiceStartDate('');
     setContractStartDate('');
@@ -940,6 +1158,13 @@ export default function CustomersPage({
     setDiscountApplied('no');
     setDiscountAmount('');
     setDiscountPeriod('');
+    const matchedPlan = activePlans.find((plan) => plan.planCode === customer.package);
+    if (matchedPlan) {
+      setSelectedPlanCode(matchedPlan.planCode);
+      setServiceId(matchedPlan.planCode);
+      setPackageName(matchedPlan.planName);
+      setBandwidthPlan(matchedPlan.bandwidthPlan ?? '');
+    }
     setNewCustomer({
       name: customer.name,
       phone: customer.phone,
@@ -998,6 +1223,7 @@ export default function CustomersPage({
       setServiceId('');
       setServiceType('');
       setPackageName('');
+      setSelectedPlanCode('');
       setBandwidthPlan('');
       setServiceStartDate('');
       setContractStartDate('');
@@ -1073,6 +1299,7 @@ export default function CustomersPage({
             <p className="text-xs text-rose-600">{errors.userStatus}</p>
           )}
         </div>
+
       </div>
 
       {customerType === 'individual' && (
@@ -1662,11 +1889,19 @@ export default function CustomersPage({
             <Label htmlFor="serviceId" className="text-sm font-medium text-slate-700">
               Service ID
             </Label>
-            <Input
+            <SearchableSelect
               id="serviceId"
-              value={serviceId}
-              onChange={(e) => setServiceId(e.target.value)}
-              placeholder="Service ID"
+              value={selectedPlanCode}
+              onValueChange={(value) => {
+                setSelectedPlanCode(value);
+                const plan = activePlans.find((item) => item.planCode === value);
+                setServiceId(plan?.planCode ?? '');
+                setPackageName(plan?.planName ?? '');
+                setBandwidthPlan(plan?.bandwidthPlan ?? '');
+              }}
+              options={serviceIdSelectOptions}
+              placeholder={plansLoading ? 'Loading plans...' : 'Select service ID'}
+              disabled={plansLoading}
             />
           </div>
           <div className="space-y-2">
@@ -1687,13 +1922,23 @@ export default function CustomersPage({
             </Label>
             <SearchableSelect
               id="packageName"
-              value={packageName}
-              onValueChange={setPackageName}
+              value={selectedPlanCode}
+              onValueChange={(value) => {
+                setSelectedPlanCode(value);
+                const plan = activePlans.find((item) => item.planCode === value);
+                setServiceId(plan?.planCode ?? '');
+                setPackageName(plan?.planName ?? '');
+                setBandwidthPlan(plan?.bandwidthPlan ?? '');
+              }}
               options={packagePlanSelectOptions}
-              placeholder="Select package plan"
+              placeholder={plansLoading ? 'Loading plans...' : 'Select package plan'}
+              disabled={plansLoading}
             />
             {errors.packageName && (
               <p className="text-xs text-rose-600">{errors.packageName}</p>
+            )}
+            {plansError && (
+              <p className="text-xs text-rose-600">{plansError}</p>
             )}
           </div>
           <div className="space-y-2">
@@ -2013,6 +2258,30 @@ export default function CustomersPage({
           )}
         </div>
       </div>
+
+      <div className="border-t border-slate-200 px-6 py-6">
+        <h4 className="text-sm font-semibold text-slate-600 mb-4 border-l-4 border-indigo-400 pl-3">
+          Assign Collector
+        </h4>
+        <div className="space-y-3 max-w-md">
+          <Label htmlFor="assignedCollector" className="text-sm font-medium text-slate-700">
+            Collector
+          </Label>
+          <SearchableSelect
+            id="assignedCollector"
+            value={newCustomer.collectorId}
+            onValueChange={(value) => setNewCustomer({ ...newCustomer, collectorId: value })}
+            options={collectorSelectOptions}
+            placeholder={collectorsLoading ? 'Loading collectors...' : 'Select collector'}
+          />
+          {collectorsError && (
+            <p className="text-xs text-rose-600">{collectorsError}</p>
+          )}
+          {!collectorsLoading && hasFetchedCollectors && collectorSelectOptions.length === 0 && (
+            <p className="text-xs text-slate-500">No collectors available.</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 
@@ -2132,7 +2401,12 @@ export default function CustomersPage({
                   </TableHeader>
                   <TableBody>
                     {filteredCustomers.map((customer) => {
-                      const collector = collectors.find(c => c.id === customer.collectorId);
+                      const collectorValue = customer.collectorId || 'unassigned';
+                      const assignPlaceholder = isAssigningCollector[customer.id]
+                        ? 'Assigning...'
+                        : collectorsLoading
+                        ? 'Loading collectors...'
+                        : 'Assign collector';
                       return (
                         <TableRow key={customer.id}>
                           <TableCell>
@@ -2188,7 +2462,18 @@ export default function CustomersPage({
                               );
                             })()}
                           </TableCell>
-                          <TableCell>{collector?.name || '—'}</TableCell>
+                          <TableCell>
+                            <div className="min-w-[180px]">
+                              <SearchableSelect
+                                id={`collector-${customer.id}`}
+                                value={collectorValue}
+                                onValueChange={(value) => handleAssignCollector(customer.id, value)}
+                                options={collectorSelectOptionsWithUnassigned}
+                                placeholder={assignPlaceholder}
+                                disabled={collectorsLoading || isAssigningCollector[customer.id]}
+                              />
+                            </div>
+                          </TableCell>
                           <TableCell>
                             <div className="flex items-center space-x-2">
                               <Button variant="ghost" size="sm" onClick={() => handleEditCustomer(customer)}>

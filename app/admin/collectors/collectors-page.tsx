@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Search, Plus, Edit, Trash2, Phone, Mail, MapPin, Users } from 'lucide-react';
 import { useData, Collector } from '../../contexts/data-context';
 import { useAuth } from '../../contexts/auth-context';
@@ -35,6 +36,7 @@ function SearchableSelect({
   id: string;
 }) {
   const [query, setQuery] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
   const filtered = options.filter((option) =>
     option.label.toLowerCase().includes(query.toLowerCase())
   );
@@ -46,21 +48,29 @@ function SearchableSelect({
       onOpenChange={(open) => {
         if (!open) {
           setQuery('');
+          return;
         }
+        setTimeout(() => {
+          inputRef.current?.focus();
+        }, 0);
       }}
     >
       <SelectTrigger id={id}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent onOpenAutoFocus={(event) => event.preventDefault()}>
         <div className="p-2">
           <Input
+            ref={inputRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={placeholder}
             className="h-8"
+            autoFocus
             onKeyDown={(event) => event.stopPropagation()}
+            onKeyDownCapture={(event) => event.stopPropagation()}
             onKeyUp={(event) => event.stopPropagation()}
+            onKeyUpCapture={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
           />
         </div>
@@ -102,6 +112,21 @@ export default function CollectorsPage({
   const [isAddingCollector, setIsAddingCollector] = useState(false);
   const [isUpdatingCollectorStatus, setIsUpdatingCollectorStatus] = useState<Record<string, boolean>>({});
   const [isUpdatingCollector, setIsUpdatingCollector] = useState(false);
+  const [availableCustomers, setAvailableCustomers] = useState<
+    Array<{ id: string; name: string; collectorId?: string }>
+  >([]);
+  const [customersLoading, setCustomersLoading] = useState(false);
+  const [customersError, setCustomersError] = useState('');
+  const [assignedCustomerIds, setAssignedCustomerIds] = useState<string[]>([]);
+  const [customerQuery, setCustomerQuery] = useState('');
+  const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [assigningCollector, setAssigningCollector] = useState<Collector | null>(null);
+  const [assignCustomerIds, setAssignCustomerIds] = useState<string[]>([]);
+  const [assignQuery, setAssignQuery] = useState('');
+  const [assignError, setAssignError] = useState('');
+  const [isSavingAssignments, setIsSavingAssignments] = useState(false);
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [viewCollector, setViewCollector] = useState<Collector | null>(null);
   const [collectorStatus, setCollectorStatus] = useState<'enable' | 'disable' | 'takeoff'>('enable');
   const [nrcState, setNrcState] = useState('');
   const [nrcTownship, setNrcTownship] = useState('');
@@ -132,6 +157,36 @@ export default function CollectorsPage({
                          collector.id.includes(searchTerm);
     return matchesSearch;
   });
+
+  const getCollectorCode = (collector: Collector) =>
+    (collector as Collector & { collectorCode?: string }).collectorCode || '';
+
+  const getCollectorAssignmentValue = (collector: Collector) =>
+    getCollectorCode(collector) || collector.id;
+
+  const isCustomerAssignedToCollector = (customer: { collectorId?: string }, collector: Collector) => {
+    if (!customer.collectorId) return false;
+    const collectorCode = getCollectorCode(collector);
+    return (
+      customer.collectorId === collector.id ||
+      (collectorCode && customer.collectorId === collectorCode)
+    );
+  };
+
+  const filteredAssignCustomers = useMemo(
+    () =>
+      availableCustomers.filter((customer) =>
+        customer.name.toLowerCase().includes(assignQuery.toLowerCase())
+      ),
+    [availableCustomers, assignQuery]
+  );
+
+  const viewAssignedCustomers = useMemo(() => {
+    if (!viewCollector) return [];
+    const hasRemoteAssignments = availableCustomers.some((customer) => customer.collectorId);
+    const source = hasRemoteAssignments ? availableCustomers : customers;
+    return source.filter((customer) => isCustomerAssignedToCollector(customer, viewCollector));
+  }, [availableCustomers, customers, viewCollector]);
 
   const updateRemoteCollectorStatus = (id: string, status: 'enable' | 'disable' | 'takeoff') => {
     setRemoteCollectors((prev) =>
@@ -349,6 +404,66 @@ export default function CollectorsPage({
     };
   }, [inlineForm]);
 
+  useEffect(() => {
+    if (inlineForm) return;
+    let isMounted = true;
+
+    const fetchCustomers = async () => {
+      setCustomersLoading(true);
+      setCustomersError('');
+      try {
+        const response = await fetch(`${API_BASE_URL}/customers`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (!response.ok) {
+          const data = await response.json().catch(() => null);
+          const message = data?.message ?? 'Failed to load customers';
+          throw new Error(message);
+        }
+
+        const data = await response.json().catch(() => ([]));
+        const list = Array.isArray(data) ? data : Array.isArray(data?.customers) ? data.customers : [];
+        const normalized = list.map((item: any, index: number) => {
+          const collectorIdRaw =
+            item?.collectorCode ?? item?.collectorId ?? item?.collector?.id ?? '';
+          const collectorId = collectorIdRaw ? String(collectorIdRaw) : '';
+          return {
+            id: String(item?.id ?? index + 1),
+            name:
+              item?.personalName ||
+              item?.companyName ||
+              item?.name ||
+              'Unknown',
+            collectorId
+          };
+        });
+
+        if (isMounted) {
+          setAvailableCustomers(normalized);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setCustomersError(error instanceof Error ? error.message : 'Failed to load customers');
+          setAvailableCustomers([]);
+        }
+      } finally {
+        if (isMounted) {
+          setCustomersLoading(false);
+        }
+      }
+    };
+
+    fetchCustomers();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [inlineForm]);
+
   if (!user || user.role !== 'admin') {
     return <div>Access denied</div>;
   }
@@ -431,6 +546,8 @@ export default function CollectorsPage({
     setCollectorStreet('');
     setCollectorBuilding('');
     setCollectorPostalCode('');
+    setAssignedCustomerIds([]);
+    setCustomerQuery('');
     toast({
       title: 'Collector added',
       description: 'Redirecting to collector list...',
@@ -555,6 +672,8 @@ export default function CollectorsPage({
       setCollectorStreet('');
       setCollectorBuilding('');
       setCollectorPostalCode('');
+      setAssignedCustomerIds([]);
+      setCustomerQuery('');
 
       toast({
         title: 'Collector updated',
@@ -570,9 +689,12 @@ export default function CollectorsPage({
     }
   };
 
-  const getCollectorStats = (collectorId: string) => {
-    const assignedCustomers = customers.filter(c => c.collectorId === collectorId);
-    const collectorBills = bills.filter(b => b.collectorId === collectorId);
+  const getCollectorStats = (collector: Collector) => {
+    const hasRemoteAssignments = availableCustomers.some((customer) => customer.collectorId);
+    const assignedCustomers = hasRemoteAssignments
+      ? availableCustomers.filter((customer) => isCustomerAssignedToCollector(customer, collector))
+      : customers.filter((customer) => isCustomerAssignedToCollector(customer, collector));
+    const collectorBills = bills.filter((bill) => bill.collectorId === collector.id);
     const paidBills = collectorBills.filter(b => b.status === 'paid');
     const totalCollected = paidBills.reduce((sum, b) => sum + b.amount, 0);
     const collectionRate = collectorBills.length > 0 ? (paidBills.length / collectorBills.length * 100) : 0;
@@ -583,6 +705,88 @@ export default function CollectorsPage({
       collectionRate,
       totalBills: collectorBills.length
     };
+  };
+
+  const openAssignDialog = (collector: Collector) => {
+    const currentAssigned = availableCustomers
+      .filter((customer) => isCustomerAssignedToCollector(customer, collector))
+      .map((customer) => customer.id);
+    setAssigningCollector(collector);
+    setAssignCustomerIds(currentAssigned);
+    setAssignQuery('');
+    setAssignError('');
+    setAssignDialogOpen(true);
+  };
+
+  const openViewDialog = (collector: Collector) => {
+    setViewCollector(collector);
+    setViewDialogOpen(true);
+  };
+
+  const updateCustomerCollector = async (customerId: string, collectorCode: string | null) => {
+    const response = await fetch(`${API_BASE_URL}/customers/${customerId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ collectorCode })
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      const message = data?.message ?? 'Failed to assign customers';
+      throw new Error(message);
+    }
+  };
+
+  const handleSaveAssignments = async () => {
+    if (!assigningCollector) return;
+    setIsSavingAssignments(true);
+    setAssignError('');
+
+    const collectorId = getCollectorAssignmentValue(assigningCollector);
+    const currentAssigned = availableCustomers
+      .filter((customer) => isCustomerAssignedToCollector(customer, assigningCollector))
+      .map((customer) => customer.id);
+
+    const toAssign = assignCustomerIds.filter((id) => !currentAssigned.includes(id));
+    const toUnassign = currentAssigned.filter((id) => !assignCustomerIds.includes(id));
+
+    if (toAssign.length === 0 && toUnassign.length === 0) {
+      setIsSavingAssignments(false);
+      setAssignDialogOpen(false);
+      return;
+    }
+
+    try {
+      await Promise.all([
+        ...toAssign.map((id) => updateCustomerCollector(id, collectorId)),
+        ...toUnassign.map((id) => updateCustomerCollector(id, null))
+      ]);
+
+      setAvailableCustomers((prev) =>
+        prev.map((customer) => {
+          if (toAssign.includes(customer.id)) {
+            return { ...customer, collectorId };
+          }
+          if (toUnassign.includes(customer.id)) {
+            return { ...customer, collectorId: '' };
+          }
+          return customer;
+        })
+      );
+
+      toast({
+        title: 'Assignments updated',
+        description: 'Collector assignments have been saved.'
+      });
+
+      setAssignDialogOpen(false);
+    } catch (error) {
+      setAssignError(error instanceof Error ? error.message : 'Failed to assign customers.');
+    } finally {
+      setIsSavingAssignments(false);
+    }
   };
 
   const formContent = (
@@ -680,6 +884,56 @@ export default function CollectorsPage({
               inputMode="numeric"
             />
           </div>
+        </div>
+      </div>
+      <div className="border-t border-slate-200 px-6 py-6">
+        <h4 className="text-sm font-semibold text-slate-600 mb-4 border-l-4 border-amber-400 pl-3">
+          Assign Customers
+        </h4>
+        <div className="space-y-3">
+          <Input
+            value={customerQuery}
+            onChange={(e) => setCustomerQuery(e.target.value)}
+            placeholder="Search customers..."
+          />
+          {customersError && (
+            <p className="text-xs text-rose-600">{customersError}</p>
+          )}
+          {customersLoading ? (
+            <p className="text-xs text-slate-500">Loading customers...</p>
+          ) : (
+            <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
+              {availableCustomers
+                .filter((customer) =>
+                  customer.name.toLowerCase().includes(customerQuery.toLowerCase())
+                )
+                .map((customer) => {
+                  const checked = assignedCustomerIds.includes(customer.id);
+                  return (
+                    <label
+                      key={customer.id}
+                      className="flex items-center justify-between gap-3 py-2 text-sm text-slate-700"
+                    >
+                      <span>{customer.name}</span>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(event) => {
+                          if (event.target.checked) {
+                            setAssignedCustomerIds((prev) => [...prev, customer.id]);
+                          } else {
+                            setAssignedCustomerIds((prev) => prev.filter((id) => id !== customer.id));
+                          }
+                        }}
+                      />
+                    </label>
+                  );
+                })}
+              {availableCustomers.length === 0 && (
+                <p className="text-xs text-slate-500">No customers available.</p>
+              )}
+            </div>
+          )}
         </div>
       </div>
       <div className="border-t border-slate-200 px-6 py-6">
@@ -953,7 +1207,7 @@ export default function CollectorsPage({
                   </TableHeader>
                   <TableBody>
                     {filteredCollectors.map((collector) => {
-                      const stats = getCollectorStats(collector.id);
+                      const stats = getCollectorStats(collector);
                       return (
                         <TableRow key={collector.id}>
                           <TableCell>
@@ -1017,10 +1271,28 @@ export default function CollectorsPage({
                             })()}
                           </TableCell>
                           <TableCell>
-                            <div className="flex items-center">
-                              <Users className="h-3 w-3 mr-1 text-gray-400" />
-                              {stats.assignedCustomers}
+                            <div className="flex items-center gap-2">
+                              <Users className="h-3 w-3 text-gray-400" />
+                              <span>{stats.assignedCustomers}</span>
                             </div>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="mt-2 h-7 px-2 text-xs"
+                              onClick={() => openAssignDialog(collector)}
+                              disabled={customersLoading}
+                            >
+                              Assign
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="mt-1 h-7 px-2 text-xs"
+                              onClick={() => openViewDialog(collector)}
+                              disabled={customersLoading}
+                            >
+                              View
+                            </Button>
                           </TableCell>
                           <TableCell>
                             <div className="font-medium">${stats.totalCollected.toFixed(2)}</div>
@@ -1063,6 +1335,127 @@ export default function CollectorsPage({
               </CardContent>
             </Card>
 
+            <Dialog
+              open={assignDialogOpen}
+              onOpenChange={(open) => {
+                setAssignDialogOpen(open);
+                if (!open) {
+                  setAssigningCollector(null);
+                  setAssignCustomerIds([]);
+                  setAssignError('');
+                }
+              }}
+            >
+              <DialogContent className="max-w-xl">
+                <DialogHeader>
+                  <DialogTitle>
+                    Assign Customers{assigningCollector ? ` • ${assigningCollector.name}` : ''}
+                  </DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <Input
+                    value={assignQuery}
+                    onChange={(e) => setAssignQuery(e.target.value)}
+                    placeholder="Search customers..."
+                  />
+                  {assignError && (
+                    <p className="text-xs text-rose-600">{assignError}</p>
+                  )}
+                  {customersLoading ? (
+                    <p className="text-xs text-slate-500">Loading customers...</p>
+                  ) : (
+                    <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      {filteredAssignCustomers.map((customer) => {
+                        const checked = assignCustomerIds.includes(customer.id);
+                        return (
+                          <label
+                            key={customer.id}
+                            className="flex items-center justify-between gap-3 py-2 text-sm text-slate-700"
+                          >
+                            <span>{customer.name}</span>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(event) => {
+                                if (event.target.checked) {
+                                  setAssignCustomerIds((prev) => [...prev, customer.id]);
+                                } else {
+                                  setAssignCustomerIds((prev) =>
+                                    prev.filter((id) => id !== customer.id)
+                                  );
+                                }
+                              }}
+                            />
+                          </label>
+                        );
+                      })}
+                      {filteredAssignCustomers.length === 0 && (
+                        <p className="text-xs text-slate-500">
+                          {availableCustomers.length === 0
+                            ? 'No customers available.'
+                            : 'No customers match your search.'}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setAssignDialogOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button onClick={handleSaveAssignments} disabled={isSavingAssignments}>
+                    {isSavingAssignments ? 'Saving...' : 'Save Assignments'}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog
+              open={viewDialogOpen}
+              onOpenChange={(open) => {
+                setViewDialogOpen(open);
+                if (!open) {
+                  setViewCollector(null);
+                }
+              }}
+            >
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>
+                    Assigned Customers{viewCollector ? ` • ${viewCollector.name}` : ''}
+                  </DialogTitle>
+                </DialogHeader>
+                <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  {customersLoading ? (
+                    <p className="text-xs text-slate-500">Loading customers...</p>
+                  ) : viewAssignedCustomers.length === 0 ? (
+                    <p className="text-xs text-slate-500">No customers assigned.</p>
+                  ) : (
+                    viewAssignedCustomers.map((customer) => (
+                      <div
+                        key={customer.id}
+                        className="flex items-center justify-between py-2 text-sm text-slate-700"
+                      >
+                        <span>{customer.name}</span>
+                        {customer.collectorId && (
+                          <span className="text-xs text-slate-400">{customer.collectorId}</span>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setViewDialogOpen(false)}>
+                    Close
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
             <Card>
               <CardHeader>
                 <CardTitle>Performance Summary</CardTitle>
@@ -1070,7 +1463,7 @@ export default function CollectorsPage({
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {collectors.map((collector) => {
-                    const stats = getCollectorStats(collector.id);
+                    const stats = getCollectorStats(collector);
                     return (
                       <div key={collector.id} className="p-4 border rounded-lg">
                         <div className="flex items-center justify-between mb-2">

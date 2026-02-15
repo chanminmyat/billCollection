@@ -27,6 +27,7 @@ export default function Layout({ children }: LayoutProps) {
   const { user, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     if (typeof window === 'undefined') return false;
+    if (window.innerWidth >= 1024) return false;
     const saved = window.localStorage.getItem('sidebarOpen');
     if (saved !== null) {
       return saved === 'true';
@@ -35,6 +36,7 @@ export default function Layout({ children }: LayoutProps) {
   });
   const [customersMenuOpen, setCustomersMenuOpen] = useState(false);
   const [collectorsMenuOpen, setCollectorsMenuOpen] = useState(false);
+  const [hoveredMenu, setHoveredMenu] = useState<'customers' | 'collectors' | null>(null);
   const pathname = usePathname();
 
   if (!user) return null;
@@ -85,13 +87,6 @@ export default function Layout({ children }: LayoutProps) {
   const isCollectorsRoute = pathname.startsWith('/admin/collectors');
 
   useEffect(() => {
-    if (user?.role === 'admin') {
-      setCustomersMenuOpen(isCustomersRoute);
-      setCollectorsMenuOpen(isCollectorsRoute);
-    }
-  }, [isCustomersRoute, isCollectorsRoute, user?.role]);
-
-  useEffect(() => {
     if (typeof window === 'undefined') return;
     const updateSidebar = () => {
       if (window.innerWidth < 1024) {
@@ -117,6 +112,20 @@ export default function Layout({ children }: LayoutProps) {
     }
   };
 
+  const handleSidebarMouseEnter = () => {
+    if (typeof window === 'undefined') return;
+    if (window.innerWidth >= 1024) {
+      setSidebarOpen(true);
+    }
+  };
+
+  const handleSidebarMouseLeave = () => {
+    if (typeof window === 'undefined') return;
+    if (window.innerWidth >= 1024) {
+      setSidebarOpen(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Mobile sidebar overlay */}
@@ -129,6 +138,8 @@ export default function Layout({ children }: LayoutProps) {
 
       {/* Sidebar */}
       <div
+        onMouseEnter={handleSidebarMouseEnter}
+        onMouseLeave={handleSidebarMouseLeave}
         className={`fixed inset-y-0 left-0 z-50 bg-white shadow-lg transition-all duration-300 ease-in-out ${
           sidebarOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full lg:w-16 lg:translate-x-0'
         }`}
@@ -178,7 +189,9 @@ export default function Layout({ children }: LayoutProps) {
             const Icon = item.icon;
             if (item.children) {
               const isCollectorsMenu = item.label === 'Collectors';
-              const isMenuOpen = isCollectorsMenu ? collectorsMenuOpen : customersMenuOpen;
+              const menuKey = isCollectorsMenu ? 'collectors' : 'customers';
+              const isMenuOpen =
+                (isCollectorsMenu ? collectorsMenuOpen : customersMenuOpen) || hoveredMenu === menuKey;
               const isMenuRoute = isCollectorsMenu ? isCollectorsRoute : isCustomersRoute;
               const toggleMenu = () => {
                 if (isCollectorsMenu) {
@@ -188,7 +201,26 @@ export default function Layout({ children }: LayoutProps) {
                 }
               };
               return (
-                <div key={item.label} className="px-2">
+                <div
+                  key={item.label}
+                  className="relative px-2"
+                  onMouseEnter={() => {
+                    setHoveredMenu(menuKey);
+                    if (isCollectorsMenu) {
+                      setCollectorsMenuOpen(true);
+                    } else {
+                      setCustomersMenuOpen(true);
+                    }
+                  }}
+                  onMouseLeave={() => {
+                    setHoveredMenu(null);
+                    if (isCollectorsMenu) {
+                      setCollectorsMenuOpen(false);
+                    } else {
+                      setCustomersMenuOpen(false);
+                    }
+                  }}
+                >
                   <button
                     type="button"
                     className={`flex w-full items-center justify-between rounded-md px-2 py-3 text-sm font-medium transition-colors ${
@@ -209,21 +241,27 @@ export default function Layout({ children }: LayoutProps) {
                     )}
                   </button>
                   {isMenuOpen && (
-                    <div className={`${sidebarOpen ? 'ml-9' : 'ml-2'} mt-1 space-y-1`}>
+                    <div
+                      className={
+                        sidebarOpen
+                          ? 'ml-9 mt-1 space-y-1'
+                          : 'absolute left-full top-0 z-50 ml-2 w-52 rounded-md border border-slate-200 bg-white py-2 shadow-lg'
+                      }
+                    >
                       {item.children.map((child) => {
                         const isChildActive = pathname === child.href;
                         return (
                           <Link
                             key={child.href}
                             href={child.href}
-                            className={`block rounded-md px-3 py-2 text-xs font-medium transition-colors ${
+                            className={`block rounded-md px-3 py-2 ${sidebarOpen ? 'text-xs' : 'text-sm'} font-medium transition-colors ${
                               isChildActive
                                 ? 'bg-blue-100 text-blue-700'
                                 : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                             }`}
                             onClick={closeSidebarOnMobile}
                           >
-                            {sidebarOpen ? child.label : child.label.charAt(0)}
+                            {child.label}
                           </Link>
                         );
                       })}
@@ -271,25 +309,16 @@ export default function Layout({ children }: LayoutProps) {
         {/* Top bar */}
         <div className="bg-white shadow-sm border-b px-4 py-3 lg:px-6">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setSidebarOpen(true)}
-                className="lg:hidden"
-              >
-                <Menu className="h-5 w-5" />
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setSidebarOpen((prev) => !prev)}
-                className={`hidden lg:inline-flex ${sidebarOpen ? 'lg:hidden' : ''}`}
-              >
-                <Menu className="h-5 w-5" />
-              </Button>
-
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSidebarOpen(true)}
+              className="lg:hidden"
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+            
+            <div className="flex items-center space-x-4">
               <div className="text-sm text-gray-500">
                 {new Date().toLocaleDateString('en-US', {
                   weekday: 'long',
