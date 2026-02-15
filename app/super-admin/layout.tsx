@@ -1,11 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   Activity,
   BadgeCheck,
+  Database,
   LayoutDashboard,
   Lock,
   Menu,
@@ -20,22 +21,50 @@ const navItems = [
   { href: '/super-admin/dashboard', label: 'Overview', icon: LayoutDashboard },
   { href: '/super-admin/admins', label: 'Manage Admins', icon: Users },
   { href: '/super-admin/packages', label: 'WiFi Packages', icon: Wifi },
+  { href: '/super-admin/reference-data', label: 'Reference Data', icon: Database },
   { href: '/super-admin/content', label: 'Content Control', icon: BadgeCheck },
   { href: '/super-admin/settings', label: 'System Settings', icon: Settings }
 ];
 
 export default function SuperAdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const isLogin = pathname === '/super-admin';
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isAuthed, setIsAuthed] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
   const title = useMemo(() => {
     if (pathname.startsWith('/super-admin/admins')) return 'Manage Admins';
     if (pathname.startsWith('/super-admin/packages')) return 'WiFi Packages';
+    if (pathname.startsWith('/super-admin/reference-data')) return 'Reference Data';
     if (pathname.startsWith('/super-admin/content')) return 'Content Control';
     if (pathname.startsWith('/super-admin/settings')) return 'System Settings';
     return 'Overview';
   }, [pathname]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const authed = localStorage.getItem('super_admin_authed') === 'true';
+    setIsAuthed(authed);
+    setIsCheckingAuth(false);
+    if (!authed && !isLogin) {
+      router.replace('/super-admin');
+    }
+    if (authed && isLogin) {
+      router.replace('/super-admin/dashboard');
+    }
+  }, [isLogin, router]);
+
+  const handleLogout = () => {
+    if (typeof window === 'undefined') return;
+    localStorage.removeItem('super_admin_authed');
+    localStorage.removeItem('super_admin_user');
+  };
+
+  if (isCheckingAuth) {
+    return <div className="min-h-screen bg-slate-950 text-white" />;
+  }
 
   if (isLogin) {
     return <div className="min-h-screen bg-slate-950 text-slate-900">{children}</div>;
@@ -94,6 +123,7 @@ export default function SuperAdminLayout({ children }: { children: React.ReactNo
           <Link
             href="/super-admin"
             className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-900 hover:text-white"
+            onClick={handleLogout}
           >
             <Lock className="h-4 w-4" />
             Sign out
