@@ -1,38 +1,190 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { FileText, Download, DollarSign, Calendar, CheckCircle, AlertCircle } from 'lucide-react';
-import { useData } from '../contexts/data-context';
+import { FileText, Download, DollarSign, CheckCircle, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/auth-context';
 import Layout from '../components/layout';
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
+
+type InvoiceStatus = 'paid' | 'unpaid' | 'overdue' | 'cancelled';
+
+type InvoiceRecord = {
+  id: string;
+  invoiceNo?: string | null;
+  invoiceDate?: string | null;
+  billingPeriodFrom?: string | null;
+  billingPeriodTo?: string | null;
+  dueDate?: string | null;
+  paidAt?: string | null;
+  status: InvoiceStatus;
+  totalAmount?: string | number | null;
+  currency?: string | null;
+  paymentMethod?: string | null;
+  receiptNo?: string | null;
+  customer?: {
+    id?: string | null;
+    customerCode?: string | null;
+    personalName?: string | null;
+    companyName?: string | null;
+    primaryPhone?: string | null;
+    installationAddress?: string | null;
+  } | null;
+  subscription?: {
+    plan?: {
+      planCode?: string | null;
+      planName?: string | null;
+      monthlyFee?: string | number | null;
+      currency?: string | null;
+    } | null;
+  } | null;
+};
+
+const normalizeKey = (value?: string | null) => (value ? value.trim().toLowerCase() : '');
+
+const toNumber = (value: string | number | null | undefined) => {
+  if (value === null || value === undefined || value === '') return 0;
+  const parsed = typeof value === 'number' ? value : Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const formatMoney = (value: string | number | null | undefined, currency = 'MMK') =>
+  `${toNumber(value).toLocaleString()} ${currency}`;
+
+const statusBadgeVariant = (status: InvoiceStatus) => {
+  if (status === 'paid') return 'default';
+  if (status === 'unpaid') return 'secondary';
+  return 'destructive';
+};
+
+const getInvoiceSortDate = (invoice: InvoiceRecord) => {
+  const candidate = invoice.invoiceDate || invoice.dueDate || invoice.paidAt;
+  if (!candidate) return 0;
+  const parsed = Date.parse(candidate);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const getBillingPeriod = (invoice: InvoiceRecord) => {
+  if (invoice.billingPeriodFrom && invoice.billingPeriodTo) {
+    return `${invoice.billingPeriodFrom} - ${invoice.billingPeriodTo}`;
+  }
+  return invoice.invoiceNo || invoice.id;
+};
+
 export default function CustomerDashboard() {
-  const { customers, bills, payments } = useData();
   const { user } = useAuth();
+  const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
+
+  useEffect(() => {
+    if (!user || user.role !== 'customer') {
+      return;
+    }
+
+    let mounted = true;
+
+    const fetchInvoices = async () => {
+      setIsLoading(true);
+      setLoadError('');
+      try {
+        const response = await fetch(`${API_BASE_URL}/billing/invoices`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (!response.ok) {
+          const data = await response.json().catch(() => null);
+          throw new Error(data?.message ?? 'Failed to load invoices');
+        }
+
+        const data = await response.json().catch(() => []);
+        const list = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.invoices)
+            ? data.invoices
+            : [];
+
+        if (!mounted) return;
+        setInvoices(list);
+      } catch (error) {
+        if (!mounted) return;
+        setLoadError(error instanceof Error ? error.message : 'Failed to load invoices');
+        setInvoices([]);
+      } finally {
+        if (mounted) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    fetchInvoices();
+
+    return () => {
+      mounted = false;
+    };
+  }, [user?.id, user?.role]);
 
   if (!user || user.role !== 'customer') {
     return <div>Access denied</div>;
   }
 
-  // Get customer data
-  const customer = customers.find(c => c.id === user.id) || customers[0]; // Fallback for demo
-  const customerBills = bills.filter(b => b.customerId === customer.id);
-  const customerPayments = payments.filter(p => p.customerId === customer.id);
+  const customerIdentityKeys = new Set<string>(
+    [
+      normalizeKey(user.id),
+      normalizeKey(user.username),
+      normalizeKey(user.customerProfile?.id),
+      normalizeKey(user.customerProfile?.customerCode),
+      normalizeKey(user.customerProfile?.accountNumber)
+    ].filter(Boolean)
+  );
 
-  // Stats
-  const totalBills = customerBills.length;
-  const paidBills = customerBills.filter(b => b.status === 'paid').length;
-  const unpaidBills = customerBills.filter(b => b.status === 'unpaid').length;
-  const overdueBills = customerBills.filter(b => b.status === 'overdue').length;
-  const totalPaid = customerPayments.reduce((sum, p) => sum + p.amount, 0);
-  const totalOutstanding = customerBills.filter(b => b.status !== 'paid').reduce((sum, b) => sum + b.amount, 0);
+  const customerInvoices = invoices
+    .filter((invoice) => {
+      const invoiceCustomerId = normalizeKey(invoice.customer?.id);
+      const invoiceCustomerCode = normalizeKey(invoice.customer?.customerCode);
+      return (
+        (invoiceCustomerId && customerIdentityKeys.has(invoiceCustomerId)) ||
+        (invoiceCustomerCode && customerIdentityKeys.has(invoiceCustomerCode))
+      );
+    })
+    .sort((a, b) => getInvoiceSortDate(b) - getInvoiceSortDate(a));
 
-  const handleDownloadReceipt = (payment: any) => {
-    console.log('Downloading receipt for payment:', payment);
-    alert(`Receipt downloaded: ${payment.receiptNumber}`);
+  const latestInvoice = customerInvoices[0];
+  const customerName =
+    latestInvoice?.customer?.personalName ||
+    latestInvoice?.customer?.companyName ||
+    user.name ||
+    'Customer';
+  const customerCode = latestInvoice?.customer?.customerCode || user.customerProfile?.customerCode || user.username || '-';
+  const packageName =
+    latestInvoice?.subscription?.plan?.planName ||
+    latestInvoice?.subscription?.plan?.planCode ||
+    '-';
+  const monthlyFee = latestInvoice?.subscription?.plan?.monthlyFee;
+  const packageCurrency = latestInvoice?.subscription?.plan?.currency || latestInvoice?.currency || 'MMK';
+  const customerPhone = latestInvoice?.customer?.primaryPhone || user.phone || '-';
+  const customerAddress = latestInvoice?.customer?.installationAddress || user.customerProfile?.address || '-';
+
+  const totalBills = customerInvoices.length;
+  const paidBills = customerInvoices.filter((bill) => bill.status === 'paid').length;
+  const unpaidBills = customerInvoices.filter((bill) => bill.status === 'unpaid').length;
+  const overdueBills = customerInvoices.filter((bill) => bill.status === 'overdue').length;
+  const totalPaid = customerInvoices
+    .filter((bill) => bill.status === 'paid')
+    .reduce((sum, bill) => sum + toNumber(bill.totalAmount), 0);
+  const totalOutstanding = customerInvoices
+    .filter((bill) => bill.status !== 'paid')
+    .reduce((sum, bill) => sum + toNumber(bill.totalAmount), 0);
+  const paymentHistory = customerInvoices.filter((bill) => bill.status === 'paid');
+
+  const handleDownloadReceipt = (invoice: InvoiceRecord) => {
+    const receiptNo = invoice.receiptNo || invoice.invoiceNo || invoice.id;
+    alert(`Receipt downloaded: ${receiptNo}`);
   };
 
   return (
@@ -40,48 +192,57 @@ export default function CustomerDashboard() {
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Customer Portal</h1>
-          <p className="text-gray-600">Welcome, {customer.name}</p>
+          <p className="text-gray-600">Welcome, {customerName}</p>
         </div>
 
-        {/* Customer Info */}
+        {isLoading && (
+          <Card>
+            <CardContent className="pt-6 text-sm text-slate-600">Loading invoices...</CardContent>
+          </Card>
+        )}
+        {!!loadError && (
+          <Card>
+            <CardContent className="pt-6 text-sm text-rose-600">{loadError}</CardContent>
+          </Card>
+        )}
+
         <Card>
           <CardHeader>
             <CardTitle>Account Information</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
               <div>
-                <Label className="text-sm text-gray-500">Customer ID</Label>
-                <p className="font-mono">{customer.id}</p>
+                <Label className="text-sm text-gray-500">Customer Code</Label>
+                <p className="font-mono">{customerCode}</p>
               </div>
               <div>
                 <Label className="text-sm text-gray-500">Package</Label>
-                <p className="font-medium">{customer.package}</p>
+                <p className="font-medium">{packageName}</p>
               </div>
               <div>
                 <Label className="text-sm text-gray-500">Monthly Fee</Label>
-                <p className="font-bold">${customer.monthlyFee}</p>
+                <p className="font-bold">{formatMoney(monthlyFee, packageCurrency)}</p>
               </div>
               <div>
                 <Label className="text-sm text-gray-500">Status</Label>
-                <Badge variant={customer.status === 'active' ? 'default' : 'secondary'}>
-                  {customer.status}
+                <Badge variant={overdueBills > 0 ? 'destructive' : 'default'}>
+                  {overdueBills > 0 ? 'overdue' : 'active'}
                 </Badge>
               </div>
             </div>
             <div className="mt-4">
               <Label className="text-sm text-gray-500">Address</Label>
-              <p>{customer.address}</p>
+              <p>{customerAddress}</p>
             </div>
             <div className="mt-2">
               <Label className="text-sm text-gray-500">Phone</Label>
-              <p>{customer.phone}</p>
+              <p>{customerPhone}</p>
             </div>
           </CardContent>
         </Card>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Bills</CardTitle>
@@ -89,9 +250,7 @@ export default function CustomerDashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{totalBills}</div>
-              <p className="text-xs text-muted-foreground">
-                All time bills generated
-              </p>
+              <p className="text-xs text-muted-foreground">All bills generated</p>
             </CardContent>
           </Card>
 
@@ -101,10 +260,8 @@ export default function CustomerDashboard() {
               <CheckCircle className="h-4 w-4 text-green-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-600">${totalPaid.toFixed(2)}</div>
-              <p className="text-xs text-muted-foreground">
-                {paidBills} bills paid
-              </p>
+              <div className="text-2xl font-bold text-green-600">{formatMoney(totalPaid)}</div>
+              <p className="text-xs text-muted-foreground">{paidBills} invoices paid</p>
             </CardContent>
           </Card>
 
@@ -114,10 +271,8 @@ export default function CustomerDashboard() {
               <DollarSign className="h-4 w-4 text-yellow-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-yellow-600">${totalOutstanding.toFixed(2)}</div>
-              <p className="text-xs text-muted-foreground">
-                {unpaidBills} unpaid bills
-              </p>
+              <div className="text-2xl font-bold text-yellow-600">{formatMoney(totalOutstanding)}</div>
+              <p className="text-xs text-muted-foreground">{unpaidBills} unpaid invoices</p>
             </CardContent>
           </Card>
 
@@ -128,24 +283,21 @@ export default function CustomerDashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-red-600">{overdueBills}</div>
-              <p className="text-xs text-muted-foreground">
-                Bills past due date
-              </p>
+              <p className="text-xs text-muted-foreground">Invoices past due date</p>
             </CardContent>
           </Card>
         </div>
 
-        {/* Recent Bills */}
         <Card>
           <CardHeader>
-            <CardTitle>Recent Bills</CardTitle>
+            <CardTitle>Recent Invoices</CardTitle>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Bill ID</TableHead>
-                  <TableHead>Bill Month</TableHead>
+                  <TableHead>Invoice No</TableHead>
+                  <TableHead>Billing Period</TableHead>
                   <TableHead>Amount</TableHead>
                   <TableHead>Due Date</TableHead>
                   <TableHead>Status</TableHead>
@@ -153,32 +305,30 @@ export default function CustomerDashboard() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {customerBills.slice(0, 10).map((bill) => (
-                  <TableRow key={bill.id}>
-                    <TableCell className="font-mono">{bill.id}</TableCell>
-                    <TableCell>{bill.billMonth}</TableCell>
-                    <TableCell>${bill.amount}</TableCell>
-                    <TableCell>{bill.dueDate}</TableCell>
+                {customerInvoices.slice(0, 10).map((invoice) => (
+                  <TableRow key={invoice.id}>
+                    <TableCell className="font-mono">{invoice.invoiceNo || invoice.id}</TableCell>
+                    <TableCell>{getBillingPeriod(invoice)}</TableCell>
+                    <TableCell>{formatMoney(invoice.totalAmount, invoice.currency || 'MMK')}</TableCell>
+                    <TableCell>{invoice.dueDate || '-'}</TableCell>
                     <TableCell>
-                      <Badge 
-                        variant={
-                          bill.status === 'paid' ? 'default' :
-                          bill.status === 'unpaid' ? 'secondary' :
-                          'destructive'
-                        }
-                      >
-                        {bill.status}
-                      </Badge>
+                      <Badge variant={statusBadgeVariant(invoice.status)}>{invoice.status}</Badge>
                     </TableCell>
-                    <TableCell>{bill.paidDate || '-'}</TableCell>
+                    <TableCell>{invoice.paidAt ? invoice.paidAt.split('T')[0] : '-'}</TableCell>
                   </TableRow>
                 ))}
+                {customerInvoices.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-sm text-slate-500">
+                      No invoices found for this customer account.
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </CardContent>
         </Card>
 
-        {/* Payment History */}
         <Card>
           <CardHeader>
             <CardTitle>Payment History</CardTitle>
@@ -195,24 +345,27 @@ export default function CustomerDashboard() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {customerPayments.map((payment) => (
-                  <TableRow key={payment.id}>
-                    <TableCell className="font-mono">{payment.receiptNumber}</TableCell>
-                    <TableCell>{payment.paymentDate}</TableCell>
-                    <TableCell>${payment.amount}</TableCell>
-                    <TableCell className="capitalize">{payment.paymentMethod}</TableCell>
+                {paymentHistory.map((invoice) => (
+                  <TableRow key={invoice.id}>
+                    <TableCell className="font-mono">{invoice.receiptNo || invoice.invoiceNo || invoice.id}</TableCell>
+                    <TableCell>{invoice.paidAt ? invoice.paidAt.split('T')[0] : '-'}</TableCell>
+                    <TableCell>{formatMoney(invoice.totalAmount, invoice.currency || 'MMK')}</TableCell>
+                    <TableCell className="capitalize">{invoice.paymentMethod || '-'}</TableCell>
                     <TableCell>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleDownloadReceipt(payment)}
-                      >
-                        <Download className="h-3 w-3 mr-1" />
+                      <Button size="sm" variant="outline" onClick={() => handleDownloadReceipt(invoice)}>
+                        <Download className="mr-1 h-3 w-3" />
                         Download
                       </Button>
                     </TableCell>
                   </TableRow>
                 ))}
+                {paymentHistory.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center text-sm text-slate-500">
+                      No paid invoices yet.
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </CardContent>

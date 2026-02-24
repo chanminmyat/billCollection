@@ -27,13 +27,14 @@ export default function Layout({ children }: LayoutProps) {
   const { user, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     if (typeof window === 'undefined') return false;
-    if (window.innerWidth >= 1024) return false;
+    if (window.innerWidth < 1024) return false;
     const saved = window.localStorage.getItem('sidebarOpen');
     if (saved !== null) {
       return saved === 'true';
     }
-    return window.innerWidth >= 1024;
+    return false;
   });
+  const [isDesktop, setIsDesktop] = useState(false);
   const [customersMenuOpen, setCustomersMenuOpen] = useState(false);
   const [collectorsMenuOpen, setCollectorsMenuOpen] = useState(false);
   const [hoveredMenu, setHoveredMenu] = useState<'customers' | 'collectors' | null>(null);
@@ -89,7 +90,9 @@ export default function Layout({ children }: LayoutProps) {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const updateSidebar = () => {
-      if (window.innerWidth < 1024) {
+      const desktop = window.innerWidth >= 1024;
+      setIsDesktop(desktop);
+      if (!desktop) {
         setSidebarOpen(false);
       }
     };
@@ -102,7 +105,9 @@ export default function Layout({ children }: LayoutProps) {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    window.localStorage.setItem('sidebarOpen', String(sidebarOpen));
+    if (window.innerWidth >= 1024) {
+      window.localStorage.setItem('sidebarOpen', String(sidebarOpen));
+    }
   }, [sidebarOpen]);
 
   const closeSidebarOnMobile = () => {
@@ -114,14 +119,14 @@ export default function Layout({ children }: LayoutProps) {
 
   const handleSidebarMouseEnter = () => {
     if (typeof window === 'undefined') return;
-    if (window.innerWidth >= 1024) {
+    if (isDesktop) {
       setSidebarOpen(true);
     }
   };
 
   const handleSidebarMouseLeave = () => {
     if (typeof window === 'undefined') return;
-    if (window.innerWidth >= 1024) {
+    if (isDesktop) {
       setSidebarOpen(false);
     }
   };
@@ -205,6 +210,7 @@ export default function Layout({ children }: LayoutProps) {
                   key={item.label}
                   className="relative px-2"
                   onMouseEnter={() => {
+                    if (!isDesktop) return;
                     setHoveredMenu(menuKey);
                     if (isCollectorsMenu) {
                       setCollectorsMenuOpen(true);
@@ -213,6 +219,7 @@ export default function Layout({ children }: LayoutProps) {
                     }
                   }}
                   onMouseLeave={() => {
+                    if (!isDesktop) return;
                     setHoveredMenu(null);
                     if (isCollectorsMenu) {
                       setCollectorsMenuOpen(false);

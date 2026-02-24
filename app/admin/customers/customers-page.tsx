@@ -18,6 +18,12 @@ import { useRouter } from 'next/navigation';
 import nrcData from '@/lib/nrc-data.json';
 import townshipData from '@/lib/township.json';
 import { useToast } from '@/hooks/use-toast';
+import {
+  DEFAULT_FIXED_BILLING_WINDOW,
+  FirstInvoiceMode,
+  FixedBillingWindow,
+  getFixedBillingWindow
+} from '@/lib/billing-config';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 
@@ -189,6 +195,10 @@ export default function CustomersPage({
   const [vlanPort, setVlanPort] = useState('');
   const [networkZone, setNetworkZone] = useState('');
   const [billingCycle, setBillingCycle] = useState('');
+  const [firstInvoiceMode, setFirstInvoiceMode] = useState<FirstInvoiceMode>('fixed');
+  const [fixedBillingWindow, setFixedBillingWindow] = useState<FixedBillingWindow>(
+    DEFAULT_FIXED_BILLING_WINDOW
+  );
   const [customBillingMonths, setCustomBillingMonths] = useState('');
   const [billingDay, setBillingDay] = useState('');
   const [installationFee, setInstallationFee] = useState('');
@@ -261,6 +271,10 @@ export default function CustomersPage({
   const serviceTypeOptions = ['Fiber', 'DSL', 'Wireless'];
   const ipTypeOptions = ['Static', 'Dynamic'];
   const billingCycleOptions = ['Monthly', 'Quarterly', 'Bi-yearly', 'Yearly', 'Custom'];
+  const firstInvoiceModeOptions = [
+    { value: 'fixed', label: 'Fixed Date' },
+    { value: 'anniversary', label: 'Anniversary Date' }
+  ] as const;
   const userStatusOptions = [
     { value: 'enable', label: 'Enable' },
     { value: 'disable', label: 'Disable' },
@@ -386,8 +400,30 @@ export default function CustomersPage({
   }, [billingCycle]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const refreshFixedWindow = () => {
+      setFixedBillingWindow(getFixedBillingWindow());
+    };
+
+    refreshFixedWindow();
+    window.addEventListener('storage', refreshFixedWindow);
+    window.addEventListener('focus', refreshFixedWindow);
+
+    return () => {
+      window.removeEventListener('storage', refreshFixedWindow);
+      window.removeEventListener('focus', refreshFixedWindow);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (firstInvoiceMode === 'fixed') {
+      setBillingDay(String(fixedBillingWindow.dueDay).padStart(2, '0'));
+      return;
+    }
+
     const baseDate = serviceStartDate || installationDate;
-    if (!baseDate || !billingCycle) {
+    if (!baseDate) {
       setBillingDay('');
       return;
     }
@@ -398,7 +434,7 @@ export default function CustomersPage({
     }
     const day = date.getDate().toString().padStart(2, '0');
     setBillingDay(day);
-  }, [billingCycle, installationDate, serviceStartDate]);
+  }, [firstInvoiceMode, fixedBillingWindow.dueDay, installationDate, serviceStartDate]);
 
   const formatAddress = (address: {
     building: string;
@@ -873,6 +909,15 @@ export default function CustomersPage({
     }
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
+      const firstErrorMessage = Object.values(nextErrors)[0] ?? 'Please fill required fields.';
+      toast({
+        title: 'Required fields missing',
+        description: firstErrorMessage,
+        variant: 'destructive'
+      });
+      if (typeof window !== 'undefined') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
       return;
     }
 
@@ -970,6 +1015,9 @@ export default function CustomersPage({
           networkZone
         },
         billingInformation: {
+          firstInvoiceMode,
+          fixedStartDay: fixedBillingWindow.startDay,
+          fixedDueDay: fixedBillingWindow.dueDay,
           billingCycle,
           customBillingMonths,
           billingDay: toNumber(billingDay),
@@ -997,13 +1045,26 @@ export default function CustomersPage({
 
       if (!response.ok) {
         const data = await response.json().catch(() => null);
-        const message = data?.message ?? 'Failed to create customer';
+        const message =
+          Array.isArray(data?.message)
+            ? data.message.join(', ')
+            : data?.message ?? data?.error ?? 'Failed to create customer';
         console.error(message, data);
+        toast({
+          title: 'Create customer failed',
+          description: String(message),
+          variant: 'destructive'
+        });
         setIsAddingCustomer(false);
         return;
       }
     } catch (error) {
       console.error('Failed to create customer', error);
+      toast({
+        title: 'Network error',
+        description: error instanceof Error ? error.message : 'Failed to create customer',
+        variant: 'destructive'
+      });
       setIsAddingCustomer(false);
       return;
     }
@@ -1065,6 +1126,7 @@ export default function CustomersPage({
     setVlanPort('');
     setNetworkZone('');
     setBillingCycle('');
+    setFirstInvoiceMode('fixed');
     setCustomBillingMonths('');
     setBillingDay('');
     setInstallationFee('');
@@ -1151,6 +1213,7 @@ export default function CustomersPage({
     setVlanPort('');
     setNetworkZone('');
     setBillingCycle('');
+    setFirstInvoiceMode('fixed');
     setCustomBillingMonths('');
     setBillingDay('');
     setInstallationFee('');
@@ -1237,6 +1300,7 @@ export default function CustomersPage({
       setVlanPort('');
       setNetworkZone('');
       setBillingCycle('');
+      setFirstInvoiceMode('fixed');
       setCustomBillingMonths('');
       setBillingDay('');
       setInstallationFee('');
@@ -2106,6 +2170,32 @@ export default function CustomersPage({
           Billing Information
         </h4>
         <div className="grid gap-6 md:grid-cols-2">
+          <div className="space-y-2 md:col-span-2">
+            <Label className="text-sm font-medium text-slate-700">First Invoice Mode</Label>
+            <RadioGroup
+              value={firstInvoiceMode}
+              onValueChange={(value) => setFirstInvoiceMode(value as FirstInvoiceMode)}
+              className="flex flex-wrap gap-6"
+            >
+              {firstInvoiceModeOptions.map((option) => (
+                <div key={option.value} className="flex items-center space-x-2">
+                  <RadioGroupItem id={`first-invoice-mode-${option.value}`} value={option.value} />
+                  <Label htmlFor={`first-invoice-mode-${option.value}`}>{option.label}</Label>
+                </div>
+              ))}
+            </RadioGroup>
+          </div>
+          {firstInvoiceMode === 'fixed' && (
+            <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 md:col-span-2">
+              Fixed cycle is configured by Super Admin: day {fixedBillingWindow.startDay} to day{' '}
+              {fixedBillingWindow.dueDay}. Billing day will use day {fixedBillingWindow.dueDay}.
+            </div>
+          )}
+          {firstInvoiceMode === 'anniversary' && (
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 md:col-span-2">
+              Anniversary mode uses service start/installation date as billing anchor.
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="billingCycle" className="text-sm font-medium text-slate-700">
               Billing Cycle
@@ -2384,7 +2474,7 @@ export default function CustomersPage({
                 <div className="mb-4 text-sm text-slate-500">No customers found.</div>
               )}
 
-              <div className="overflow-x-auto">
+              <div className="hidden md:block overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -2486,6 +2576,99 @@ export default function CustomersPage({
                     })}
                   </TableBody>
                 </Table>
+              </div>
+
+              <div className="space-y-4 md:hidden">
+                {filteredCustomers.map((customer) => {
+                  const collectorValue = customer.collectorId || 'unassigned';
+                  const assignPlaceholder = isAssigningCollector[customer.id]
+                    ? 'Assigning...'
+                    : collectorsLoading
+                    ? 'Loading collectors...'
+                    : 'Assign collector';
+                  const statusValue = toSelectStatus(
+                    customer.status as 'active' | 'inactive' | 'enable' | 'disable' | 'takeoff'
+                  );
+                  const statusClass =
+                    statusValue === 'enable'
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : statusValue === 'disable'
+                      ? 'bg-rose-50 text-rose-700 border-rose-200'
+                      : 'bg-amber-50 text-amber-700 border-amber-200';
+                  return (
+                    <Card key={customer.id}>
+                      <CardContent className="space-y-3 pt-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm text-slate-500">
+                              {(customer as Customer & { code?: string }).code || '—'}
+                            </p>
+                            <p className="text-base font-semibold text-slate-900">{customer.name}</p>
+                          </div>
+                          <Button variant="ghost" size="sm" onClick={() => handleEditCustomer(customer)}>
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                        </div>
+
+                        <div className="space-y-2 text-sm text-slate-700">
+                          <div className="flex items-center">
+                            <Phone className="mr-2 h-4 w-4 text-slate-400" />
+                            {customer.phone}
+                          </div>
+                          <div className="flex items-start">
+                            <MapPin className="mr-2 mt-0.5 h-4 w-4 text-slate-400" />
+                            <span>{customer.address}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2 text-sm text-slate-600">
+                          <span className="rounded-full bg-slate-100 px-3 py-1">
+                            {customer.package || 'No package'}
+                          </span>
+                          <span className="rounded-full bg-slate-100 px-3 py-1">
+                            {customer.monthlyFee || '—'}
+                          </span>
+                        </div>
+
+                        <div className="grid gap-3">
+                          <div>
+                            <Label className="text-xs text-slate-500">Status</Label>
+                            <Select
+                              value={statusValue}
+                              onValueChange={(value) =>
+                                handleStatusChange(customer.id, value as 'enable' | 'disable' | 'takeoff')
+                              }
+                              disabled={isUpdatingStatus[customer.id]}
+                            >
+                              <SelectTrigger className={`h-9 w-full ${statusClass}`}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {userStatusOptions.map((option) => (
+                                  <SelectItem key={option.value} value={option.value}>
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div>
+                            <Label className="text-xs text-slate-500">Collector</Label>
+                            <SearchableSelect
+                              id={`collector-${customer.id}-mobile`}
+                              value={collectorValue}
+                              onValueChange={(value) => handleAssignCollector(customer.id, value)}
+                              options={collectorSelectOptionsWithUnassigned}
+                              placeholder={assignPlaceholder}
+                              disabled={collectorsLoading || isAssigningCollector[customer.id]}
+                            />
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             </CardContent>
           </Card>

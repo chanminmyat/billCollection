@@ -1192,146 +1192,250 @@ export default function CollectorsPage({
                 {collectorsError && (
                   <div className="mb-4 text-sm text-rose-600">{collectorsError}</div>
                 )}
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Collector</TableHead>
-                      <TableHead>Contact Info</TableHead>
-                      <TableHead>Assigned Area</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Customers</TableHead>
-                      <TableHead>Total Collected</TableHead>
-                      <TableHead>Collection Rate</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredCollectors.map((collector) => {
-                      const stats = getCollectorStats(collector);
-                      return (
-                        <TableRow key={collector.id}>
-                          <TableCell>
-                            <div>
-                              <div className="font-medium">{collector.name}</div>
-                              <div className="text-sm text-gray-500">
-                                ID: {(collector as Collector & { collectorCode?: string }).collectorCode || collector.id}
+                <div className="hidden md:block">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Collector</TableHead>
+                        <TableHead>Contact Info</TableHead>
+                        <TableHead>Assigned Area</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Customers</TableHead>
+                        <TableHead>Total Collected</TableHead>
+                        <TableHead>Collection Rate</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredCollectors.map((collector) => {
+                        const stats = getCollectorStats(collector);
+                        return (
+                          <TableRow key={collector.id}>
+                            <TableCell>
+                              <div>
+                                <div className="font-medium">{collector.name}</div>
+                                <div className="text-sm text-gray-500">
+                                  ID: {(collector as Collector & { collectorCode?: string }).collectorCode || collector.id}
+                                </div>
                               </div>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="space-y-1">
-                              <div className="flex items-center text-sm">
-                                <Phone className="h-3 w-3 mr-1" />
-                                {collector.phone}
+                            </TableCell>
+                            <TableCell>
+                              <div className="space-y-1">
+                                <div className="flex items-center text-sm">
+                                  <Phone className="h-3 w-3 mr-1" />
+                                  {collector.phone}
+                                </div>
+                                <div className="flex items-center text-sm text-gray-500">
+                                  <Mail className="h-3 w-3 mr-1" />
+                                  {collector.email}
+                                </div>
                               </div>
-                              <div className="flex items-center text-sm text-gray-500">
-                                <Mail className="h-3 w-3 mr-1" />
-                                {collector.email}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center">
+                                <MapPin className="h-3 w-3 mr-1 text-gray-400" />
+                                {collector.area}
                               </div>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center">
-                              <MapPin className="h-3 w-3 mr-1 text-gray-400" />
-                              {collector.area}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            {(() => {
-                              const statusValue = (collector.status ?? 'enable') as 'enable' | 'disable' | 'takeoff';
-                              const statusClass =
-                                statusValue === 'enable'
-                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                  : statusValue === 'disable'
-                                  ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                  : 'bg-amber-50 text-amber-700 border-amber-200';
-                              return (
-                                <Select
-                                  value={statusValue}
-                                  onValueChange={(value) =>
-                                    handleCollectorStatusChange(
-                                      collector,
-                                      value as 'enable' | 'disable' | 'takeoff'
-                                    )
-                                  }
-                                  disabled={isUpdatingCollectorStatus[collector.id]}
-                                >
-                                  <SelectTrigger className={`h-8 w-32 ${statusClass}`}>
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {collectorStatusOptions.map((option) => (
-                                      <SelectItem key={option.value} value={option.value}>
-                                        {option.label}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              );
-                            })()}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Users className="h-3 w-3 text-gray-400" />
-                              <span>{stats.assignedCustomers}</span>
-                            </div>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="mt-2 h-7 px-2 text-xs"
-                              onClick={() => openAssignDialog(collector)}
-                              disabled={customersLoading}
-                            >
-                              Assign
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="mt-1 h-7 px-2 text-xs"
-                              onClick={() => openViewDialog(collector)}
-                              disabled={customersLoading}
-                            >
-                              View
-                            </Button>
-                          </TableCell>
-                          <TableCell>
-                            <div className="font-medium">${stats.totalCollected.toFixed(2)}</div>
-                            <div className="text-sm text-gray-500">{stats.totalBills} bills</div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center space-x-2">
-                              <div className="text-sm font-medium">
-                                {stats.collectionRate.toFixed(1)}%
+                            </TableCell>
+                            <TableCell>
+                              {(() => {
+                                const statusValue = (collector.status ?? 'enable') as 'enable' | 'disable' | 'takeoff';
+                                const statusClass =
+                                  statusValue === 'enable'
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : statusValue === 'disable'
+                                    ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                    : 'bg-amber-50 text-amber-700 border-amber-200';
+                                return (
+                                  <Select
+                                    value={statusValue}
+                                    onValueChange={(value) =>
+                                      handleCollectorStatusChange(
+                                        collector,
+                                        value as 'enable' | 'disable' | 'takeoff'
+                                      )
+                                    }
+                                    disabled={isUpdatingCollectorStatus[collector.id]}
+                                  >
+                                    <SelectTrigger className={`h-8 w-32 ${statusClass}`}>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {collectorStatusOptions.map((option) => (
+                                        <SelectItem key={option.value} value={option.value}>
+                                          {option.label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                );
+                              })()}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Users className="h-3 w-3 text-gray-400" />
+                                <span>{stats.assignedCustomers}</span>
                               </div>
-                              <Badge
-                                variant={
-                                  stats.collectionRate >= 80 ? 'default' :
-                                  stats.collectionRate >= 60 ? 'secondary' :
-                                  'destructive'
-                                }
-                              >
-                                {stats.collectionRate >= 80 ? 'Excellent' :
-                                 stats.collectionRate >= 60 ? 'Good' :
-                                 'Needs Improvement'}
-                              </Badge>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex space-x-2">
                               <Button
                                 size="sm"
-                                variant="outline"
-                                onClick={() => handleEditCollector(collector)}
+                                variant="ghost"
+                                className="mt-2 h-7 px-2 text-xs"
+                                onClick={() => openAssignDialog(collector)}
+                                disabled={customersLoading}
                               >
-                                <Edit className="h-3 w-3" />
+                                Assign
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="mt-1 h-7 px-2 text-xs"
+                                onClick={() => openViewDialog(collector)}
+                                disabled={customersLoading}
+                              >
+                                View
+                              </Button>
+                            </TableCell>
+                            <TableCell>
+                              <div className="font-medium">${stats.totalCollected.toFixed(2)}</div>
+                              <div className="text-sm text-gray-500">{stats.totalBills} bills</div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center space-x-2">
+                                <div className="text-sm font-medium">
+                                  {stats.collectionRate.toFixed(1)}%
+                                </div>
+                                <Badge
+                                  variant={
+                                    stats.collectionRate >= 80 ? 'default' :
+                                    stats.collectionRate >= 60 ? 'secondary' :
+                                    'destructive'
+                                  }
+                                >
+                                  {stats.collectionRate >= 80 ? 'Excellent' :
+                                   stats.collectionRate >= 60 ? 'Good' :
+                                   'Needs Improvement'}
+                                </Badge>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex space-x-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleEditCollector(collector)}
+                                >
+                                  <Edit className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="space-y-4 md:hidden">
+                  {filteredCollectors.map((collector) => {
+                    const stats = getCollectorStats(collector);
+                    const statusValue = (collector.status ?? 'enable') as 'enable' | 'disable' | 'takeoff';
+                    const statusClass =
+                      statusValue === 'enable'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : statusValue === 'disable'
+                        ? 'bg-rose-50 text-rose-700 border-rose-200'
+                        : 'bg-amber-50 text-amber-700 border-amber-200';
+                    return (
+                      <Card key={collector.id}>
+                        <CardContent className="space-y-3 pt-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm text-slate-500">
+                                {(collector as Collector & { collectorCode?: string }).collectorCode || collector.id}
+                              </p>
+                              <p className="text-base font-semibold text-slate-900">{collector.name}</p>
+                            </div>
+                            <Button size="sm" variant="outline" onClick={() => handleEditCollector(collector)}>
+                              <Edit className="h-3 w-3" />
+                            </Button>
+                          </div>
+
+                          <div className="space-y-2 text-sm text-slate-700">
+                            <div className="flex items-center">
+                              <Phone className="mr-2 h-4 w-4 text-slate-400" />
+                              {collector.phone}
+                            </div>
+                            <div className="flex items-center">
+                              <Mail className="mr-2 h-4 w-4 text-slate-400" />
+                              {collector.email}
+                            </div>
+                            <div className="flex items-start">
+                              <MapPin className="mr-2 mt-0.5 h-4 w-4 text-slate-400" />
+                              <span>{collector.area}</span>
+                            </div>
+                          </div>
+
+                          <div className="grid gap-3">
+                            <div>
+                              <Label className="text-xs text-slate-500">Status</Label>
+                              <Select
+                                value={statusValue}
+                                onValueChange={(value) =>
+                                  handleCollectorStatusChange(
+                                    collector,
+                                    value as 'enable' | 'disable' | 'takeoff'
+                                  )
+                                }
+                                disabled={isUpdatingCollectorStatus[collector.id]}
+                              >
+                                <SelectTrigger className={`h-9 w-full ${statusClass}`}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {collectorStatusOptions.map((option) => (
+                                    <SelectItem key={option.value} value={option.value}>
+                                      {option.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2 text-sm text-slate-600">
+                              <span className="rounded-full bg-slate-100 px-3 py-1">
+                                Customers: {stats.assignedCustomers}
+                              </span>
+                              <span className="rounded-full bg-slate-100 px-3 py-1">
+                                {stats.collectionRate.toFixed(1)}%
+                              </span>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 px-3 text-xs"
+                                onClick={() => openAssignDialog(collector)}
+                                disabled={customersLoading}
+                              >
+                                Assign
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 px-3 text-xs"
+                                onClick={() => openViewDialog(collector)}
+                                disabled={customersLoading}
+                              >
+                                View
                               </Button>
                             </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
               </CardContent>
             </Card>
 
