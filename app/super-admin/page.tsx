@@ -18,11 +18,25 @@ export default function SuperAdminLoginPage() {
   const superAdminUser = process.env.NEXT_PUBLIC_SUPER_ADMIN_USERNAME ?? '';
   const superAdminPass = process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD ?? '';
 
+  const readCookieFlag = (name: string) => {
+    if (typeof document === 'undefined') return '';
+    const matched = document.cookie
+      .split('; ')
+      .find((item) => item.startsWith(`${name}=`));
+    return matched ? decodeURIComponent(matched.split('=').slice(1).join('=')) : '';
+  };
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const authed = localStorage.getItem('super_admin_authed') === 'true';
-    if (authed) {
-      router.replace('/super-admin/dashboard');
+    try {
+      const localStorageAuthed = window.localStorage.getItem('super_admin_authed') === 'true';
+      const cookieAuthed = readCookieFlag('super_admin_authed') === 'true';
+      const authed = localStorageAuthed || cookieAuthed;
+      if (authed) {
+        router.replace('/super-admin/dashboard');
+      }
+    } catch {
+      // storage may be blocked; keep login form visible
     }
   }, [router]);
 
@@ -43,8 +57,16 @@ export default function SuperAdminLoginPage() {
       return;
     }
 
-    localStorage.setItem('super_admin_authed', 'true');
-    localStorage.setItem('super_admin_user', identifier.trim());
+    try {
+      window.localStorage.setItem('super_admin_authed', 'true');
+      window.localStorage.setItem('super_admin_user', identifier.trim());
+      document.cookie =
+        `super_admin_authed=true; path=/; max-age=${60 * 60 * 24 * 30}; SameSite=Lax`;
+    } catch {
+      setError('Browser storage is blocked. Please enable cookies/local storage.');
+      setIsSubmitting(false);
+      return;
+    }
     router.replace('/super-admin/dashboard');
   };
 

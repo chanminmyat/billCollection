@@ -70,11 +70,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('billflow_user');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
+    try {
+      const savedUser = window.localStorage.getItem('billflow_user');
+      if (savedUser) {
+        const parsedUser = JSON.parse(savedUser);
+        if (parsedUser && parsedUser.role) {
+          setUser(parsedUser);
+        } else {
+          window.localStorage.removeItem('billflow_user');
+        }
+      }
+    } catch {
+      setUser(null);
+      window.localStorage.removeItem('billflow_user');
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   }, []);
 
   useEffect(() => {
@@ -82,10 +93,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const isResetRoute = pathname?.startsWith('/reset-password');
       const isSuperAdminRoute = pathname?.startsWith('/super-admin');
       if (!user && pathname !== '/' && !isResetRoute && !isSuperAdminRoute) {
-        router.push('/');
+        router.replace('/');
       } else if (user && pathname === '/') {
         const dashboardPath = user.role === 'admin' ? '/admin' : user.role === 'collector' ? '/collector' : '/customer';
-        router.push(dashboardPath);
+        router.replace(dashboardPath);
       }
     }
   }, [user, pathname, router, isLoading]);

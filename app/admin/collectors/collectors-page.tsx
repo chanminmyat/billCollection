@@ -17,6 +17,7 @@ import Layout from '../../components/layout';
 import nrcData from '@/lib/nrc-data.json';
 import townshipData from '@/lib/township.json';
 import { useToast } from '@/hooks/use-toast';
+import { appendActivityLog } from '@/lib/activity-log';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 
@@ -100,7 +101,7 @@ export default function CollectorsPage({
   listPath = '/admin/collectors/collector-list'
 }: CollectorsPageProps) {
   const { collectors, customers, bills, addCollector, updateCollector, deleteCollector } = useData();
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
@@ -146,6 +147,28 @@ export default function CollectorsPage({
     email: '',
     area: ''
   });
+
+  const logAdminActivity = (
+    action: string,
+    description: string,
+    targetType: string,
+    targetId?: string,
+    targetName?: string,
+    metadata?: Record<string, unknown>
+  ) => {
+    appendActivityLog({
+      module: 'collector',
+      action,
+      description,
+      actorId: user?.id,
+      actorName: user?.name,
+      actorRole: user?.role,
+      targetType,
+      targetId,
+      targetName,
+      metadata
+    });
+  };
 
   const collectorsSource = hasFetchedCollectors ? remoteCollectors : [];
 
@@ -228,6 +251,15 @@ export default function CollectorsPage({
         console.error(message, data);
         throw new Error(message);
       }
+
+      logAdminActivity(
+        'collector_status_changed',
+        `Collector status changed to ${status}.`,
+        'collector',
+        collector.id,
+        collector.name,
+        { status }
+      );
     } catch (error) {
       console.error('Failed to update status', error);
     } finally {
@@ -464,6 +496,10 @@ export default function CollectorsPage({
     };
   }, [inlineForm]);
 
+  if (authLoading) {
+    return <div className="min-h-screen bg-gray-50" />;
+  }
+
   if (!user || user.role !== 'admin') {
     return <div>Access denied</div>;
   }
@@ -498,6 +534,7 @@ export default function CollectorsPage({
 
     console.log('Add collector payload:', JSON.stringify(payload, null, 2));
 
+    let createdCollectorId: string | undefined;
     try {
       const response = await fetch(`${API_BASE_URL}/auth/collectors`, {
         method: 'POST',
@@ -506,14 +543,19 @@ export default function CollectorsPage({
         },
         body: JSON.stringify(payload)
       });
+      const data = await response.json().catch(() => null);
 
       if (!response.ok) {
-        const data = await response.json().catch(() => null);
         const message = data?.message ?? 'Failed to create collector';
         console.error(message, data);
         setIsAddingCollector(false);
         return;
       }
+
+      const directId = data?.id ?? data?.collectorId;
+      createdCollectorId =
+        (directId ? String(directId) : undefined) ||
+        (data?.collector?.id ? String(data.collector.id) : undefined);
     } catch (error) {
       console.error('Failed to create collector', error);
       setIsAddingCollector(false);
@@ -527,6 +569,17 @@ export default function CollectorsPage({
       nrc: nrcValue,
       address: addressValue
     });
+    logAdminActivity(
+      'collector_created',
+      'New collector created.',
+      'collector',
+      createdCollectorId,
+      newCollector.name,
+      {
+        status: collectorStatus,
+        area: collectorTownship || collectorDistrict || newCollector.area
+      }
+    );
     setNewCollector({
       name: '',
       phone: '',
@@ -652,6 +705,17 @@ export default function CollectorsPage({
         nrc: nrcValue,
         address: addressValue
       });
+      logAdminActivity(
+        'collector_updated',
+        'Collector profile updated.',
+        'collector',
+        editingCollector.id,
+        newCollector.name,
+        {
+          status: collectorStatus,
+          area: collectorTownship || collectorDistrict || newCollector.area
+        }
+      );
       setEditingCollector(null);
       setNewCollector({
         name: '',
@@ -780,6 +844,17 @@ export default function CollectorsPage({
         title: 'Assignments updated',
         description: 'Collector assignments have been saved.'
       });
+      logAdminActivity(
+        'collector_assignments_updated',
+        'Collector customer assignments updated.',
+        'collector',
+        assigningCollector.id,
+        assigningCollector.name,
+        {
+          assignedCount: toAssign.length,
+          unassignedCount: toUnassign.length
+        }
+      );
 
       setAssignDialogOpen(false);
     } catch (error) {
@@ -797,7 +872,7 @@ export default function CollectorsPage({
       <div className="grid gap-6 px-6 py-6 md:grid-cols-2">
         <div className="space-y-2 md:col-span-2">
           <Label htmlFor="collector-name" className="text-sm font-medium text-slate-700">
-            Full Name
+            Full Name <span className="text-rose-600">*</span>
           </Label>
           <Input
             id="collector-name"
@@ -808,7 +883,7 @@ export default function CollectorsPage({
         </div>
         <div className="space-y-2">
           <Label htmlFor="collector-status" className="text-sm font-medium text-slate-700">
-            Collector Status
+            Collector Status <span className="text-rose-600">*</span>
           </Label>
           <Select value={collectorStatus} onValueChange={(value) => setCollectorStatus(value as 'enable' | 'disable' | 'takeoff')}>
             <SelectTrigger id="collector-status">
@@ -825,7 +900,7 @@ export default function CollectorsPage({
         </div>
         <div className="space-y-2">
           <Label htmlFor="collector-email" className="text-sm font-medium text-slate-700">
-            Email Address
+            Email Address <span className="text-rose-600">*</span>
           </Label>
           <Input
             id="collector-email"
@@ -837,7 +912,7 @@ export default function CollectorsPage({
         </div>
         <div className="space-y-2">
           <Label htmlFor="collector-phone" className="text-sm font-medium text-slate-700">
-            Phone Number
+            Phone Number <span className="text-rose-600">*</span>
           </Label>
           <Input
             id="collector-phone"
@@ -847,7 +922,9 @@ export default function CollectorsPage({
           />
         </div>
         <div className="space-y-2 md:col-span-2">
-          <Label className="text-sm font-medium text-slate-700">NRC</Label>
+          <Label className="text-sm font-medium text-slate-700">
+            NRC <span className="text-rose-600">*</span>
+          </Label>
           <div className="grid gap-3 md:grid-cols-4 rounded-lg border border-slate-200 bg-slate-100 p-4">
             <SearchableSelect
               id="collector-nrc-state"
@@ -943,7 +1020,7 @@ export default function CollectorsPage({
         <div className="grid gap-6 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="collector-region" className="text-sm font-medium text-slate-700">
-              Region
+              Region <span className="text-rose-600">*</span>
             </Label>
             <SearchableSelect
               id="collector-region"
@@ -959,7 +1036,7 @@ export default function CollectorsPage({
           </div>
           <div className="space-y-2">
             <Label htmlFor="collector-district" className="text-sm font-medium text-slate-700">
-              District
+              District <span className="text-rose-600">*</span>
             </Label>
             <SearchableSelect
               id="collector-district"
@@ -974,7 +1051,7 @@ export default function CollectorsPage({
           </div>
           <div className="space-y-2">
             <Label htmlFor="collector-township" className="text-sm font-medium text-slate-700">
-              Township
+              Township <span className="text-rose-600">*</span>
             </Label>
             <SearchableSelect
               id="collector-township"
@@ -997,7 +1074,7 @@ export default function CollectorsPage({
           </div>
           <div className="space-y-2">
             <Label htmlFor="collector-ward" className="text-sm font-medium text-slate-700">
-              Ward
+              Ward <span className="text-rose-600">*</span>
             </Label>
             <Input
               id="collector-ward"

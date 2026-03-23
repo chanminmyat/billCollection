@@ -172,6 +172,17 @@ export default function SuperAdminSettingsPage() {
 
       <Card>
         <CardHeader>
+          <CardTitle>Billing Rule Configuration</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-slate-600">
+            `+ fees` and `- fees` have been moved to <span className="font-medium">Super Admin → Billing Rules</span>.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>Platform Controls</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-6 md:grid-cols-2">

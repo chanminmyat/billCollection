@@ -13,18 +13,20 @@ import {
   ChevronLeft,
   Building2,
   UserCheck,
-  DollarSign
+  DollarSign,
+  Activity
 } from 'lucide-react';
 import { useAuth } from '../contexts/auth-context';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { formatDisplayDate } from '@/lib/date-format';
 
 interface LayoutProps {
   children: React.ReactNode;
 }
 
 export default function Layout({ children }: LayoutProps) {
-  const { user, logout } = useAuth();
+  const { user, logout, isLoading } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     if (typeof window === 'undefined') return false;
     if (window.innerWidth < 1024) return false;
@@ -37,10 +39,17 @@ export default function Layout({ children }: LayoutProps) {
   const [isDesktop, setIsDesktop] = useState(false);
   const [customersMenuOpen, setCustomersMenuOpen] = useState(false);
   const [collectorsMenuOpen, setCollectorsMenuOpen] = useState(false);
-  const [hoveredMenu, setHoveredMenu] = useState<'customers' | 'collectors' | null>(null);
+  const [billingMenuOpen, setBillingMenuOpen] = useState(false);
+  const [hoveredMenu, setHoveredMenu] = useState<'customers' | 'collectors' | 'billing' | null>(null);
   const pathname = usePathname();
 
-  if (!user) return null;
+  if (isLoading) {
+    return <div className="min-h-screen bg-gray-50" />;
+  }
+
+  if (!user) {
+    return <div className="min-h-screen bg-gray-50" />;
+  }
 
   const getNavItems = () => {
     switch (user.role) {
@@ -63,7 +72,15 @@ export default function Layout({ children }: LayoutProps) {
               { label: 'Collector List', href: '/admin/collectors/collector-list' },
             ],
           },
-          { icon: FileText, label: 'Billing', href: '/admin/billing' },
+          {
+            icon: FileText,
+            label: 'Billing',
+            children: [
+              { label: 'Invoice List', href: '/admin/billing' },
+              { label: 'Create Invoice', href: '/admin/billing/create-invoice' },
+            ],
+          },
+          { icon: Activity, label: 'Activity Log', href: '/admin/activity-log' },
           { icon: BarChart3, label: 'Reports', href: '/admin/reports' },
         ];
       case 'collector':
@@ -86,6 +103,7 @@ export default function Layout({ children }: LayoutProps) {
   const navItems = getNavItems();
   const isCustomersRoute = pathname.startsWith('/admin/customers');
   const isCollectorsRoute = pathname.startsWith('/admin/collectors');
+  const isBillingRoute = pathname.startsWith('/admin/billing');
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -193,14 +211,29 @@ export default function Layout({ children }: LayoutProps) {
           {navItems.map((item) => {
             const Icon = item.icon;
             if (item.children) {
-              const isCollectorsMenu = item.label === 'Collectors';
-              const menuKey = isCollectorsMenu ? 'collectors' : 'customers';
+              const menuKey =
+                item.label === 'Collectors'
+                  ? 'collectors'
+                  : item.label === 'Billing'
+                    ? 'billing'
+                    : 'customers';
               const isMenuOpen =
-                (isCollectorsMenu ? collectorsMenuOpen : customersMenuOpen) || hoveredMenu === menuKey;
-              const isMenuRoute = isCollectorsMenu ? isCollectorsRoute : isCustomersRoute;
+                (menuKey === 'collectors'
+                  ? collectorsMenuOpen
+                  : menuKey === 'billing'
+                    ? billingMenuOpen
+                    : customersMenuOpen) || hoveredMenu === menuKey;
+              const isMenuRoute =
+                menuKey === 'collectors'
+                  ? isCollectorsRoute
+                  : menuKey === 'billing'
+                    ? isBillingRoute
+                    : isCustomersRoute;
               const toggleMenu = () => {
-                if (isCollectorsMenu) {
+                if (menuKey === 'collectors') {
                   setCollectorsMenuOpen((prev) => !prev);
+                } else if (menuKey === 'billing') {
+                  setBillingMenuOpen((prev) => !prev);
                 } else {
                   setCustomersMenuOpen((prev) => !prev);
                 }
@@ -212,8 +245,10 @@ export default function Layout({ children }: LayoutProps) {
                   onMouseEnter={() => {
                     if (!isDesktop) return;
                     setHoveredMenu(menuKey);
-                    if (isCollectorsMenu) {
+                    if (menuKey === 'collectors') {
                       setCollectorsMenuOpen(true);
+                    } else if (menuKey === 'billing') {
+                      setBillingMenuOpen(true);
                     } else {
                       setCustomersMenuOpen(true);
                     }
@@ -221,8 +256,10 @@ export default function Layout({ children }: LayoutProps) {
                   onMouseLeave={() => {
                     if (!isDesktop) return;
                     setHoveredMenu(null);
-                    if (isCollectorsMenu) {
+                    if (menuKey === 'collectors') {
                       setCollectorsMenuOpen(false);
+                    } else if (menuKey === 'billing') {
+                      setBillingMenuOpen(false);
                     } else {
                       setCustomersMenuOpen(false);
                     }
@@ -327,12 +364,7 @@ export default function Layout({ children }: LayoutProps) {
             
             <div className="flex items-center space-x-4">
               <div className="text-sm text-gray-500">
-                {new Date().toLocaleDateString('en-US', {
-                  weekday: 'long',
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric'
-                })}
+                {formatDisplayDate(new Date())}
               </div>
             </div>
 

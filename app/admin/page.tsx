@@ -6,10 +6,15 @@ import { useData } from '../contexts/data-context';
 import { useAuth } from '../contexts/auth-context';
 import Layout from '../components/layout';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { formatDisplayDate } from '@/lib/date-format';
 
 export default function AdminDashboard() {
   const { customers, bills, payments } = useData();
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return <div className="min-h-screen bg-gray-50" />;
+  }
 
   if (!user || user.role !== 'admin') {
     return <div>Access denied</div>;
@@ -164,7 +169,7 @@ export default function AdminDashboard() {
                         Payment received from {customer?.name}
                       </p>
                       <p className="text-xs text-gray-500">
-                        ${payment.amount} - {payment.paymentDate}
+                        ${payment.amount} - {formatDisplayDate(payment.paymentDate, '-')}
                       </p>
                     </div>
                     <div className="text-sm text-gray-500">

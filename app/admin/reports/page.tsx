@@ -11,7 +11,11 @@ import Layout from '../../components/layout';
 
 export default function ReportsPage() {
   const { customers, bills, payments, collectors } = useData();
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return <div className="min-h-screen bg-gray-50" />;
+  }
 
   if (!user || user.role !== 'admin') {
     return <div>Access denied</div>;

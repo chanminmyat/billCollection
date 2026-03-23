@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,18 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { FileText, Download, DollarSign, CheckCircle, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/auth-context';
 import Layout from '../components/layout';
+import { filterReleasedInvoices } from '@/lib/invoice-visibility';
+import { formatDisplayDate, formatDisplayDateRange } from '@/lib/date-format';
+import {
+  CollectionWorkflowEvent,
+  COLLECTION_WORKFLOW_STORAGE_KEY,
+  COLLECTION_WORKFLOW_UPDATED_EVENT,
+  CollectionWorkflowMap,
+  CollectionWorkflowStatus,
+  getCollectionWorkflowStatusClassName,
+  getCollectionWorkflowStatusLabel,
+  readCollectionWorkflowMap,
+} from '@/lib/collection-workflow';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 
@@ -26,6 +38,9 @@ type InvoiceRecord = {
   currency?: string | null;
   paymentMethod?: string | null;
   receiptNo?: string | null;
+  collectionStatus?: CollectionWorkflowStatus | null;
+  collectionUpdatedAt?: string | null;
+  collectionEvents?: CollectionWorkflowEvent[] | null;
   customer?: {
     id?: string | null;
     customerCode?: string | null;
@@ -70,14 +85,30 @@ const getInvoiceSortDate = (invoice: InvoiceRecord) => {
 
 const getBillingPeriod = (invoice: InvoiceRecord) => {
   if (invoice.billingPeriodFrom && invoice.billingPeriodTo) {
-    return `${invoice.billingPeriodFrom} - ${invoice.billingPeriodTo}`;
+    return formatDisplayDateRange(invoice.billingPeriodFrom, invoice.billingPeriodTo);
   }
   return invoice.invoiceNo || invoice.id;
 };
 
+const formatDateTime = (value?: string | null) => {
+  if (!value) return '-';
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return '-';
+  return new Date(parsed).toLocaleString('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+};
+
 export default function CustomerDashboard() {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
+  const [collectionMap, setCollectionMap] = useState<CollectionWorkflowMap>({});
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
 
@@ -129,21 +160,42 @@ export default function CustomerDashboard() {
     };
   }, [user?.id, user?.role]);
 
-  if (!user || user.role !== 'customer') {
-    return <div>Access denied</div>;
-  }
+  const refreshCollectionMap = useCallback(() => {
+    setCollectionMap(readCollectionWorkflowMap());
+  }, []);
+
+  useEffect(() => {
+    refreshCollectionMap();
+  }, [refreshCollectionMap]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === COLLECTION_WORKFLOW_STORAGE_KEY) {
+        refreshCollectionMap();
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    window.addEventListener(COLLECTION_WORKFLOW_UPDATED_EVENT, refreshCollectionMap);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener(COLLECTION_WORKFLOW_UPDATED_EVENT, refreshCollectionMap);
+    };
+  }, [refreshCollectionMap]);
 
   const customerIdentityKeys = new Set<string>(
     [
-      normalizeKey(user.id),
-      normalizeKey(user.username),
-      normalizeKey(user.customerProfile?.id),
-      normalizeKey(user.customerProfile?.customerCode),
-      normalizeKey(user.customerProfile?.accountNumber)
+      normalizeKey(user?.id),
+      normalizeKey(user?.username),
+      normalizeKey(user?.customerProfile?.id),
+      normalizeKey(user?.customerProfile?.customerCode),
+      normalizeKey(user?.customerProfile?.accountNumber)
     ].filter(Boolean)
   );
 
-  const customerInvoices = invoices
+  const releasedInvoices = useMemo(() => filterReleasedInvoices(invoices), [invoices]);
+
+  const customerInvoices = releasedInvoices
     .filter((invoice) => {
       const invoiceCustomerId = normalizeKey(invoice.customer?.id);
       const invoiceCustomerCode = normalizeKey(invoice.customer?.customerCode);
@@ -158,17 +210,18 @@ export default function CustomerDashboard() {
   const customerName =
     latestInvoice?.customer?.personalName ||
     latestInvoice?.customer?.companyName ||
-    user.name ||
+    user?.name ||
     'Customer';
-  const customerCode = latestInvoice?.customer?.customerCode || user.customerProfile?.customerCode || user.username || '-';
+  const customerCode =
+    latestInvoice?.customer?.customerCode || user?.customerProfile?.customerCode || user?.username || '-';
   const packageName =
     latestInvoice?.subscription?.plan?.planName ||
     latestInvoice?.subscription?.plan?.planCode ||
     '-';
   const monthlyFee = latestInvoice?.subscription?.plan?.monthlyFee;
   const packageCurrency = latestInvoice?.subscription?.plan?.currency || latestInvoice?.currency || 'MMK';
-  const customerPhone = latestInvoice?.customer?.primaryPhone || user.phone || '-';
-  const customerAddress = latestInvoice?.customer?.installationAddress || user.customerProfile?.address || '-';
+  const customerPhone = latestInvoice?.customer?.primaryPhone || user?.phone || '-';
+  const customerAddress = latestInvoice?.customer?.installationAddress || user?.customerProfile?.address || '-';
 
   const totalBills = customerInvoices.length;
   const paidBills = customerInvoices.filter((bill) => bill.status === 'paid').length;
@@ -182,10 +235,37 @@ export default function CustomerDashboard() {
     .reduce((sum, bill) => sum + toNumber(bill.totalAmount), 0);
   const paymentHistory = customerInvoices.filter((bill) => bill.status === 'paid');
 
+  const getCollectionStatusForInvoice = (invoice: InvoiceRecord): CollectionWorkflowStatus => {
+    if (invoice.status === 'paid') return 'completed';
+    if (invoice.collectionStatus) return invoice.collectionStatus;
+    return collectionMap[invoice.id]?.status ?? 'idle';
+  };
+
+  const collectionFeed = useMemo(
+    () =>
+      customerInvoices.map((invoice) => ({
+        invoice,
+        status: getCollectionStatusForInvoice(invoice),
+        events:
+          Array.isArray(invoice.collectionEvents) && invoice.collectionEvents.length > 0
+            ? invoice.collectionEvents
+            : collectionMap[invoice.id]?.events ?? [],
+      })),
+    [collectionMap, customerInvoices],
+  );
+
   const handleDownloadReceipt = (invoice: InvoiceRecord) => {
     const receiptNo = invoice.receiptNo || invoice.invoiceNo || invoice.id;
     alert(`Receipt downloaded: ${receiptNo}`);
   };
+
+  if (authLoading) {
+    return <div className="min-h-screen bg-gray-50" />;
+  }
+
+  if (!user || user.role !== 'customer') {
+    return <div>Access denied</div>;
+  }
 
   return (
     <Layout>
@@ -301,6 +381,7 @@ export default function CustomerDashboard() {
                   <TableHead>Amount</TableHead>
                   <TableHead>Due Date</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Collection</TableHead>
                   <TableHead>Paid Date</TableHead>
                 </TableRow>
               </TableHeader>
@@ -310,22 +391,81 @@ export default function CustomerDashboard() {
                     <TableCell className="font-mono">{invoice.invoiceNo || invoice.id}</TableCell>
                     <TableCell>{getBillingPeriod(invoice)}</TableCell>
                     <TableCell>{formatMoney(invoice.totalAmount, invoice.currency || 'MMK')}</TableCell>
-                    <TableCell>{invoice.dueDate || '-'}</TableCell>
+                    <TableCell>{formatDisplayDate(invoice.dueDate, '-')}</TableCell>
                     <TableCell>
                       <Badge variant={statusBadgeVariant(invoice.status)}>{invoice.status}</Badge>
                     </TableCell>
-                    <TableCell>{invoice.paidAt ? invoice.paidAt.split('T')[0] : '-'}</TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="secondary"
+                        className={getCollectionWorkflowStatusClassName(getCollectionStatusForInvoice(invoice))}
+                      >
+                        {getCollectionWorkflowStatusLabel(getCollectionStatusForInvoice(invoice))}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{formatDisplayDate(invoice.paidAt, '-')}</TableCell>
                   </TableRow>
                 ))}
                 {customerInvoices.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-sm text-slate-500">
+                    <TableCell colSpan={7} className="text-center text-sm text-slate-500">
                       No invoices found for this customer account.
                     </TableCell>
                   </TableRow>
                 )}
               </TableBody>
             </Table>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Collection Activity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {collectionFeed.length === 0 ? (
+              <p className="text-sm text-slate-500">No invoices to track yet.</p>
+            ) : (
+              <div className="space-y-4">
+                {collectionFeed.map(({ invoice, status, events }) => (
+                  <div key={invoice.id} className="rounded-md border p-3">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">
+                          {invoice.invoiceNo || invoice.id}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {getBillingPeriod(invoice)}
+                        </p>
+                      </div>
+                      <Badge variant="secondary" className={getCollectionWorkflowStatusClassName(status)}>
+                        {getCollectionWorkflowStatusLabel(status)}
+                      </Badge>
+                    </div>
+
+                    {events.length === 0 ? (
+                      <p className="text-sm text-slate-500">No collection updates yet.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {events
+                          .slice()
+                          .reverse()
+                          .map((event) => (
+                            <div key={event.id} className="rounded border bg-slate-50 p-2">
+                              <p className="text-sm font-medium text-slate-800">{event.label}</p>
+                              {event.note && <p className="text-xs text-slate-600">Note: {event.note}</p>}
+                              <p className="text-xs text-slate-500">
+                                {formatDateTime(event.timestamp)}
+                                {event.actorName ? ` • ${event.actorName}` : ''}
+                              </p>
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -348,7 +488,7 @@ export default function CustomerDashboard() {
                 {paymentHistory.map((invoice) => (
                   <TableRow key={invoice.id}>
                     <TableCell className="font-mono">{invoice.receiptNo || invoice.invoiceNo || invoice.id}</TableCell>
-                    <TableCell>{invoice.paidAt ? invoice.paidAt.split('T')[0] : '-'}</TableCell>
+                    <TableCell>{formatDisplayDate(invoice.paidAt, '-')}</TableCell>
                     <TableCell>{formatMoney(invoice.totalAmount, invoice.currency || 'MMK')}</TableCell>
                     <TableCell className="capitalize">{invoice.paymentMethod || '-'}</TableCell>
                     <TableCell>

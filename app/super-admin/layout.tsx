@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   Lock,
   Menu,
+  SlidersHorizontal,
   Settings,
   Shield,
   Users,
@@ -21,6 +22,7 @@ const navItems = [
   { href: '/super-admin/dashboard', label: 'Overview', icon: LayoutDashboard },
   { href: '/super-admin/admins', label: 'Manage Admins', icon: Users },
   { href: '/super-admin/packages', label: 'WiFi Packages', icon: Wifi },
+  { href: '/super-admin/billing-rules', label: 'Billing Rules', icon: SlidersHorizontal },
   { href: '/super-admin/reference-data', label: 'Reference Data', icon: Database },
   { href: '/super-admin/content', label: 'Content Control', icon: BadgeCheck },
   { href: '/super-admin/settings', label: 'System Settings', icon: Settings }
@@ -29,45 +31,110 @@ const navItems = [
 export default function SuperAdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const isLogin = pathname === '/super-admin';
+  const currentPath = pathname ?? '';
+  const isLogin = currentPath === '/super-admin' || currentPath === '/super-admin/';
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isAuthed, setIsAuthed] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
+  const readCookieFlag = (name: string) => {
+    if (typeof document === 'undefined') return '';
+    const matched = document.cookie
+      .split('; ')
+      .find((item) => item.startsWith(`${name}=`));
+    return matched ? decodeURIComponent(matched.split('=').slice(1).join('=')) : '';
+  };
+
   const title = useMemo(() => {
-    if (pathname.startsWith('/super-admin/admins')) return 'Manage Admins';
-    if (pathname.startsWith('/super-admin/packages')) return 'WiFi Packages';
-    if (pathname.startsWith('/super-admin/reference-data')) return 'Reference Data';
-    if (pathname.startsWith('/super-admin/content')) return 'Content Control';
-    if (pathname.startsWith('/super-admin/settings')) return 'System Settings';
+    if (currentPath.startsWith('/super-admin/admins')) return 'Manage Admins';
+    if (currentPath.startsWith('/super-admin/packages')) return 'WiFi Packages';
+    if (currentPath.startsWith('/super-admin/billing-rules')) return 'Billing Rules';
+    if (currentPath.startsWith('/super-admin/reference-data')) return 'Reference Data';
+    if (currentPath.startsWith('/super-admin/content')) return 'Content Control';
+    if (currentPath.startsWith('/super-admin/settings')) return 'System Settings';
     return 'Overview';
-  }, [pathname]);
+  }, [currentPath]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const authed = localStorage.getItem('super_admin_authed') === 'true';
-    setIsAuthed(authed);
-    setIsCheckingAuth(false);
-    if (!authed && !isLogin) {
-      router.replace('/super-admin');
+    let cancelled = false;
+    const fallbackTimer = window.setTimeout(() => {
+      if (!cancelled) {
+        setIsCheckingAuth(false);
+      }
+    }, 1500);
+    try {
+      const localStorageAuthed = window.localStorage.getItem('super_admin_authed') === 'true';
+      const cookieAuthed = readCookieFlag('super_admin_authed') === 'true';
+      const authed = localStorageAuthed || cookieAuthed;
+      setIsAuthed(authed);
+      if (!authed && !isLogin) {
+        router.replace('/super-admin');
+      }
+      if (authed && isLogin) {
+        router.replace('/super-admin/dashboard');
+      }
+    } catch {
+      // Fallback when storage is blocked by browser privacy settings.
+      const cookieAuthed = readCookieFlag('super_admin_authed') === 'true';
+      setIsAuthed(cookieAuthed);
+      if (!cookieAuthed && !isLogin) {
+        router.replace('/super-admin');
+      }
+      if (cookieAuthed && isLogin) {
+        router.replace('/super-admin/dashboard');
+      }
+    } finally {
+      if (!cancelled) {
+        window.clearTimeout(fallbackTimer);
+        setIsCheckingAuth(false);
+      }
     }
-    if (authed && isLogin) {
-      router.replace('/super-admin/dashboard');
-    }
+    return () => {
+      cancelled = true;
+      window.clearTimeout(fallbackTimer);
+    };
   }, [isLogin, router]);
 
   const handleLogout = () => {
     if (typeof window === 'undefined') return;
-    localStorage.removeItem('super_admin_authed');
-    localStorage.removeItem('super_admin_user');
+    try {
+      window.localStorage.removeItem('super_admin_authed');
+      window.localStorage.removeItem('super_admin_user');
+      document.cookie =
+        'super_admin_authed=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
+    } catch {
+      // ignore storage errors
+      document.cookie =
+        'super_admin_authed=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
+    }
   };
 
-  if (isCheckingAuth) {
-    return <div className="min-h-screen bg-slate-950 text-white" />;
-  }
-
+  // Always allow rendering login page UI immediately.
   if (isLogin) {
     return <div className="min-h-screen bg-slate-950 text-slate-900">{children}</div>;
+  }
+
+  if (isCheckingAuth) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
+        <div className="text-center">
+          <p className="text-sm uppercase tracking-[0.2em] text-slate-400">Super Admin</p>
+          <p className="mt-2 text-sm text-slate-200">Checking access...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthed) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
+        <div className="text-center">
+          <p className="text-sm uppercase tracking-[0.2em] text-slate-400">Super Admin</p>
+          <p className="mt-2 text-sm text-slate-200">Redirecting to login...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -100,7 +167,7 @@ export default function SuperAdminLayout({ children }: { children: React.ReactNo
           <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Navigation</p>
           <nav className="mt-4 space-y-2">
             {navItems.map((item) => {
-              const isActive = pathname.startsWith(item.href);
+              const isActive = currentPath.startsWith(item.href);
               const Icon = item.icon;
               return (
                 <Link
