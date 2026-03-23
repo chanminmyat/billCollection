@@ -289,7 +289,22 @@ const formatInvoiceNo = (invoiceNo?: string | null, fallbackId?: string | null) 
 const normalizeInvoiceStatusLabel = (status: string | null | undefined) => {
   const normalized = String(status ?? '').trim().toLowerCase();
   if (normalized === 'canceled') return 'cancelled';
+  if (normalized === 'cancel' || normalized === 'cancelled') return 'cancelled';
   if (
+    normalized === 'unpaid' ||
+    normalized === 'pending' ||
+    normalized === 'pending_payment' ||
+    normalized === 'pending-payment' ||
+    normalized === 'awaiting_payment' ||
+    normalized === 'not_paid' ||
+    normalized === 'not-paid' ||
+    normalized === 'notpaid' ||
+    normalized === 'awaiting-payment'
+  ) {
+    return 'unpaid';
+  }
+  if (
+    normalized === 'paid' ||
     normalized === 'completed' ||
     normalized === 'complete' ||
     normalized === 'settled' ||
@@ -298,19 +313,9 @@ const normalizeInvoiceStatusLabel = (status: string | null | undefined) => {
     normalized === 'paid_by_admin' ||
     normalized === 'paid-by-admin' ||
     normalized === 'fully_paid' ||
-    normalized === 'fully-paid' ||
-    normalized.includes('paid')
+    normalized === 'fully-paid'
   ) {
     return 'paid';
-  }
-  if (
-    normalized === 'pending' ||
-    normalized === 'pending_payment' ||
-    normalized === 'pending-payment' ||
-    normalized === 'awaiting_payment' ||
-    normalized === 'awaiting-payment'
-  ) {
-    return 'unpaid';
   }
   if (normalized === 'over_due') return 'overdue';
   if (!normalized) return 'unpaid';
