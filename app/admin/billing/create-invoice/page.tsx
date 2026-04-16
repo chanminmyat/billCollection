@@ -33,17 +33,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4
 type AdjustmentType = 'plus' | 'minus';
 type AdjustmentValueType = 'fixed' | 'percent';
 
-type PlanOption = {
-  id: string;
-  planCode: string;
-  planName: string;
-  bandwidthPlan?: string;
-  monthlyFee?: number;
-  currency?: string;
-  isActive?: boolean;
-};
-
-type PlanCustomer = {
+type CustomerOption = {
   id: string;
   customerCode: string;
   customerName: string;
@@ -51,6 +41,9 @@ type PlanCustomer = {
   status: string;
   planCode: string;
   planName: string;
+  monthlyFee: number;
+  currency: string;
+  address: string;
 };
 
 type BillingRule = {
@@ -77,6 +70,7 @@ type InvoiceAdjustmentInput = {
 type GeneratedInvoice = {
   id: string;
   invoiceNo?: string | null;
+  invoiceType?: string | null;
   invoiceDate?: string | null;
   billingPeriodFrom?: string | null;
   billingPeriodTo?: string | null;
@@ -136,38 +130,52 @@ const toNumber = (value: string | number | null | undefined) => {
 const formatMoney = (value: string | number | null | undefined, currency = 'MMK') =>
   `${toNumber(value).toLocaleString()} ${currency}`;
 
+const formatInvoiceTypeLabel = (value: string | null | undefined) => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return '—';
+  if (normalized === 'manual_one_time') return 'One-time Manual';
+  if (normalized === 'manual') return 'Manual';
+  if (normalized === 'auto') return 'Rule-based Auto';
+  return normalized
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+};
+
+const EPSILON = 0.0001;
+
 export default function CreateInvoicePage() {
   const { user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
 
-  const [plans, setPlans] = useState<PlanOption[]>([]);
-  const [customers, setCustomers] = useState<PlanCustomer[]>([]);
-  const [invoicedCustomerMap, setInvoicedCustomerMap] = useState<Record<string, boolean>>({});
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [globalAdjustments, setGlobalAdjustments] = useState<GlobalAdjustmentOption[]>([]);
   const [billingRules, setBillingRules] = useState<BillingRule[]>([]);
-
-  const [plansLoading, setPlansLoading] = useState(false);
-  const [customersLoading, setCustomersLoading] = useState(false);
-  const [invoicesLoading, setInvoicesLoading] = useState(false);
-  const [globalAdjustmentsLoading, setGlobalAdjustmentsLoading] = useState(false);
-  const [billingRulesLoading, setBillingRulesLoading] = useState(false);
-  const [isCreatingInvoices, setIsCreatingInvoices] = useState(false);
-  const [generatedInvoicePreview, setGeneratedInvoicePreview] = useState<GeneratedInvoice | null>(null);
-  const [generatedInvoiceDialogOpen, setGeneratedInvoiceDialogOpen] = useState(false);
-
-  const [plansError, setPlansError] = useState('');
-  const [customersError, setCustomersError] = useState('');
-  const [invoicesError, setInvoicesError] = useState('');
-  const [globalAdjustmentsError, setGlobalAdjustmentsError] = useState('');
-  const [billingRulesError, setBillingRulesError] = useState('');
-
-  const [selectedPlanCode, setSelectedPlanCode] = useState('');
-  const [selectedCustomerIds, setSelectedCustomerIds] = useState<string[]>([]);
-  const [selectedRuleId, setSelectedRuleId] = useState('');
   const [fixedBillingWindow, setFixedBillingWindow] = useState<FixedBillingWindow>(
     DEFAULT_FIXED_BILLING_WINDOW
   );
 
+  const [customersLoading, setCustomersLoading] = useState(false);
+  const [globalAdjustmentsLoading, setGlobalAdjustmentsLoading] = useState(false);
+  const [billingRulesLoading, setBillingRulesLoading] = useState(false);
+  const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
+  const [generatedInvoicePreview, setGeneratedInvoicePreview] = useState<GeneratedInvoice | null>(null);
+  const [generatedInvoiceDialogOpen, setGeneratedInvoiceDialogOpen] = useState(false);
+
+  const [customersError, setCustomersError] = useState('');
+  const [globalAdjustmentsError, setGlobalAdjustmentsError] = useState('');
+  const [billingRulesError, setBillingRulesError] = useState('');
+
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [invoiceCreateMode, setInvoiceCreateMode] = useState<'one_time' | 'rule_based'>('one_time');
+  const [selectedRuleId, setSelectedRuleId] = useState('');
+  const [includeSubscriptionFeeInOneTime, setIncludeSubscriptionFeeInOneTime] = useState(true);
+  const [oneTimeSubscriptionFee, setOneTimeSubscriptionFee] = useState('');
+  const [manualMonthlyFee, setManualMonthlyFee] = useState('');
+  const [manualInstallationFee, setManualInstallationFee] = useState('0');
+  const [manualAdditionalFee, setManualAdditionalFee] = useState('0');
   const [adjustmentRows, setAdjustmentRows] = useState<InvoiceAdjustmentInput[]>([]);
   const [selectedGlobalAdjustmentIds, setSelectedGlobalAdjustmentIds] = useState<string[]>([]);
 
@@ -193,10 +201,6 @@ export default function CreateInvoicePage() {
     });
   };
 
-  const activePlans = useMemo(
-    () => plans.filter((plan) => plan.isActive !== false && plan.planCode),
-    [plans]
-  );
   const activeGlobalAdjustments = useMemo(
     () => globalAdjustments.filter((item) => item.isActive),
     [globalAdjustments]
@@ -205,30 +209,35 @@ export default function CreateInvoicePage() {
     () => billingRules.filter((rule) => rule.isActive),
     [billingRules]
   );
-
-  const selectedPlan = useMemo(
-    () => activePlans.find((plan) => plan.planCode === selectedPlanCode) ?? null,
-    [activePlans, selectedPlanCode]
-  );
   const selectedRule = useMemo(
     () => activeBillingRules.find((rule) => rule.id === selectedRuleId) ?? null,
     [activeBillingRules, selectedRuleId]
   );
-
-  const customersBySelectedPlan = useMemo(() => {
-    if (!selectedPlanCode) return [];
-    return customers.filter((customer) => customer.planCode === selectedPlanCode);
-  }, [customers, selectedPlanCode]);
-
-  const eligibleCustomers = useMemo(
-    () => customersBySelectedPlan.filter((customer) => !invoicedCustomerMap[customer.id]),
-    [customersBySelectedPlan, invoicedCustomerMap]
+  const selectedCustomer = useMemo(
+    () => customers.find((customer) => customer.id === selectedCustomerId) ?? null,
+    [customers, selectedCustomerId]
   );
 
-  const selectedEligibleCustomerIds = useMemo(() => {
-    const eligibleSet = new Set(eligibleCustomers.map((customer) => customer.id));
-    return selectedCustomerIds.filter((id) => eligibleSet.has(id));
-  }, [eligibleCustomers, selectedCustomerIds]);
+  const filteredCustomers = useMemo(() => {
+    const keyword = customerSearch.trim().toLowerCase();
+    if (!keyword) return customers;
+    return customers.filter((customer) => {
+      return (
+        customer.customerName.toLowerCase().includes(keyword) ||
+        customer.customerCode.toLowerCase().includes(keyword) ||
+        customer.phone.toLowerCase().includes(keyword) ||
+        customer.planCode.toLowerCase().includes(keyword)
+      );
+    });
+  }, [customerSearch, customers]);
+
+  const selectCustomers = useMemo(() => {
+    if (!selectedCustomer) return filteredCustomers;
+    if (filteredCustomers.some((customer) => customer.id === selectedCustomer.id)) {
+      return filteredCustomers;
+    }
+    return [selectedCustomer, ...filteredCustomers];
+  }, [filteredCustomers, selectedCustomer]);
 
   const getGlobalAdjustmentKey = (item: GlobalAdjustmentOption, index: number) =>
     item.id ?? `idx-${index}`;
@@ -236,50 +245,6 @@ export default function CreateInvoicePage() {
   const openGeneratedInvoiceDialog = (invoice: GeneratedInvoice) => {
     setGeneratedInvoicePreview(invoice);
     setGeneratedInvoiceDialogOpen(true);
-  };
-
-  const fetchPlans = async () => {
-    setPlansLoading(true);
-    setPlansError('');
-    try {
-      const response = await fetch(`${API_BASE_URL}/plans`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(data?.message ?? 'Failed to load plans');
-      }
-
-      const data = await response.json().catch(() => []);
-      const list = Array.isArray(data)
-        ? data
-        : Array.isArray(data?.plans)
-        ? data.plans
-        : Array.isArray(data?.data)
-        ? data.data
-        : [];
-
-      const normalized: PlanOption[] = list.map((item: any, index: number) => ({
-        id: String(item?.id ?? item?._id ?? index + 1),
-        planCode: String(item?.planCode ?? ''),
-        planName: String(item?.planName ?? item?.name ?? ''),
-        bandwidthPlan: item?.bandwidthPlan ? String(item.bandwidthPlan) : undefined,
-        monthlyFee: Number(item?.monthlyFee ?? 0),
-        currency: item?.currency ? String(item.currency) : 'MMK',
-        isActive: item?.isActive !== false
-      }));
-
-      setPlans(normalized);
-    } catch (error) {
-      setPlans([]);
-      setPlansError(error instanceof Error ? error.message : 'Failed to load plans');
-    } finally {
-      setPlansLoading(false);
-    }
   };
 
   const fetchCustomers = async () => {
@@ -302,12 +267,12 @@ export default function CreateInvoicePage() {
       const list = Array.isArray(data)
         ? data
         : Array.isArray(data?.customers)
-        ? data.customers
-        : Array.isArray(data?.data)
-        ? data.data
-        : [];
+          ? data.customers
+          : Array.isArray(data?.data)
+            ? data.data
+            : [];
 
-      const normalized: PlanCustomer[] = list.map((item: any, index: number) => ({
+      const normalized: CustomerOption[] = list.map((item: any, index: number) => ({
         id: String(item?.id ?? item?._id ?? index + 1),
         customerCode: String(item?.customerCode ?? ''),
         customerName:
@@ -327,7 +292,10 @@ export default function CreateInvoicePage() {
             item?.services?.packageName ??
             item?.package ??
             ''
-        )
+        ),
+        monthlyFee: toNumber(item?.subscription?.plan?.monthlyFee ?? item?.monthlyFee),
+        currency: String(item?.subscription?.plan?.currency ?? 'MMK'),
+        address: String(item?.installationAddress ?? '')
       }));
 
       setCustomers(normalized);
@@ -336,46 +304,6 @@ export default function CreateInvoicePage() {
       setCustomersError(error instanceof Error ? error.message : 'Failed to load customers');
     } finally {
       setCustomersLoading(false);
-    }
-  };
-
-  const fetchInvoices = async () => {
-    setInvoicesLoading(true);
-    setInvoicesError('');
-    try {
-      const response = await fetch(`${API_BASE_URL}/billing/invoices`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(data?.message ?? 'Failed to load invoices');
-      }
-
-      const data = await response.json().catch(() => []);
-      const list = Array.isArray(data)
-        ? data
-        : Array.isArray(data?.invoices)
-        ? data.invoices
-        : [];
-
-      const mapped: Record<string, boolean> = {};
-      for (const item of list as any[]) {
-        const customerId = item?.customer?.id;
-        if (customerId) {
-          mapped[String(customerId)] = true;
-        }
-      }
-
-      setInvoicedCustomerMap(mapped);
-    } catch (error) {
-      setInvoicedCustomerMap({});
-      setInvoicesError(error instanceof Error ? error.message : 'Failed to load invoices');
-    } finally {
-      setInvoicesLoading(false);
     }
   };
 
@@ -400,8 +328,8 @@ export default function CreateInvoicePage() {
       const list = Array.isArray(data)
         ? data
         : Array.isArray(data?.adjustments)
-        ? data.adjustments
-        : [];
+          ? data.adjustments
+          : [];
 
       const normalized: GlobalAdjustmentOption[] = (list as any[])
         .map((item: any, index: number) => {
@@ -449,15 +377,9 @@ export default function CreateInvoicePage() {
             billingModel: billingModel === 'usage' ? 'usage' : 'recurring',
             billingType: billingType === 'anniversary' ? 'anniversary' : 'fixed',
             billingMode: String(item?.billingMode ?? item?.cycle ?? 'monthly'),
-            fixedBillingDay: String(
-              item?.fixedBillingDay ?? item?.config?.fixedBillingDay ?? ''
-            ),
-            dueAfterDays: String(
-              item?.dueAfterDays ?? item?.config?.dueAfterDays ?? ''
-            ),
-            customMonths: String(
-              item?.customMonths ?? item?.config?.customMonths ?? ''
-            ),
+            fixedBillingDay: String(item?.fixedBillingDay ?? item?.config?.fixedBillingDay ?? ''),
+            dueAfterDays: String(item?.dueAfterDays ?? item?.config?.dueAfterDays ?? ''),
+            customMonths: String(item?.customMonths ?? item?.config?.customMonths ?? ''),
             isActive: item?.isActive !== false,
             version: Number(item?.version ?? 1) || 1
           } as BillingRule;
@@ -487,8 +409,7 @@ export default function CreateInvoicePage() {
             ? (data as any).data
             : [];
 
-      const normalized = normalizeRules(list as any[]);
-      setBillingRules(normalized);
+      setBillingRules(normalizeRules(list as any[]));
     } catch (error) {
       setBillingRules([]);
       setBillingRulesError(error instanceof Error ? error.message : 'Failed to load billing rules');
@@ -498,13 +419,7 @@ export default function CreateInvoicePage() {
   };
 
   const refreshAll = async () => {
-    await Promise.all([
-      fetchPlans(),
-      fetchCustomers(),
-      fetchInvoices(),
-      fetchGlobalAdjustments(),
-      fetchBillingRules()
-    ]);
+    await Promise.all([fetchCustomers(), fetchGlobalAdjustments(), fetchBillingRules()]);
   };
 
   useEffect(() => {
@@ -518,8 +433,24 @@ export default function CreateInvoicePage() {
   }, [user?.role]);
 
   useEffect(() => {
-    setSelectedCustomerIds([]);
-  }, [selectedPlanCode]);
+    if (!selectedCustomer) {
+      setOneTimeSubscriptionFee('');
+      setManualMonthlyFee('');
+      setManualInstallationFee('0');
+      setManualAdditionalFee('0');
+      return;
+    }
+    setOneTimeSubscriptionFee(String(toNumber(selectedCustomer.monthlyFee)));
+    if (invoiceCreateMode === 'one_time') {
+      setManualMonthlyFee('0');
+      setManualInstallationFee('0');
+      setManualAdditionalFee('0');
+      return;
+    }
+    setManualMonthlyFee(String(toNumber(selectedCustomer.monthlyFee)));
+    setManualInstallationFee('0');
+    setManualAdditionalFee('0');
+  }, [selectedCustomer?.id, invoiceCreateMode]);
 
   const addAdjustmentRow = (type: AdjustmentType) => {
     setAdjustmentRows((prev) => [
@@ -589,85 +520,23 @@ export default function CreateInvoicePage() {
     setSelectedGlobalAdjustmentIds([]);
   };
 
-  const toggleCustomerSelection = (customerId: string, checked: boolean) => {
-    setSelectedCustomerIds((prev) => {
-      if (checked) {
-        return Array.from(new Set([...prev, customerId]));
-      }
-      return prev.filter((id) => id !== customerId);
-    });
-  };
+  const buildGeneratePayloadFromRule = (rule: BillingRule | null) => {
+    if (!rule) return {};
 
-  const toggleSelectAllEligible = (checked: boolean) => {
-    const eligibleIds = eligibleCustomers.map((customer) => customer.id);
-    const eligibleSet = new Set(eligibleIds);
-    setSelectedCustomerIds((prev) => {
-      if (checked) {
-        return Array.from(new Set([...prev, ...eligibleIds]));
-      }
-      return prev.filter((id) => !eligibleSet.has(id));
-    });
-  };
-
-  const handleCreateInvoices = async () => {
-    if (!selectedPlanCode) {
-      toast({
-        title: 'Plan required',
-        description: 'Please choose one plan first.',
-        variant: 'destructive'
-      });
-      return;
-    }
-
-    if (selectedEligibleCustomerIds.length === 0) {
-      toast({
-        title: 'No customers selected',
-        description: 'Select at least one eligible customer.',
-        variant: 'destructive'
-      });
-      return;
-    }
-
-    if (!selectedRule) {
-      toast({
-        title: 'Billing rule required',
-        description: 'Please select one billing rule. Invoice mode is taken from the selected rule.',
-        variant: 'destructive'
-      });
-      return;
-    }
-
-    const invalidAdjustment = adjustmentRows.find(
-      (row) => row.description.trim().length === 0 || toNumber(row.value) < 0
-    );
-    if (invalidAdjustment) {
-      toast({
-        title: 'Invalid adjustment',
-        description: 'Each adjustment row needs description and non-negative value.',
-        variant: 'destructive'
-      });
-      return;
-    }
-
-    const effectiveInvoiceMode = selectedRule.billingType === 'anniversary' ? 'anniversary' : 'fixed';
-    const normalizedRuleBillingMode = String(selectedRule?.billingMode ?? '')
+    const normalizedRuleBillingMode = String(rule.billingMode ?? '')
       .trim()
       .toLowerCase();
+
     const inferredCustomMonthsFromRuleName = (() => {
-      const match = String(selectedRule?.name ?? '').match(/(\d+)\s*month/i);
+      const match = String(rule.name ?? '').match(/(\d+)\s*month/i);
       if (!match) return undefined;
       const parsed = Number.parseInt(match[1], 10);
       return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
     })();
+
     const hasCustomMode =
       normalizedRuleBillingMode.includes('custom') || inferredCustomMonthsFromRuleName !== undefined;
-    const resolvedFixedStartDay = (() => {
-      const parsed = Number.parseInt(String(selectedRule?.fixedBillingDay ?? ''), 10);
-      if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 31) {
-        return parsed;
-      }
-      return fixedBillingWindow.startDay;
-    })();
+
     const derivedBillingCycle = (() => {
       if (normalizedRuleBillingMode.includes('quarter')) return 'Quarterly';
       if (normalizedRuleBillingMode.includes('yearly') || normalizedRuleBillingMode.includes('annual'))
@@ -685,245 +554,283 @@ export default function CreateInvoicePage() {
       return 'Monthly';
     })();
 
-    setIsCreatingInvoices(true);
-    const selectedSet = new Set(selectedEligibleCustomerIds);
-    const selectedCustomers = customersBySelectedPlan.filter((customer) =>
-      selectedSet.has(customer.id)
+    const resolvedFixedStartDay = (() => {
+      const parsed = Number.parseInt(String(rule.fixedBillingDay ?? ''), 10);
+      if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 31) {
+        return parsed;
+      }
+      return fixedBillingWindow.startDay;
+    })();
+
+    return {
+      billingRuleId: rule.id,
+      billingRuleName: rule.name ?? undefined,
+      billingCycle: derivedBillingCycle,
+      firstInvoiceMode: rule.billingType === 'anniversary' ? 'anniversary' : 'fixed',
+      billingMode: rule.billingMode ?? undefined,
+      customMonths: (() => {
+        if (
+          normalizedRuleBillingMode === 'bi-yearly' ||
+          normalizedRuleBillingMode === 'bi_yearly' ||
+          normalizedRuleBillingMode === 'biyearly' ||
+          normalizedRuleBillingMode === 'semiannual' ||
+          normalizedRuleBillingMode === 'semi-annual'
+        ) {
+          return 6;
+        }
+        if (!hasCustomMode) return undefined;
+        const parsed = Number.parseInt(rule.customMonths || '', 10);
+        if (Number.isFinite(parsed) && parsed > 0) return parsed;
+        return inferredCustomMonthsFromRuleName;
+      })(),
+      dueAfterDays: (() => {
+        const raw = rule.dueAfterDays ?? '';
+        if (!raw.trim()) return undefined;
+        const parsed = Number.parseInt(raw, 10);
+        return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+      })(),
+      fixedStartDay: resolvedFixedStartDay,
+      fixedDueDay: fixedBillingWindow.dueDay
+    };
+  };
+
+  const buildDiffAdjustment = (description: string, targetAmount: number, currentAmount: number) => {
+    const diff = targetAmount - currentAmount;
+    if (Math.abs(diff) < EPSILON) return null;
+    return {
+      description,
+      type: diff > 0 ? 'plus' : 'minus',
+      valueType: 'fixed',
+      value: String(Math.abs(diff)),
+      sortOrder: 0
+    } as InvoiceAdjustmentInput;
+  };
+
+  const handleCreateInvoice = async () => {
+    if (!selectedCustomer) {
+      toast({
+        title: 'Customer required',
+        description: 'Please choose one customer.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    if (invoiceCreateMode === 'rule_based' && !selectedRule) {
+      toast({
+        title: 'Billing rule required',
+        description: 'Please choose one billing rule for rule-based invoice.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    const invalidAdjustment = adjustmentRows.find(
+      (row) => row.description.trim().length === 0 || toNumber(row.value) < 0
     );
+    if (invalidAdjustment) {
+      toast({
+        title: 'Invalid adjustment',
+        description: 'Each adjustment row needs description and non-negative value.',
+        variant: 'destructive'
+      });
+      return;
+    }
 
-    let successCount = 0;
-    let adjustmentWarningCount = 0;
-    let ruleBindingWarningCount = 0;
-    const failed: Array<{ customerName: string; message: string }> = [];
-    const createdCustomerIds: string[] = [];
-    const createdInvoices: GeneratedInvoice[] = [];
+    if (invoiceCreateMode === 'rule_based' && !manualMonthlyFee.trim()) {
+      toast({
+        title: 'Monthly fee required',
+        description: 'Please enter monthly fee.',
+        variant: 'destructive'
+      });
+      return;
+    }
 
-    for (const customer of selectedCustomers) {
-      try {
-        const response = await fetch(
-          `${API_BASE_URL}/billing/customers/${customer.id}/invoices/generate`,
+    const oneTimeSubscriptionFeeTarget = toNumber(oneTimeSubscriptionFee);
+    const monthlyFeeTarget =
+      invoiceCreateMode === 'one_time' ? 0 : toNumber(manualMonthlyFee || '0');
+    const installationFeeTarget = toNumber(manualInstallationFee);
+    const additionalFeeTarget = toNumber(manualAdditionalFee);
+    if (
+      oneTimeSubscriptionFeeTarget < 0 ||
+      monthlyFeeTarget < 0 ||
+      installationFeeTarget < 0 ||
+      additionalFeeTarget < 0
+    ) {
+      toast({
+        title: 'Invalid amount',
+        description: 'Fee amounts cannot be negative.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    setIsCreatingInvoice(true);
+    try {
+      const appliedRule = invoiceCreateMode === 'rule_based' ? selectedRule : null;
+      const generatePayload = buildGeneratePayloadFromRule(appliedRule);
+
+      const response = await fetch(
+        `${API_BASE_URL}/billing/customers/${selectedCustomer.id}/invoices/generate`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            ...generatePayload,
+            manualOneTime: invoiceCreateMode === 'one_time'
+          })
+        }
+      );
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message =
+          Array.isArray(data?.message)
+            ? data.message.join(', ')
+            : data?.message ?? 'Failed to create invoice';
+        throw new Error(message);
+      }
+
+      let createdInvoice = data as GeneratedInvoice;
+      if (!createdInvoice || typeof createdInvoice !== 'object' || !createdInvoice.id) {
+        throw new Error('Invoice created but response is invalid.');
+      }
+
+      const autoRows: InvoiceAdjustmentInput[] = [];
+      if (invoiceCreateMode === 'one_time') {
+        if (includeSubscriptionFeeInOneTime && oneTimeSubscriptionFeeTarget > 0) {
+          autoRows.push({
+            description: 'Subscription Fee',
+            type: 'plus',
+            valueType: 'fixed',
+            value: String(oneTimeSubscriptionFeeTarget),
+            sortOrder: autoRows.length
+          });
+        }
+        if (installationFeeTarget > 0) {
+          autoRows.push({
+            description: 'Installation Fee',
+            type: 'plus',
+            valueType: 'fixed',
+            value: String(installationFeeTarget),
+            sortOrder: autoRows.length
+          });
+        }
+        if (additionalFeeTarget > 0) {
+          autoRows.push({
+            description: 'Additional Fee',
+            type: 'plus',
+            valueType: 'fixed',
+            value: String(additionalFeeTarget),
+            sortOrder: autoRows.length
+          });
+        }
+      } else {
+        const autoDiffRows = [
+          buildDiffAdjustment(
+            'Manual Monthly Fee Adjustment',
+            monthlyFeeTarget,
+            toNumber(createdInvoice.monthlyFee)
+          ),
+          buildDiffAdjustment(
+            'Manual Installation Fee Adjustment',
+            installationFeeTarget,
+            toNumber(createdInvoice.installationFee)
+          ),
+          buildDiffAdjustment(
+            'Manual Additional Fee Adjustment',
+            additionalFeeTarget,
+            toNumber(createdInvoice.additionalFees)
+          )
+        ].filter((item): item is InvoiceAdjustmentInput => Boolean(item));
+        autoRows.push(...autoDiffRows);
+      }
+
+      const finalAdjustmentRows = [...autoRows, ...adjustmentRows].map((row, index) => ({
+        ...row,
+        sortOrder: index
+      }));
+
+      if (finalAdjustmentRows.length > 0) {
+        const adjustmentResponse = await fetch(
+          `${API_BASE_URL}/billing/invoices/${createdInvoice.id}/adjustments`,
           {
-            method: 'POST',
+            method: 'PATCH',
             headers: {
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-              firstInvoiceMode: effectiveInvoiceMode,
-              fixedStartDay: resolvedFixedStartDay,
-              fixedDueDay: fixedBillingWindow.dueDay,
-              billingCycle: derivedBillingCycle,
-              billingRuleId: selectedRuleId || undefined,
-              billingRuleName: selectedRule?.name ?? undefined,
-              billingMode: selectedRule?.billingMode ?? undefined,
-              customMonths: (() => {
-                if (
-                  normalizedRuleBillingMode === 'bi-yearly' ||
-                  normalizedRuleBillingMode === 'bi_yearly' ||
-                  normalizedRuleBillingMode === 'biyearly' ||
-                  normalizedRuleBillingMode === 'semiannual' ||
-                  normalizedRuleBillingMode === 'semi-annual'
-                ) {
-                  return 6;
-                }
-                if (!hasCustomMode) return undefined;
-                const parsed = Number.parseInt(selectedRule.customMonths || '', 10);
-                if (Number.isFinite(parsed) && parsed > 0) return parsed;
-                return inferredCustomMonthsFromRuleName;
-              })(),
-              dueAfterDays: (() => {
-                const raw = selectedRule?.dueAfterDays ?? '';
-                if (!raw.trim()) return undefined;
-                const parsed = Number.parseInt(raw, 10);
-                return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
-              })()
+              adjustments: finalAdjustmentRows.map((row, index) => ({
+                description: row.description.trim(),
+                type: row.type,
+                valueType: row.valueType,
+                value: toNumber(row.value),
+                rememberForNext: false,
+                sortOrder: index
+              }))
             })
           }
         );
 
-        const data = await response.json().catch(() => null);
-        if (!response.ok) {
+        if (adjustmentResponse.ok) {
+          const updatedInvoice = (await adjustmentResponse.json().catch(() => null)) as GeneratedInvoice | null;
+          if (updatedInvoice?.id) {
+            createdInvoice = updatedInvoice;
+          }
+        } else {
+          const adjustmentError = await adjustmentResponse.json().catch(() => null);
           const message =
-            Array.isArray(data?.message)
-              ? data.message.join(', ')
-              : data?.message ?? 'Failed to create invoice';
-          throw new Error(message);
+            Array.isArray(adjustmentError?.message)
+              ? adjustmentError.message.join(', ')
+              : adjustmentError?.message ?? 'Invoice created but failed to save adjustments.';
+          toast({
+            title: 'Adjustment save failed',
+            description: message,
+            variant: 'destructive'
+          });
         }
-
-        let createdInvoice = data as GeneratedInvoice;
-        const createdInvoiceId = createdInvoice?.id ? String(createdInvoice.id) : '';
-        if (createdInvoiceId && adjustmentRows.length > 0) {
-          const adjustmentResponse = await fetch(
-            `${API_BASE_URL}/billing/invoices/${createdInvoiceId}/adjustments`,
-            {
-              method: 'PATCH',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                adjustments: adjustmentRows.map((row, index) => ({
-                  description: row.description.trim(),
-                  type: row.type,
-                  valueType: row.valueType,
-                  value: toNumber(row.value),
-                  rememberForNext: false,
-                  sortOrder: index
-                }))
-              })
-            }
-          );
-
-          if (adjustmentResponse.ok) {
-            const updatedInvoice = (await adjustmentResponse.json().catch(() => null)) as GeneratedInvoice | null;
-            if (updatedInvoice?.id) {
-              createdInvoice = updatedInvoice;
-            }
-          } else {
-            adjustmentWarningCount += 1;
-          }
-        }
-
-        if (createdInvoiceId && selectedRuleId) {
-          const candidates = [
-            `${API_BASE_URL}/billing/rules/assign-invoices`,
-            `${API_BASE_URL}/billing/rules/${selectedRuleId}/assign-invoices`
-          ];
-          const payload = {
-            ruleId: selectedRuleId,
-            invoiceIds: [createdInvoiceId],
-            recalculate: true
-          };
-
-          let bindSuccess = false;
-          let bindErrorMessage = 'Failed to bind billing rule to invoice.';
-          for (const url of candidates) {
-            const bindResponse = await fetch(url, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify(payload)
-            });
-
-            if (bindResponse.ok) {
-              bindSuccess = true;
-              break;
-            }
-
-            const bindData = await bindResponse.json().catch(() => null);
-            bindErrorMessage =
-              Array.isArray(bindData?.message)
-                ? bindData.message.join(', ')
-                : bindData?.message ?? bindErrorMessage;
-
-            if (bindResponse.status !== 404) break;
-          }
-
-          if (!bindSuccess) {
-            ruleBindingWarningCount += 1;
-            throw new Error(bindErrorMessage);
-          }
-        }
-
-        createdCustomerIds.push(customer.id);
-        if (createdInvoice?.id) {
-          createdInvoices.push(createdInvoice);
-          logAdminActivity(
-            'invoice_created',
-            'Invoice created from bulk create-invoice page.',
-            'invoice',
-            createdInvoice.id,
-            createdInvoice.invoiceNo || createdInvoice.id,
-            {
-              customerId: customer.id,
-              customerCode: customer.customerCode,
-              customerName: customer.customerName,
-              planCode: selectedPlanCode,
-              invoiceMode: effectiveInvoiceMode
-            }
-          );
-        }
-        successCount += 1;
-      } catch (error) {
-        failed.push({
-          customerName: customer.customerName,
-          message: error instanceof Error ? error.message : 'Failed to create invoice'
-        });
       }
-    }
 
-    if (createdCustomerIds.length > 0) {
-      setInvoicedCustomerMap((prev) => {
-        const next = { ...prev };
-        for (const id of createdCustomerIds) {
-          next[id] = true;
-        }
-        return next;
-      });
-      setSelectedCustomerIds((prev) => prev.filter((id) => !createdCustomerIds.includes(id)));
-      await fetchInvoices();
-    }
-
-    if (createdInvoices.length > 0) {
-      openGeneratedInvoiceDialog(createdInvoices[0]);
-    }
-
-    if (failed.length === 0) {
+      openGeneratedInvoiceDialog(createdInvoice);
       toast({
-        title: 'Invoices created',
-        description:
-          adjustmentWarningCount > 0 || ruleBindingWarningCount > 0
-            ? `${successCount} invoices created. ${adjustmentWarningCount} adjustment apply warning(s), ${ruleBindingWarningCount} rule bind warning(s). Opened first invoice.`
-            : `${successCount} invoices created successfully. Opened first invoice.`
+        title: 'Invoice created',
+        description: 'Manual invoice was created successfully.'
       });
-      if (successCount > 0) {
-        logAdminActivity(
-          'bulk_invoice_created',
-          'Bulk invoice creation completed.',
-          'invoice-batch',
-          undefined,
-          selectedPlanCode || undefined,
-          {
-            successCount,
-            failedCount: 0,
-            adjustmentWarningCount,
-            ruleBindingWarningCount,
-            selectedRuleId: selectedRuleId || null,
-            selectedRuleName: selectedRule?.name || null,
-            invoiceMode: effectiveInvoiceMode
-          }
-        );
-      }
-    } else if (successCount > 0) {
-      toast({
-        title: 'Partially completed',
-        description: `${successCount} created, ${failed.length} failed.`,
-        variant: 'destructive'
-      });
+
       logAdminActivity(
-        'bulk_invoice_created_partial',
-        'Bulk invoice creation partially completed.',
-        'invoice-batch',
-        undefined,
-        selectedPlanCode || undefined,
+        'invoice_created',
+        'Manual invoice created from create-invoice page.',
+        'invoice',
+        createdInvoice.id,
+        createdInvoice.invoiceNo || createdInvoice.id,
         {
-          successCount,
-          failedCount: failed.length,
-          adjustmentWarningCount,
-          ruleBindingWarningCount,
-          selectedRuleId: selectedRuleId || null,
-          selectedRuleName: selectedRule?.name || null,
-          invoiceMode: effectiveInvoiceMode
+          customerId: selectedCustomer.id,
+          customerCode: selectedCustomer.customerCode,
+          customerName: selectedCustomer.customerName,
+          invoiceMode: invoiceCreateMode,
+          ruleId: appliedRule?.id ?? null,
+          ruleName: appliedRule?.name ?? null,
+          includeSubscriptionFeeInOneTime:
+            invoiceCreateMode === 'one_time' ? includeSubscriptionFeeInOneTime : null,
+          oneTimeSubscriptionFeeTarget:
+            invoiceCreateMode === 'one_time' ? oneTimeSubscriptionFeeTarget : null,
+          monthlyFeeTarget,
+          installationFeeTarget,
+          additionalFeeTarget,
+          adjustmentCount: finalAdjustmentRows.length
         }
       );
-    } else {
+    } catch (error) {
       toast({
-        title: 'Create failed',
-        description: failed[0]?.message ?? 'No invoices were created.',
+        title: 'Create invoice failed',
+        description: error instanceof Error ? error.message : 'Failed to create invoice',
         variant: 'destructive'
       });
+    } finally {
+      setIsCreatingInvoice(false);
     }
-
-    setIsCreatingInvoices(false);
   };
 
   if (authLoading) {
@@ -934,8 +841,7 @@ export default function CreateInvoicePage() {
     return <div>Access denied</div>;
   }
 
-  const allEligibleSelected =
-    eligibleCustomers.length > 0 && selectedEligibleCustomerIds.length === eligibleCustomers.length;
+  const loadingAny = customersLoading || globalAdjustmentsLoading || billingRulesLoading;
 
   return (
     <Layout>
@@ -944,65 +850,75 @@ export default function CreateInvoicePage() {
           <div>
             <h1 className="text-3xl font-bold text-slate-900">Create Invoice</h1>
             <p className="text-slate-600">
-              Generate invoices in bulk by plan for customers who do not have invoices yet.
+              Manual invoice creation: choose a customer and set invoice amounts before create.
             </p>
           </div>
-          <Button
-            variant="outline"
-            onClick={refreshAll}
-            disabled={
-              plansLoading ||
-              customersLoading ||
-              invoicesLoading ||
-              globalAdjustmentsLoading ||
-              billingRulesLoading
-            }
-          >
-            <RefreshCw
-              className={`mr-2 h-4 w-4 ${
-                plansLoading ||
-                customersLoading ||
-                invoicesLoading ||
-                globalAdjustmentsLoading ||
-                billingRulesLoading
-                  ? 'animate-spin'
-                  : ''
-              }`}
-            />
+          <Button variant="outline" onClick={refreshAll} disabled={loadingAny}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${loadingAny ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
         </div>
 
         <Card>
           <CardHeader>
-            <CardTitle>Plan And Billing Rule</CardTitle>
+            <CardTitle>Customer And Billing Rule</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="customer-search">Find Customer</Label>
+              <Input
+                id="customer-search"
+                placeholder="Search by customer code, name, phone, or package..."
+                value={customerSearch}
+                onChange={(event) => setCustomerSearch(event.target.value)}
+              />
+            </div>
+
             <div className="space-y-2">
-              <Label>Plan</Label>
-              <Select value={selectedPlanCode} onValueChange={setSelectedPlanCode}>
+              <Label>Customer</Label>
+              <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId}>
                 <SelectTrigger>
-                  <SelectValue
-                    placeholder={plansLoading ? 'Loading plans...' : 'Select plan'}
-                  />
+                  <SelectValue placeholder={customersLoading ? 'Loading customers...' : 'Select customer'} />
                 </SelectTrigger>
                 <SelectContent>
-                  {activePlans.map((plan) => (
-                    <SelectItem key={plan.id} value={plan.planCode}>
-                      {plan.planName} ({plan.planCode})
+                  {selectCustomers.map((customer) => (
+                    <SelectItem key={customer.id} value={customer.id}>
+                      {customer.customerName} ({customer.customerCode || 'No Code'})
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              {plansError && <p className="text-xs text-rose-600">{plansError}</p>}
+              {customersError && <p className="text-xs text-rose-600">{customersError}</p>}
             </div>
 
             <div className="space-y-2">
-              <Label>Bind Billing Rule</Label>
-              <Select value={selectedRuleId} onValueChange={setSelectedRuleId}>
+              <Label>Invoice Type</Label>
+              <Select
+                value={invoiceCreateMode}
+                onValueChange={(value) => setInvoiceCreateMode(value as 'one_time' | 'rule_based')}
+              >
                 <SelectTrigger>
+                  <SelectValue placeholder="Select invoice type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="one_time">One-time Manual Invoice</SelectItem>
+                  <SelectItem value="rule_based">Rule-based Invoice</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Billing Rule</Label>
+              <Select value={selectedRuleId} onValueChange={setSelectedRuleId}>
+                <SelectTrigger disabled={invoiceCreateMode !== 'rule_based'}>
                   <SelectValue
-                    placeholder={billingRulesLoading ? 'Loading rules...' : 'Select rule (optional)'}
+                    placeholder={
+                      invoiceCreateMode !== 'rule_based'
+                        ? 'Not required for one-time invoice'
+                        : billingRulesLoading
+                          ? 'Loading rules...'
+                          : 'Select billing rule'
+                    }
                   />
                 </SelectTrigger>
                 <SelectContent>
@@ -1014,28 +930,25 @@ export default function CreateInvoicePage() {
                 </SelectContent>
               </Select>
               {billingRulesError && <p className="text-xs text-rose-600">{billingRulesError}</p>}
-              {selectedRule ? (
-                <p className="text-xs text-blue-600">
-                  Invoice mode from rule: <span className="font-medium capitalize">{selectedRule.billingType}</span>
-                </p>
-              ) : (
+              {invoiceCreateMode !== 'rule_based' && (
                 <p className="text-xs text-slate-500">
-                  Select a rule. Invoice mode is always taken from the selected rule.
+                  One-time manual invoice does not require billing rule.
                 </p>
               )}
             </div>
 
-            {(selectedPlan || selectedRule) && (
+            {(selectedCustomer || selectedRule) && (
               <div className="md:col-span-2 rounded-md border bg-slate-50 p-3 text-sm text-slate-700 space-y-2">
-                {selectedPlan && (
+                {selectedCustomer && (
                   <>
                     <p>
-                      Selected plan: <span className="font-semibold">{selectedPlan.planName}</span> (
-                      {selectedPlan.planCode})
+                      Customer: <span className="font-semibold">{selectedCustomer.customerName}</span>{' '}
+                      ({selectedCustomer.customerCode || 'No Code'})
                     </p>
                     <p>
-                      Bandwidth: {selectedPlan.bandwidthPlan || '—'} | Monthly fee:{' '}
-                      {formatMoney(selectedPlan.monthlyFee, selectedPlan.currency || 'MMK')}
+                      Phone: {selectedCustomer.phone || '—'} | Package:{' '}
+                      {selectedCustomer.planName || selectedCustomer.planCode || '—'} | Base monthly:{' '}
+                      {formatMoney(selectedCustomer.monthlyFee, selectedCustomer.currency || 'MMK')}
                     </p>
                   </>
                 )}
@@ -1063,9 +976,86 @@ export default function CreateInvoicePage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Adjustments (Optional)</CardTitle>
+            <CardTitle>Manual Charge Setup</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-3">
+              {invoiceCreateMode === 'one_time' && (
+                <div className="space-y-2 md:col-span-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="include-subscription-fee-one-time"
+                      checked={includeSubscriptionFeeInOneTime}
+                      onCheckedChange={(checked) =>
+                        setIncludeSubscriptionFeeInOneTime(checked === true)
+                      }
+                    />
+                    <Label
+                      htmlFor="include-subscription-fee-one-time"
+                      className="text-sm font-medium text-slate-700"
+                    >
+                      Include subscription fee from customer plan
+                    </Label>
+                  </div>
+                  {includeSubscriptionFeeInOneTime && (
+                    <div className="grid gap-2 md:max-w-xs">
+                      <Label htmlFor="one-time-subscription-fee">Subscription Fee</Label>
+                      <Input
+                        id="one-time-subscription-fee"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={oneTimeSubscriptionFee}
+                        onChange={(event) => setOneTimeSubscriptionFee(event.target.value)}
+                        placeholder="0"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {invoiceCreateMode === 'rule_based' && (
+                <div className="space-y-2">
+                  <Label htmlFor="manual-monthly-fee">Monthly Fee</Label>
+                  <Input
+                    id="manual-monthly-fee"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={manualMonthlyFee}
+                    onChange={(event) => setManualMonthlyFee(event.target.value)}
+                    placeholder="0"
+                  />
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label htmlFor="manual-installation-fee">Installation Fee</Label>
+                <Input
+                  id="manual-installation-fee"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={manualInstallationFee}
+                  onChange={(event) => setManualInstallationFee(event.target.value)}
+                  placeholder="0"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="manual-additional-fee">Additional Fee</Label>
+                <Input
+                  id="manual-additional-fee"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={manualAdditionalFee}
+                  onChange={(event) => setManualAdditionalFee(event.target.value)}
+                  placeholder="0"
+                />
+              </div>
+            </div>
+
             <div className="grid gap-2 md:grid-cols-[1fr_auto]">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -1078,12 +1068,12 @@ export default function CreateInvoicePage() {
                     {globalAdjustmentsLoading
                       ? 'Loading global adjustments...'
                       : activeGlobalAdjustments.length === 0
-                      ? 'No active global adjustments'
-                      : selectedGlobalAdjustmentIds.length > 0
-                      ? `${selectedGlobalAdjustmentIds.length} adjustment${
-                          selectedGlobalAdjustmentIds.length > 1 ? 's' : ''
-                        } selected`
-                      : 'Select global adjustments'}
+                        ? 'No active global adjustments'
+                        : selectedGlobalAdjustmentIds.length > 0
+                          ? `${selectedGlobalAdjustmentIds.length} adjustment${
+                              selectedGlobalAdjustmentIds.length > 1 ? 's' : ''
+                            } selected`
+                          : 'Select global adjustments'}
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent className="max-h-72 w-[420px] overflow-y-auto">
@@ -1126,9 +1116,7 @@ export default function CreateInvoicePage() {
               </Button>
             </div>
 
-            {globalAdjustmentsError && (
-              <p className="text-xs text-rose-600">{globalAdjustmentsError}</p>
-            )}
+            {globalAdjustmentsError && <p className="text-xs text-rose-600">{globalAdjustmentsError}</p>}
 
             <div className="flex flex-wrap gap-2">
               <Button type="button" size="sm" variant="outline" onClick={() => addAdjustmentRow('plus')}>
@@ -1221,106 +1209,21 @@ export default function CreateInvoicePage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Customers By Selected Plan</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {!selectedPlanCode && (
-              <p className="text-sm text-slate-500">Select a plan first to list subscribed customers.</p>
-            )}
-            {selectedPlanCode && (
-              <>
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <Badge variant="secondary">Total: {customersBySelectedPlan.length}</Badge>
-                  <Badge variant="secondary">Eligible: {eligibleCustomers.length}</Badge>
-                  <Badge variant="secondary">Selected: {selectedEligibleCustomerIds.length}</Badge>
-                </div>
-
-                {customersError && <p className="text-xs text-rose-600">{customersError}</p>}
-                {invoicesError && <p className="text-xs text-rose-600">{invoicesError}</p>}
-                {customersLoading && (
-                  <p className="text-xs text-slate-500">Loading customers...</p>
-                )}
-                {invoicesLoading && (
-                  <p className="text-xs text-slate-500">Checking invoice status...</p>
-                )}
-
-                <div className="rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-12">
-                          <Checkbox
-                            checked={allEligibleSelected}
-                            onCheckedChange={(checked) => toggleSelectAllEligible(checked === true)}
-                            disabled={eligibleCustomers.length === 0 || isCreatingInvoices}
-                          />
-                        </TableHead>
-                        <TableHead>Customer Code</TableHead>
-                        <TableHead>Customer Name</TableHead>
-                        <TableHead>Phone</TableHead>
-                        <TableHead>Plan</TableHead>
-                        <TableHead>Invoice</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {customersBySelectedPlan.length === 0 && (
-                        <TableRow>
-                          <TableCell colSpan={6} className="text-sm text-slate-500">
-                            No customers found for this plan.
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      {customersBySelectedPlan.map((customer) => {
-                        const hasInvoice = Boolean(invoicedCustomerMap[customer.id]);
-                        const checked = selectedCustomerIds.includes(customer.id);
-                        return (
-                          <TableRow key={customer.id}>
-                            <TableCell>
-                              <Checkbox
-                                checked={checked}
-                                onCheckedChange={(nextChecked) =>
-                                  toggleCustomerSelection(customer.id, nextChecked === true)
-                                }
-                                disabled={hasInvoice || isCreatingInvoices}
-                              />
-                            </TableCell>
-                            <TableCell>{customer.customerCode || '—'}</TableCell>
-                            <TableCell>{customer.customerName}</TableCell>
-                            <TableCell>{customer.phone || '—'}</TableCell>
-                            <TableCell>{customer.planName || customer.planCode || '—'}</TableCell>
-                            <TableCell>
-                              {hasInvoice ? (
-                                <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100">
-                                  Already Created
-                                </Badge>
-                              ) : (
-                                <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
-                                  Not Created
-                                </Badge>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-
         <div className="flex justify-end">
           <Button
-            onClick={handleCreateInvoices}
-            disabled={isCreatingInvoices || selectedEligibleCustomerIds.length === 0}
+            onClick={handleCreateInvoice}
+            disabled={
+              isCreatingInvoice ||
+              !selectedCustomerId ||
+              (invoiceCreateMode === 'rule_based' && !selectedRuleId)
+            }
           >
             <FilePlus2 className="mr-2 h-4 w-4" />
-            {isCreatingInvoices
-              ? 'Creating Invoices...'
-              : `Create Invoices (${selectedEligibleCustomerIds.length})`}
+            {isCreatingInvoice
+              ? 'Creating Invoice...'
+              : invoiceCreateMode === 'one_time'
+                ? 'Create One-time Invoice'
+                : 'Create Invoice'}
           </Button>
         </div>
 
@@ -1336,22 +1239,62 @@ export default function CreateInvoicePage() {
           <DialogContent className="inset-0 left-0 top-0 h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 overflow-y-auto rounded-none border-0 p-4 sm:rounded-none sm:p-6">
             <DialogHeader>
               <DialogTitle>Invoice Detail</DialogTitle>
-              <DialogDescription>
-                Newly created invoice preview.
-              </DialogDescription>
+              <DialogDescription>Newly created invoice preview.</DialogDescription>
             </DialogHeader>
             {generatedInvoicePreview &&
               (() => {
                 const invoice = generatedInvoicePreview;
                 const customerName =
-                  invoice.customer?.personalName ||
-                  invoice.customer?.companyName ||
-                  'Unknown';
+                  invoice.customer?.personalName || invoice.customer?.companyName || 'Unknown';
                 const packageName =
-                  invoice.subscription?.plan?.planName ||
-                  invoice.subscription?.plan?.planCode ||
-                  '—';
+                  invoice.subscription?.plan?.planName || invoice.subscription?.plan?.planCode || '—';
                 const currency = invoice.currency || 'MMK';
+                const monthlyFeeAmount = toNumber(invoice.monthlyFee);
+                const installationFeeAmount = toNumber(invoice.installationFee);
+                const additionalFeeAmount = toNumber(invoice.additionalFees);
+                const allAdjustments = invoice.adjustments || [];
+                const isSystemMonthlyOffset = (adjustment: (typeof allAdjustments)[number]) => {
+                  const description = String(adjustment.description || '').trim().toLowerCase();
+                  if (description !== 'manual monthly fee adjustment') return false;
+                  if ((adjustment.type || '').toLowerCase() !== 'minus') return false;
+                  return Math.abs(toNumber(adjustment.amount) - monthlyFeeAmount) < 0.01;
+                };
+                const visibleAdjustments = allAdjustments.filter((adjustment) => !isSystemMonthlyOffset(adjustment));
+                const hasSystemMonthlyOffset = visibleAdjustments.length !== allAdjustments.length;
+                const visibleChargeRows: Array<{ description: string; qty: number; unitPrice: number; amount: number }> = [];
+                if (!hasSystemMonthlyOffset && monthlyFeeAmount > 0) {
+                  visibleChargeRows.push({
+                    description: 'Monthly Internet Fee',
+                    qty: 1,
+                    unitPrice: monthlyFeeAmount,
+                    amount: monthlyFeeAmount
+                  });
+                }
+                if (installationFeeAmount > 0) {
+                  visibleChargeRows.push({
+                    description: 'Installation Fee',
+                    qty: 1,
+                    unitPrice: installationFeeAmount,
+                    amount: installationFeeAmount
+                  });
+                }
+                if (additionalFeeAmount > 0) {
+                  visibleChargeRows.push({
+                    description: 'Additional Fee',
+                    qty: 1,
+                    unitPrice: additionalFeeAmount,
+                    amount: additionalFeeAmount
+                  });
+                }
+
+                const displaySubtotal = visibleChargeRows.reduce((sum, row) => sum + row.amount, 0);
+                const displayPlus = visibleAdjustments
+                  .filter((adjustment) => adjustment.type !== 'minus')
+                  .reduce((sum, adjustment) => sum + Math.abs(toNumber(adjustment.amount)), 0);
+                const displayMinus = visibleAdjustments
+                  .filter((adjustment) => adjustment.type === 'minus')
+                  .reduce((sum, adjustment) => sum + Math.abs(toNumber(adjustment.amount)), 0);
+                const displayTotal = displaySubtotal + displayPlus - displayMinus;
 
                 return (
                   <div className="space-y-6">
@@ -1370,6 +1313,7 @@ export default function CreateInvoicePage() {
                           <p className="font-semibold">Invoice Information</p>
                           <p>Invoice No: {invoice.invoiceNo || invoice.id}</p>
                           <p>Invoice Date: {formatDisplayDate(invoice.invoiceDate)}</p>
+                          <p>Invoice Type: {formatInvoiceTypeLabel(invoice.invoiceType)}</p>
                           <p>
                             Billing Period:{' '}
                             {formatDisplayDateRange(invoice.billingPeriodFrom, invoice.billingPeriodTo)}
@@ -1401,36 +1345,20 @@ export default function CreateInvoicePage() {
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              <TableRow>
-                                <TableCell>1</TableCell>
-                                <TableCell>Monthly Internet Fee</TableCell>
-                                <TableCell className="text-right">1</TableCell>
-                                <TableCell className="text-right">{formatMoney(invoice.monthlyFee, currency)}</TableCell>
-                                <TableCell className="text-right">{formatMoney(invoice.monthlyFee, currency)}</TableCell>
-                              </TableRow>
-                              {toNumber(invoice.installationFee) > 0 && (
-                                <TableRow>
-                                  <TableCell>2</TableCell>
-                                  <TableCell>Installation Fee</TableCell>
-                                  <TableCell className="text-right">1</TableCell>
-                                  <TableCell className="text-right">{formatMoney(invoice.installationFee, currency)}</TableCell>
-                                  <TableCell className="text-right">{formatMoney(invoice.installationFee, currency)}</TableCell>
+                              {visibleChargeRows.map((row, index) => (
+                                <TableRow key={`charge-${row.description}-${index}`}>
+                                  <TableCell>{index + 1}</TableCell>
+                                  <TableCell>{row.description}</TableCell>
+                                  <TableCell className="text-right">{row.qty}</TableCell>
+                                  <TableCell className="text-right">{formatMoney(row.unitPrice, currency)}</TableCell>
+                                  <TableCell className="text-right">{formatMoney(row.amount, currency)}</TableCell>
                                 </TableRow>
-                              )}
-                              {toNumber(invoice.additionalFees) > 0 && (
-                                <TableRow>
-                                  <TableCell>3</TableCell>
-                                  <TableCell>Additional Fee</TableCell>
-                                  <TableCell className="text-right">1</TableCell>
-                                  <TableCell className="text-right">{formatMoney(invoice.additionalFees, currency)}</TableCell>
-                                  <TableCell className="text-right">{formatMoney(invoice.additionalFees, currency)}</TableCell>
-                                </TableRow>
-                              )}
-                              {(invoice.adjustments || []).map((adjustment, index) => (
+                              ))}
+                              {visibleAdjustments.map((adjustment, index) => (
                                 <TableRow
                                   key={adjustment.id || `${adjustment.description || 'adjustment'}-${index}`}
                                 >
-                                  <TableCell>{index + 4}</TableCell>
+                                  <TableCell>{visibleChargeRows.length + index + 1}</TableCell>
                                   <TableCell>{adjustment.description || 'Adjustment'}</TableCell>
                                   <TableCell className="text-right">1</TableCell>
                                   <TableCell className="text-right">
@@ -1444,32 +1372,38 @@ export default function CreateInvoicePage() {
                                   </TableCell>
                                 </TableRow>
                               ))}
-                              {(invoice.status || 'unpaid') !== 'paid' && (
+                              {(invoice.status || 'unpaid') !== 'paid' && !hasSystemMonthlyOffset && (
                                 <>
-                                  <TableRow>
-                                    <TableCell colSpan={4} className="text-right font-semibold">
-                                      Subtotal
-                                    </TableCell>
-                                    <TableCell className="text-right font-semibold">
-                                      {formatMoney(invoice.subtotalAmount, currency)}
-                                    </TableCell>
-                                  </TableRow>
-                                  <TableRow>
-                                    <TableCell colSpan={4} className="text-right font-semibold">
-                                      Plus
-                                    </TableCell>
-                                    <TableCell className="text-right font-semibold">
-                                      {formatMoney(invoice.plusAmount, currency)}
-                                    </TableCell>
-                                  </TableRow>
-                                  <TableRow>
-                                    <TableCell colSpan={4} className="text-right font-semibold">
-                                      Minus
-                                    </TableCell>
-                                    <TableCell className="text-right font-semibold">
-                                      {formatMoney(invoice.minusAmount, currency)}
-                                    </TableCell>
-                                  </TableRow>
+                                  {displaySubtotal > 0 && (
+                                    <TableRow>
+                                      <TableCell colSpan={4} className="text-right font-semibold">
+                                        Subtotal
+                                      </TableCell>
+                                      <TableCell className="text-right font-semibold">
+                                        {formatMoney(displaySubtotal, currency)}
+                                      </TableCell>
+                                    </TableRow>
+                                  )}
+                                  {displayPlus > 0 && (
+                                    <TableRow>
+                                      <TableCell colSpan={4} className="text-right font-semibold">
+                                        Plus
+                                      </TableCell>
+                                      <TableCell className="text-right font-semibold">
+                                        {formatMoney(displayPlus, currency)}
+                                      </TableCell>
+                                    </TableRow>
+                                  )}
+                                  {displayMinus > 0 && (
+                                    <TableRow>
+                                      <TableCell colSpan={4} className="text-right font-semibold">
+                                        Minus
+                                      </TableCell>
+                                      <TableCell className="text-right font-semibold">
+                                        {formatMoney(displayMinus, currency)}
+                                      </TableCell>
+                                    </TableRow>
+                                  )}
                                 </>
                               )}
                               <TableRow>
@@ -1477,30 +1411,12 @@ export default function CreateInvoicePage() {
                                   Total Amount
                                 </TableCell>
                                 <TableCell className="text-right text-base font-bold">
-                                  {formatMoney(invoice.totalAmount, currency)}
+                                  {formatMoney(hasSystemMonthlyOffset ? displayTotal : invoice.totalAmount, currency)}
                                 </TableCell>
                               </TableRow>
                             </TableBody>
                           </Table>
                         </div>
-                      </div>
-
-                      <div className="mt-8 space-y-1 text-sm">
-                        <p className="font-semibold">Payment Information</p>
-                        <p>Payment Method: {invoice.paymentMethod || '—'}</p>
-                        <p>Payment Status: {invoice.status || 'unpaid'}</p>
-                        <p>
-                          Payment Date:{' '}
-                          {formatDisplayDate(invoice.paidAt, '__________')}
-                        </p>
-                        <p>Receipt No: {invoice.receiptNo || '__________'}</p>
-                      </div>
-
-                      <div className="mt-8 space-y-1 text-sm">
-                        <p className="font-semibold">Notes / Terms</p>
-                        <p>Please pay before the due date to avoid service suspension.</p>
-                        <p>No refund after billing period started.</p>
-                        <p>This is a system-generated invoice.</p>
                       </div>
                     </div>
                   </div>

@@ -9,10 +9,13 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Eye, EyeOff } from 'lucide-react';
+import { readUiLanguage, writeUiLanguage } from '@/lib/ui-language';
 
 type CollectorProfileFormState = {
   collectorCode: string;
+  language: string;
   address: string;
   township: string;
   region: string;
@@ -42,6 +45,7 @@ type PasswordFormState = {
 
 const emptyCollectorProfile: CollectorProfileFormState = {
   collectorCode: '',
+  language: '',
   address: '',
   township: '',
   region: '',
@@ -52,6 +56,23 @@ const emptyCollectorProfile: CollectorProfileFormState = {
 const emptyCustomerProfile: CustomerProfileFormState = {
   accountNumber: '',
   address: '',
+};
+
+const normalizeCollectorLanguageValue = (value?: string | null): string => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (
+    normalized === 'burmese' ||
+    normalized === 'myanmar' ||
+    normalized === 'my' ||
+    normalized === 'mm' ||
+    normalized.includes('မြန်')
+  ) {
+    return 'burmese';
+  }
+  if (normalized === 'english' || normalized === 'en') {
+    return 'english';
+  }
+  return '';
 };
 
 export default function ProfilePage() {
@@ -81,6 +102,10 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (user) {
+      const profileLanguage =
+        normalizeCollectorLanguageValue(user.collectorProfile?.language) ||
+        (readUiLanguage(user.collectorProfile?.language) === 'mm' ? 'burmese' : 'english');
+
       setFormData({
         name: user.name ?? '',
         email: user.email ?? '',
@@ -89,6 +114,7 @@ export default function ProfilePage() {
         collectorProfile: {
           ...emptyCollectorProfile,
           ...(user.collectorProfile ?? {}),
+          language: profileLanguage,
         },
         customerProfile: {
           ...emptyCustomerProfile,
@@ -113,6 +139,10 @@ export default function ProfilePage() {
         [field]: value,
       },
     }));
+
+    if (field === 'language') {
+      writeUiLanguage(value === 'burmese' ? 'mm' : 'en');
+    }
   };
 
   const handleCustomerChange = (field: keyof CustomerProfileFormState, value: string) => {
@@ -157,7 +187,11 @@ export default function ProfilePage() {
       };
 
       if (user.role === 'collector') {
-        payload.collectorProfile = formData.collectorProfile;
+        const { language, ...collectorProfilePayload } = formData.collectorProfile;
+        payload.collectorProfile = collectorProfilePayload;
+        if (language) {
+          writeUiLanguage(language === 'burmese' ? 'mm' : 'en');
+        }
       } else if (user.role === 'customer') {
         payload.customerProfile = formData.customerProfile;
       }
@@ -172,6 +206,10 @@ export default function ProfilePage() {
         collectorProfile: {
           ...emptyCollectorProfile,
           ...(updatedUser.collectorProfile ?? {}),
+          language:
+            normalizeCollectorLanguageValue(updatedUser.collectorProfile?.language) ||
+            formData.collectorProfile.language ||
+            (readUiLanguage(updatedUser.collectorProfile?.language) === 'mm' ? 'burmese' : 'english'),
         },
         customerProfile: {
           ...emptyCustomerProfile,
@@ -311,6 +349,21 @@ export default function ProfilePage() {
                       value={formData.collectorProfile.region}
                       onChange={(event) => handleCollectorChange('region', event.target.value)}
                     />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="collectorLanguage">Language</Label>
+                    <Select
+                      value={formData.collectorProfile.language || undefined}
+                      onValueChange={(value) => handleCollectorChange('language', value)}
+                    >
+                      <SelectTrigger id="collectorLanguage">
+                        <SelectValue placeholder="Select language" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="english">English</SelectItem>
+                        <SelectItem value="burmese">Burmese (မြန်မာ)</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="township">Township</Label>

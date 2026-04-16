@@ -14,12 +14,15 @@ import {
   Building2,
   UserCheck,
   DollarSign,
-  Activity
+  Activity,
+  Globe
 } from 'lucide-react';
 import { useAuth } from '../contexts/auth-context';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { formatDisplayDate } from '@/lib/date-format';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { readUiLanguage, UI_LANGUAGE_STORAGE_KEY, UI_LANGUAGE_UPDATED_EVENT, UiLanguage, writeUiLanguage } from '@/lib/ui-language';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -37,22 +40,25 @@ export default function Layout({ children }: LayoutProps) {
     return false;
   });
   const [isDesktop, setIsDesktop] = useState(false);
+  const [uiLanguage, setUiLanguage] = useState<UiLanguage>('en');
   const [customersMenuOpen, setCustomersMenuOpen] = useState(false);
   const [collectorsMenuOpen, setCollectorsMenuOpen] = useState(false);
   const [billingMenuOpen, setBillingMenuOpen] = useState(false);
-  const [hoveredMenu, setHoveredMenu] = useState<'customers' | 'collectors' | 'billing' | null>(null);
+  const [paymentConfigMenuOpen, setPaymentConfigMenuOpen] = useState(false);
+  const [hoveredMenu, setHoveredMenu] = useState<
+    'customers' | 'collectors' | 'billing' | 'paymentConfig' | null
+  >(null);
+  const [collectorViewHash, setCollectorViewHash] = useState<string>('dashboard');
   const pathname = usePathname();
+  const searchParams = useSearchParams();
 
-  if (isLoading) {
-    return <div className="min-h-screen bg-gray-50" />;
-  }
+  const role = user?.role;
+  const isCollectorBurmese = role === 'collector' && uiLanguage === 'mm';
 
-  if (!user) {
-    return <div className="min-h-screen bg-gray-50" />;
-  }
+  const collectorLabel = (english: string, burmese: string) => (isCollectorBurmese ? burmese : english);
 
   const getNavItems = () => {
-    switch (user.role) {
+    switch (role) {
       case 'admin':
         return [
           { icon: LayoutDashboard, label: 'Dashboard', href: '/admin' },
@@ -80,14 +86,23 @@ export default function Layout({ children }: LayoutProps) {
               { label: 'Create Invoice', href: '/admin/billing/create-invoice' },
             ],
           },
+          {
+            icon: DollarSign,
+            label: 'Payment Config',
+            children: [
+              { label: 'Create Payment Account', href: '/admin/billing/payment-config/create' },
+              { label: 'Payment Account List', href: '/admin/billing/payment-config/list' },
+            ],
+          },
           { icon: Activity, label: 'Activity Log', href: '/admin/activity-log' },
           { icon: BarChart3, label: 'Reports', href: '/admin/reports' },
         ];
       case 'collector':
         return [
-          { icon: LayoutDashboard, label: 'Dashboard', href: '/collector' },
-          { icon: UserCheck, label: 'Collections', href: '/collector/collections' },
-          { icon: BarChart3, label: 'Performance', href: '/collector/performance' },
+          { icon: LayoutDashboard, label: collectorLabel('Dashboard', 'ဒက်ရှ်ဘုတ်'), href: '/collector#dashboard' },
+          { icon: Users, label: collectorLabel('Assigned Customers', 'တာဝန်ပေးထားသော ဖောက်သည်များ'), href: '/collector#assigned_customers' },
+          { icon: FileText, label: collectorLabel('Assigned Bills', 'တာဝန်ပေးထားသော ဘီလ်များ'), href: '/collector#assigned_bills' },
+          { icon: UserCheck, label: collectorLabel('Collected Bills', 'ကောက်ခံပြီး ဘီလ်များ'), href: '/collector#collected_bills' },
         ];
       case 'customer':
         return [
@@ -103,7 +118,8 @@ export default function Layout({ children }: LayoutProps) {
   const navItems = getNavItems();
   const isCustomersRoute = pathname.startsWith('/admin/customers');
   const isCollectorsRoute = pathname.startsWith('/admin/collectors');
-  const isBillingRoute = pathname.startsWith('/admin/billing');
+  const isPaymentConfigRoute = pathname.startsWith('/admin/billing/payment-config');
+  const isBillingRoute = pathname.startsWith('/admin/billing') && !isPaymentConfigRoute;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -120,6 +136,53 @@ export default function Layout({ children }: LayoutProps) {
       window.removeEventListener('resize', updateSidebar);
     };
   }, []);
+
+  useEffect(() => {
+    if (role !== 'collector') {
+      setUiLanguage('en');
+      return;
+    }
+    setUiLanguage(readUiLanguage(user?.collectorProfile?.language));
+  }, [role, user?.collectorProfile?.language]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || role !== 'collector') return;
+    const syncCollectorHash = () => {
+      const hashValue = window.location.hash.replace('#', '').trim();
+      setCollectorViewHash(hashValue || 'dashboard');
+    };
+    syncCollectorHash();
+    window.addEventListener('hashchange', syncCollectorHash);
+    return () => {
+      window.removeEventListener('hashchange', syncCollectorHash);
+    };
+  }, [role, pathname]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || role !== 'collector') return;
+
+    const syncLanguage = () => {
+      setUiLanguage(readUiLanguage(user?.collectorProfile?.language));
+    };
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === UI_LANGUAGE_STORAGE_KEY) {
+        syncLanguage();
+      }
+    };
+
+    window.addEventListener('storage', onStorage);
+    window.addEventListener(UI_LANGUAGE_UPDATED_EVENT, syncLanguage as EventListener);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener(UI_LANGUAGE_UPDATED_EVENT, syncLanguage as EventListener);
+    };
+  }, [role, user?.collectorProfile?.language]);
+
+  const handleChangeLanguage = (language: UiLanguage) => {
+    setUiLanguage(language);
+    writeUiLanguage(language);
+  };
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -148,6 +211,10 @@ export default function Layout({ children }: LayoutProps) {
       setSidebarOpen(false);
     }
   };
+
+  if (isLoading || !user) {
+    return <div className="min-h-screen bg-gray-50" />;
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -198,9 +265,11 @@ export default function Layout({ children }: LayoutProps) {
             {sidebarOpen && (
               <div>
                 <p className="font-medium text-gray-800">{user.name}</p>
-                <p className="text-sm text-gray-500 capitalize">{user.role}</p>
+                <p className="text-sm text-gray-500 capitalize">
+                  {isCollectorBurmese ? 'ကောက်ခံသူ' : user.role}
+                </p>
                 <span className="mt-1 inline-flex items-center text-xs font-medium text-blue-600">
-                  Edit profile
+                  {collectorLabel('Edit profile', 'ပရိုဖိုင် ပြင်ရန်')}
                 </span>
               </div>
             )}
@@ -216,24 +285,32 @@ export default function Layout({ children }: LayoutProps) {
                   ? 'collectors'
                   : item.label === 'Billing'
                     ? 'billing'
+                    : item.label === 'Payment Config'
+                      ? 'paymentConfig'
                     : 'customers';
               const isMenuOpen =
                 (menuKey === 'collectors'
                   ? collectorsMenuOpen
                   : menuKey === 'billing'
                     ? billingMenuOpen
+                    : menuKey === 'paymentConfig'
+                      ? paymentConfigMenuOpen
                     : customersMenuOpen) || hoveredMenu === menuKey;
               const isMenuRoute =
                 menuKey === 'collectors'
                   ? isCollectorsRoute
                   : menuKey === 'billing'
                     ? isBillingRoute
+                    : menuKey === 'paymentConfig'
+                      ? isPaymentConfigRoute
                     : isCustomersRoute;
               const toggleMenu = () => {
                 if (menuKey === 'collectors') {
                   setCollectorsMenuOpen((prev) => !prev);
                 } else if (menuKey === 'billing') {
                   setBillingMenuOpen((prev) => !prev);
+                } else if (menuKey === 'paymentConfig') {
+                  setPaymentConfigMenuOpen((prev) => !prev);
                 } else {
                   setCustomersMenuOpen((prev) => !prev);
                 }
@@ -249,6 +326,8 @@ export default function Layout({ children }: LayoutProps) {
                       setCollectorsMenuOpen(true);
                     } else if (menuKey === 'billing') {
                       setBillingMenuOpen(true);
+                    } else if (menuKey === 'paymentConfig') {
+                      setPaymentConfigMenuOpen(true);
                     } else {
                       setCustomersMenuOpen(true);
                     }
@@ -260,6 +339,8 @@ export default function Layout({ children }: LayoutProps) {
                       setCollectorsMenuOpen(false);
                     } else if (menuKey === 'billing') {
                       setBillingMenuOpen(false);
+                    } else if (menuKey === 'paymentConfig') {
+                      setPaymentConfigMenuOpen(false);
                     } else {
                       setCustomersMenuOpen(false);
                     }
@@ -315,7 +396,40 @@ export default function Layout({ children }: LayoutProps) {
               );
             }
 
-            const isActive = pathname === item.href;
+            let isActive = pathname === item.href;
+            const isCollectorViewLink = role === 'collector' && item.href.startsWith('/collector#');
+            const collectorTargetView = isCollectorViewLink ? item.href.split('#')[1] || 'dashboard' : null;
+            if (role === 'collector' && item.href.startsWith('/collector')) {
+              const hrefView = item.href.split('#')[1] || 'dashboard';
+              const currentView = collectorViewHash || searchParams.get('view') || 'dashboard';
+              isActive = pathname === '/collector' && currentView === hrefView;
+            }
+            if (isCollectorViewLink && collectorTargetView) {
+              return (
+                <button
+                  key={item.href}
+                  type="button"
+                  className={`flex w-full items-center ${sidebarOpen ? 'space-x-3 px-4' : 'justify-center px-0'} py-3 text-sm font-medium transition-colors ${
+                    isActive
+                      ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700'
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                  }`}
+                  onClick={() => {
+                    setCollectorViewHash(collectorTargetView);
+                    if (typeof window !== 'undefined') {
+                      const { pathname: currentPath, search } = window.location;
+                      const nextUrl = `${currentPath}${search}#${collectorTargetView}`;
+                      window.history.pushState(null, '', nextUrl);
+                      window.dispatchEvent(new HashChangeEvent('hashchange'));
+                    }
+                    closeSidebarOnMobile();
+                  }}
+                >
+                  <Icon className="h-5 w-5" />
+                  {sidebarOpen && <span>{item.label}</span>}
+                </button>
+              );
+            }
             return (
               <Link
                 key={item.href}
@@ -343,7 +457,7 @@ export default function Layout({ children }: LayoutProps) {
             }`}
           >
             <LogOut className="h-5 w-5 mr-3" />
-            {sidebarOpen && 'Logout'}
+            {sidebarOpen && collectorLabel('Logout', 'ထွက်မည်')}
           </Button>
         </div>
       </div>
@@ -369,6 +483,24 @@ export default function Layout({ children }: LayoutProps) {
             </div>
 
             <div className="flex items-center space-x-4">
+              {user.role === 'collector' && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900">
+                      <Globe className="h-4 w-4 mr-2" />
+                      {isCollectorBurmese ? 'မြန်မာ' : 'English'}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => handleChangeLanguage('en')}>
+                      English
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleChangeLanguage('mm')}>
+                      မြန်မာ
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
@@ -376,7 +508,7 @@ export default function Layout({ children }: LayoutProps) {
                 className="text-gray-600 hover:text-gray-900"
               >
                 <LogOut className="h-4 w-4 mr-2" />
-                Logout
+                {collectorLabel('Logout', 'ထွက်မည်')}
               </Button>
             </div>
           </div>

@@ -2,7 +2,16 @@ import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Activity, ArrowUpRight, BadgeCheck, Settings, SlidersHorizontal, Users, Wifi } from 'lucide-react';
+import {
+  Activity,
+  ArrowUpRight,
+  BadgeCheck,
+  Languages,
+  Settings,
+  SlidersHorizontal,
+  Users,
+  Wifi,
+} from 'lucide-react';
 
 const metrics = [
   { label: 'Active Admins', value: '12', trend: '+2', icon: Users },
@@ -15,6 +24,7 @@ const quickLinks = [
   { label: 'Manage Admins', href: '/super-admin/admins', icon: Users },
   { label: 'Update Packages', href: '/super-admin/packages', icon: Wifi },
   { label: 'Billing Rules', href: '/super-admin/billing-rules', icon: SlidersHorizontal },
+  { label: 'Collector Dashboard Texts', href: '/super-admin/collector-dashboard-texts', icon: Languages },
   { label: 'Content Rules', href: '/super-admin/content', icon: BadgeCheck },
   { label: 'System Branding', href: '/super-admin/settings', icon: Settings }
 ];

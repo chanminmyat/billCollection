@@ -286,6 +286,19 @@ const formatInvoiceNo = (invoiceNo?: string | null, fallbackId?: string | null) 
   return rawId;
 };
 
+const formatInvoiceTypeLabel = (value: string | null | undefined) => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return '—';
+  if (normalized === 'manual_one_time') return 'One-time Manual';
+  if (normalized === 'manual') return 'Manual';
+  if (normalized === 'auto') return 'Rule-based Auto';
+  return normalized
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+};
+
 const normalizeInvoiceStatusLabel = (status: string | null | undefined) => {
   const normalized = String(status ?? '').trim().toLowerCase();
   if (normalized === 'canceled') return 'cancelled';
@@ -599,6 +612,7 @@ export default function BillingPage() {
   const [selectedTransactionGroup, setSelectedTransactionGroup] = useState<TransactionGroup | null>(null);
 
   const [detailOpen, setDetailOpen] = useState(false);
+  const [invoiceDetailMode, setInvoiceDetailMode] = useState<'view' | 'edit'>('view');
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceRecord | null>(null);
   const [adjustmentRows, setAdjustmentRows] = useState<AdjustmentFormRow[]>([]);
   const [paymentMethod, setPaymentMethod] = useState('KBZPay');
@@ -1254,6 +1268,16 @@ export default function BillingPage() {
     }
     return collectionMap[selectedInvoice.id]?.events ?? [];
   }, [collectionMap, selectedInvoice]);
+
+  const selectedInvoiceStatus = useMemo<InvoiceStatus | null>(() => {
+    if (!selectedInvoice) return null;
+    return normalizeInvoiceStatusLabel(selectedInvoice.status) as InvoiceStatus;
+  }, [selectedInvoice]);
+
+  const canEditSelectedInvoiceInDialog = useMemo(() => {
+    if (!selectedInvoiceStatus) return false;
+    return invoiceDetailMode === 'edit' && selectedInvoiceStatus !== 'paid' && selectedInvoiceStatus !== 'cancelled';
+  }, [invoiceDetailMode, selectedInvoiceStatus]);
 
   const filteredInvoices = useMemo(() => {
     return releasedInvoices.filter((invoice) => {
@@ -2209,7 +2233,8 @@ export default function BillingPage() {
   const getGlobalAdjustmentKey = (item: GlobalAdjustmentOption, index: number) =>
     item.id ?? `idx-${index}`;
 
-  const openInvoiceDetail = (invoice: InvoiceRecord) => {
+  const openInvoiceDetail = (invoice: InvoiceRecord, mode: 'view' | 'edit' = 'view') => {
+    setInvoiceDetailMode(mode);
     setSelectedInvoice(invoice);
     const invoiceRuleDetails = getInvoiceRuleDetails(invoice);
     const rows =
@@ -2359,10 +2384,11 @@ export default function BillingPage() {
 
   const saveAdjustments = async () => {
     if (!selectedInvoice) return;
-    if (selectedInvoice.status === 'paid') {
+    const invoiceStatus = normalizeInvoiceStatusLabel(selectedInvoice.status);
+    if (invoiceStatus === 'paid' || invoiceStatus === 'cancelled') {
       toast({
         title: 'Invoice is locked',
-        description: 'Paid invoices cannot be changed.',
+        description: 'Paid or cancelled invoices cannot be changed.',
         variant: 'destructive',
       });
       return;
@@ -2834,6 +2860,15 @@ export default function BillingPage() {
 
   const markInvoicePaid = async () => {
     if (!selectedInvoice) return;
+    const invoiceStatus = normalizeInvoiceStatusLabel(selectedInvoice.status);
+    if (invoiceStatus === 'paid' || invoiceStatus === 'cancelled') {
+      toast({
+        title: 'Invoice is locked',
+        description: 'Paid or cancelled invoices cannot be marked again.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     setIsMarkingPaid(true);
     try {
@@ -3509,6 +3544,7 @@ export default function BillingPage() {
                 <div class="title">Invoice Information</div>
                 <div>Invoice No: ${escapeHtml(invoiceNoDisplay)}</div>
                 <div>Invoice Date: ${escapeHtml(formatDisplayDate(selectedInvoice.invoiceDate))}</div>
+                <div>Invoice Type: ${escapeHtml(formatInvoiceTypeLabel(selectedInvoice.invoiceType))}</div>
                 <div>Billing Period: ${escapeHtml(
                   formatDisplayDateRange(selectedInvoice.billingPeriodFrom, selectedInvoice.billingPeriodTo)
                 )}</div>
@@ -3862,13 +3898,17 @@ export default function BillingPage() {
                             </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-2">
-                                <Button variant="outline" size="sm" onClick={() => openInvoiceDetail(invoice)}>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openInvoiceDetail(invoice, 'view')}
+                                >
                                   <Eye className="mr-2 h-4 w-4" />
                                   View
                                 </Button>
                                 <Button
                                   size="sm"
-                                  onClick={() => openInvoiceDetail(invoice)}
+                                  onClick={() => openInvoiceDetail(invoice, 'edit')}
                                   disabled={!canEditInvoice}
                                 >
                                   <Edit className="mr-2 h-4 w-4" />
@@ -3915,13 +3955,17 @@ export default function BillingPage() {
                           </div>
 
                           <div className="grid grid-cols-2 gap-2">
-                            <Button className="w-full" variant="outline" onClick={() => openInvoiceDetail(invoice)}>
+                            <Button
+                              className="w-full"
+                              variant="outline"
+                              onClick={() => openInvoiceDetail(invoice, 'view')}
+                            >
                               <Eye className="mr-2 h-4 w-4" />
                               View
                             </Button>
                             <Button
                               className="w-full"
-                              onClick={() => openInvoiceDetail(invoice)}
+                              onClick={() => openInvoiceDetail(invoice, 'edit')}
                               disabled={!canEditInvoice}
                             >
                               <Edit className="mr-2 h-4 w-4" />
@@ -4709,6 +4753,7 @@ export default function BillingPage() {
           onOpenChange={(open) => {
             setDetailOpen(open);
             if (!open) {
+              setInvoiceDetailMode('view');
               setSelectedInvoice(null);
               setAdjustmentRows([]);
               setReceiptNo('');
@@ -4720,12 +4765,14 @@ export default function BillingPage() {
         >
           <DialogContent className="inset-0 left-0 top-0 h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 overflow-y-auto rounded-none border-0 p-4 sm:rounded-none sm:p-6">
             <DialogHeader>
-              <DialogTitle>Invoice Detail</DialogTitle>
+              <DialogTitle>
+                Invoice Detail {invoiceDetailMode === 'edit' ? '(Edit Mode)' : '(View Mode)'}
+              </DialogTitle>
             </DialogHeader>
 
             {selectedInvoice && (
               <div className="mx-auto w-full max-w-5xl space-y-6">
-                {selectedInvoice.status !== 'paid' ? (
+                {canEditSelectedInvoiceInDialog ? (
                   <div className="rounded-lg border border-slate-300 bg-white p-5 text-slate-900">
                     <div className="space-y-6">
                       <div className="space-y-4">
@@ -5129,6 +5176,7 @@ export default function BillingPage() {
                         <p className="font-semibold">Invoice Information</p>
                         <p>Invoice No: {formatInvoiceNo(selectedInvoice.invoiceNo, selectedInvoice.id)}</p>
                         <p>Invoice Date: {formatDisplayDate(selectedInvoice.invoiceDate)}</p>
+                        <p>Invoice Type: {formatInvoiceTypeLabel(selectedInvoice.invoiceType)}</p>
                         <p>
                           Billing Period: {formatDisplayDateRange(
                             selectedInvoice.billingPeriodFrom,
@@ -5160,93 +5208,134 @@ export default function BillingPage() {
                       </div>
                     </div>
 
-                    <div className="mt-8">
-                      <p className="mb-2 text-sm font-semibold">Charges Details</p>
-                      <div className="overflow-x-auto">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>No</TableHead>
-                              <TableHead>Description</TableHead>
-                              <TableHead className="text-right">Qty</TableHead>
-                              <TableHead className="text-right">Unit Price</TableHead>
-                              <TableHead className="text-right">Amount</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            <TableRow>
-                              <TableCell>1</TableCell>
-                              <TableCell>Monthly Internet Fee</TableCell>
-                              <TableCell className="text-right">1</TableCell>
-                              <TableCell className="text-right">{formatMoney(selectedInvoice.monthlyFee, selectedInvoice.currency)}</TableCell>
-                              <TableCell className="text-right">{formatMoney(selectedInvoice.monthlyFee, selectedInvoice.currency)}</TableCell>
-                            </TableRow>
-                            {toNumber(selectedInvoice.installationFee) > 0 && (
-                              <TableRow>
-                                <TableCell>2</TableCell>
-                                <TableCell>Installation Fee</TableCell>
-                                <TableCell className="text-right">1</TableCell>
-                                <TableCell className="text-right">{formatMoney(selectedInvoice.installationFee, selectedInvoice.currency)}</TableCell>
-                                <TableCell className="text-right">{formatMoney(selectedInvoice.installationFee, selectedInvoice.currency)}</TableCell>
-                              </TableRow>
-                            )}
-                            {toNumber(selectedInvoice.additionalFees) > 0 && (
-                              <TableRow>
-                                <TableCell>3</TableCell>
-                                <TableCell>Additional Fee</TableCell>
-                                <TableCell className="text-right">1</TableCell>
-                                <TableCell className="text-right">{formatMoney(selectedInvoice.additionalFees, selectedInvoice.currency)}</TableCell>
-                                <TableCell className="text-right">{formatMoney(selectedInvoice.additionalFees, selectedInvoice.currency)}</TableCell>
-                              </TableRow>
-                            )}
-                            {(selectedInvoice.adjustments || []).map((adjustment, index) => (
-                              <TableRow key={adjustment.id || `${adjustment.description}-${index}`}>
-                                <TableCell>{index + 4}</TableCell>
-                                <TableCell>{adjustment.description}</TableCell>
-                                <TableCell className="text-right">1</TableCell>
-                                <TableCell className="text-right">
-                                  {adjustment.valueType === 'percent'
-                                    ? `${toNumber(adjustment.value)}%`
-                                    : formatMoney(adjustment.value, selectedInvoice.currency)}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  {adjustment.type === 'minus' ? '-' : ''}
-                                  {formatMoney(adjustment.amount, selectedInvoice.currency)}
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                            {selectedInvoice.status !== 'paid' && (
-                              <>
+                    {(() => {
+                      const currency = selectedInvoice.currency || 'MMK';
+                      const monthlyFeeAmount = toNumber(selectedInvoice.monthlyFee);
+                      const installationFeeAmount = toNumber(selectedInvoice.installationFee);
+                      const additionalFeeAmount = toNumber(selectedInvoice.additionalFees);
+                      const allAdjustments = selectedInvoice.adjustments || [];
+                      const isSystemMonthlyOffset = (adjustment: InvoiceAdjustment) => {
+                        const description = String(adjustment.description || '').trim().toLowerCase();
+                        if (description !== 'manual monthly fee adjustment') return false;
+                        if ((adjustment.type || '').toLowerCase() !== 'minus') return false;
+                        return Math.abs(toNumber(adjustment.amount) - monthlyFeeAmount) < 0.01;
+                      };
+                      const visibleAdjustments = allAdjustments.filter((adjustment) => !isSystemMonthlyOffset(adjustment));
+                      const hasSystemMonthlyOffset = visibleAdjustments.length !== allAdjustments.length;
+                      const visibleChargeRows: Array<{ description: string; qty: number; unitPrice: number; amount: number }> = [];
+                      if (!hasSystemMonthlyOffset && monthlyFeeAmount > 0) {
+                        visibleChargeRows.push({
+                          description: 'Monthly Internet Fee',
+                          qty: 1,
+                          unitPrice: monthlyFeeAmount,
+                          amount: monthlyFeeAmount
+                        });
+                      }
+                      if (installationFeeAmount > 0) {
+                        visibleChargeRows.push({
+                          description: 'Installation Fee',
+                          qty: 1,
+                          unitPrice: installationFeeAmount,
+                          amount: installationFeeAmount
+                        });
+                      }
+                      if (additionalFeeAmount > 0) {
+                        visibleChargeRows.push({
+                          description: 'Additional Fee',
+                          qty: 1,
+                          unitPrice: additionalFeeAmount,
+                          amount: additionalFeeAmount
+                        });
+                      }
+                      const displaySubtotal = visibleChargeRows.reduce((sum, row) => sum + row.amount, 0);
+                      const displayPlus = visibleAdjustments
+                        .filter((adjustment) => adjustment.type !== 'minus')
+                        .reduce((sum, adjustment) => sum + Math.abs(toNumber(adjustment.amount)), 0);
+                      const displayMinus = visibleAdjustments
+                        .filter((adjustment) => adjustment.type === 'minus')
+                        .reduce((sum, adjustment) => sum + Math.abs(toNumber(adjustment.amount)), 0);
+                      const displayTotal = displaySubtotal + displayPlus - displayMinus;
+
+                      return (
+                        <div className="mt-8">
+                          <p className="mb-2 text-sm font-semibold">Charges Details</p>
+                          <div className="overflow-x-auto">
+                            <Table>
+                              <TableHeader>
                                 <TableRow>
-                                  <TableCell colSpan={4} className="text-right font-semibold">Subtotal</TableCell>
-                                  <TableCell className="text-right font-semibold">
-                                    {formatMoney(selectedInvoice.subtotalAmount, selectedInvoice.currency)}
+                                  <TableHead>No</TableHead>
+                                  <TableHead>Description</TableHead>
+                                  <TableHead className="text-right">Qty</TableHead>
+                                  <TableHead className="text-right">Unit Price</TableHead>
+                                  <TableHead className="text-right">Amount</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {visibleChargeRows.map((row, index) => (
+                                  <TableRow key={`charge-${row.description}-${index}`}>
+                                    <TableCell>{index + 1}</TableCell>
+                                    <TableCell>{row.description}</TableCell>
+                                    <TableCell className="text-right">{row.qty}</TableCell>
+                                    <TableCell className="text-right">{formatMoney(row.unitPrice, currency)}</TableCell>
+                                    <TableCell className="text-right">{formatMoney(row.amount, currency)}</TableCell>
+                                  </TableRow>
+                                ))}
+                                {visibleAdjustments.map((adjustment, index) => (
+                                  <TableRow key={adjustment.id || `${adjustment.description}-${index}`}>
+                                    <TableCell>{visibleChargeRows.length + index + 1}</TableCell>
+                                    <TableCell>{adjustment.description}</TableCell>
+                                    <TableCell className="text-right">1</TableCell>
+                                    <TableCell className="text-right">
+                                      {adjustment.valueType === 'percent'
+                                        ? `${toNumber(adjustment.value)}%`
+                                        : formatMoney(adjustment.value, currency)}
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                      {adjustment.type === 'minus' ? '-' : ''}
+                                      {formatMoney(adjustment.amount, currency)}
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                                {selectedInvoice.status !== 'paid' && !hasSystemMonthlyOffset && (
+                                  <>
+                                    {displaySubtotal > 0 && (
+                                      <TableRow>
+                                        <TableCell colSpan={4} className="text-right font-semibold">Subtotal</TableCell>
+                                        <TableCell className="text-right font-semibold">
+                                          {formatMoney(displaySubtotal, currency)}
+                                        </TableCell>
+                                      </TableRow>
+                                    )}
+                                    {displayPlus > 0 && (
+                                      <TableRow>
+                                        <TableCell colSpan={4} className="text-right font-semibold">Plus</TableCell>
+                                        <TableCell className="text-right font-semibold">
+                                          {formatMoney(displayPlus, currency)}
+                                        </TableCell>
+                                      </TableRow>
+                                    )}
+                                    {displayMinus > 0 && (
+                                      <TableRow>
+                                        <TableCell colSpan={4} className="text-right font-semibold">Minus</TableCell>
+                                        <TableCell className="text-right font-semibold">
+                                          {formatMoney(displayMinus, currency)}
+                                        </TableCell>
+                                      </TableRow>
+                                    )}
+                                  </>
+                                )}
+                                <TableRow>
+                                  <TableCell colSpan={4} className="text-right text-base font-bold">Total Amount</TableCell>
+                                  <TableCell className="text-right text-base font-bold">
+                                    {formatMoney(hasSystemMonthlyOffset ? displayTotal : selectedInvoice.totalAmount, currency)}
                                   </TableCell>
                                 </TableRow>
-                                <TableRow>
-                                  <TableCell colSpan={4} className="text-right font-semibold">Plus</TableCell>
-                                  <TableCell className="text-right font-semibold">
-                                    {formatMoney(selectedInvoice.plusAmount, selectedInvoice.currency)}
-                                  </TableCell>
-                                </TableRow>
-                                <TableRow>
-                                  <TableCell colSpan={4} className="text-right font-semibold">Minus</TableCell>
-                                  <TableCell className="text-right font-semibold">
-                                    {formatMoney(selectedInvoice.minusAmount, selectedInvoice.currency)}
-                                  </TableCell>
-                                </TableRow>
-                              </>
-                            )}
-                            <TableRow>
-                              <TableCell colSpan={4} className="text-right text-base font-bold">Total Amount</TableCell>
-                              <TableCell className="text-right text-base font-bold">
-                                {formatMoney(selectedInvoice.totalAmount, selectedInvoice.currency)}
-                              </TableCell>
-                            </TableRow>
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
+                              </TableBody>
+                            </Table>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     <div className="mt-8 space-y-1 text-sm">
                       <p className="font-semibold">Payment Information</p>
@@ -5301,7 +5390,7 @@ export default function BillingPage() {
                   </div>
                 )}
 
-                {selectedInvoice.status !== 'paid' ? (
+                {canEditSelectedInvoiceInDialog ? (
                   <Card>
                     <CardHeader>
                       <CardTitle>
@@ -5356,10 +5445,22 @@ export default function BillingPage() {
                 ) : (
                   <Card>
                     <CardHeader>
-                      <CardTitle>Final Amount (Paid Invoice)</CardTitle>
+                      <CardTitle>
+                        {selectedInvoiceStatus === 'paid'
+                          ? 'Final Amount (Paid Invoice)'
+                          : selectedInvoiceStatus === 'cancelled'
+                            ? 'Cancelled Invoice'
+                            : 'View Only'}
+                      </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <p className="text-sm text-slate-600">This invoice is already paid and locked.</p>
+                      <p className="text-sm text-slate-600">
+                        {selectedInvoiceStatus === 'paid'
+                          ? 'This invoice is already paid and locked.'
+                          : selectedInvoiceStatus === 'cancelled'
+                            ? 'This invoice is cancelled. You can only view details.'
+                            : 'This is view mode. Use Edit to change adjustments or payment.'}
+                      </p>
                       <p className="mt-2 text-lg font-semibold text-slate-900">
                         {formatMoney(selectedInvoice.totalAmount, selectedInvoice.currency)}
                       </p>

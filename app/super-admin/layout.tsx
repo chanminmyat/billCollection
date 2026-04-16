@@ -8,6 +8,7 @@ import {
   BadgeCheck,
   Database,
   LayoutDashboard,
+  Languages,
   Lock,
   Menu,
   SlidersHorizontal,
@@ -23,6 +24,7 @@ const navItems = [
   { href: '/super-admin/admins', label: 'Manage Admins', icon: Users },
   { href: '/super-admin/packages', label: 'WiFi Packages', icon: Wifi },
   { href: '/super-admin/billing-rules', label: 'Billing Rules', icon: SlidersHorizontal },
+  { href: '/super-admin/collector-dashboard-texts', label: 'Collector Dashboard Texts', icon: Languages },
   { href: '/super-admin/reference-data', label: 'Reference Data', icon: Database },
   { href: '/super-admin/content', label: 'Content Control', icon: BadgeCheck },
   { href: '/super-admin/settings', label: 'System Settings', icon: Settings }
@@ -49,6 +51,7 @@ export default function SuperAdminLayout({ children }: { children: React.ReactNo
     if (currentPath.startsWith('/super-admin/admins')) return 'Manage Admins';
     if (currentPath.startsWith('/super-admin/packages')) return 'WiFi Packages';
     if (currentPath.startsWith('/super-admin/billing-rules')) return 'Billing Rules';
+    if (currentPath.startsWith('/super-admin/collector-dashboard-texts')) return 'Collector Dashboard Texts';
     if (currentPath.startsWith('/super-admin/reference-data')) return 'Reference Data';
     if (currentPath.startsWith('/super-admin/content')) return 'Content Control';
     if (currentPath.startsWith('/super-admin/settings')) return 'System Settings';

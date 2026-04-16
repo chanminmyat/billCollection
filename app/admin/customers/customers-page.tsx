@@ -91,6 +91,7 @@ type GlobalAdjustmentOption = {
 type GeneratedInvoice = {
   id: string;
   invoiceNo?: string | null;
+  invoiceType?: string | null;
   invoiceDate?: string | null;
   billingPeriodFrom?: string | null;
   billingPeriodTo?: string | null;
@@ -200,6 +201,8 @@ type CustomerCreateDraft = {
   customBillingMonths: string;
   installationFee: string;
   additionalFees: string;
+  collectionService: 'yes' | 'no';
+  collectionFee: string;
   discountApplied: 'yes' | 'no';
   discountAmount: string;
   discountPeriod: string;
@@ -219,6 +222,8 @@ type CustomerBillingFeeCache = {
   discountApplied: 'yes' | 'no';
   discountAmount: number;
   discountPeriod: string;
+  collectionService?: 'yes' | 'no';
+  collectionFee?: number;
   updatedAt: string;
 };
 
@@ -246,6 +251,20 @@ const toNumber = (value: string | number | null | undefined) => {
   if (value === null || value === undefined || value === '') return 0;
   const parsed = typeof value === 'number' ? value : Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const normalizeCollectionServiceValue = (value: unknown): 'yes' | 'no' | null => {
+  if (typeof value === 'boolean') return value ? 'yes' : 'no';
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
+  if (['yes', 'true', '1', 'enable', 'enabled', 'active', 'on'].includes(normalized)) {
+    return 'yes';
+  }
+  if (['no', 'false', '0', 'disable', 'disabled', 'off'].includes(normalized)) {
+    return 'no';
+  }
+  return null;
 };
 
 const normalizePhoneCacheKey = (value: string | null | undefined) =>
@@ -325,6 +344,19 @@ const parseDdMmYyyyToDate = (value: string) => {
 
 const formatMoney = (value: string | number | null | undefined, currency = 'MMK') =>
   `${toNumber(value).toLocaleString()} ${currency}`;
+
+const formatInvoiceTypeLabel = (value: string | null | undefined) => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return '—';
+  if (normalized === 'manual_one_time') return 'One-time Manual';
+  if (normalized === 'manual') return 'Manual';
+  if (normalized === 'auto') return 'Rule-based Auto';
+  return normalized
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+};
 
 const parseIsoDateOnly = (value?: string | null) => {
   if (!value) return null;
@@ -564,6 +596,8 @@ export default function CustomersPage({
   const [customBillingMonths, setCustomBillingMonths] = useState('');
   const [installationFee, setInstallationFee] = useState('');
   const [additionalFees, setAdditionalFees] = useState('');
+  const [collectionService, setCollectionService] = useState<'yes' | 'no'>('yes');
+  const [collectionFee, setCollectionFee] = useState('');
   const [discountApplied, setDiscountApplied] = useState<'yes' | 'no'>('no');
   const [discountAmount, setDiscountAmount] = useState('');
   const [discountPeriod, setDiscountPeriod] = useState('');
@@ -723,7 +757,11 @@ export default function CustomersPage({
     if (targetKeys.length === 0) return;
 
     const current = readCustomerBillingFeeCache();
+    const existingEntry = targetKeys
+      .map((key) => current[key])
+      .find((entry): entry is CustomerBillingFeeCache => Boolean(entry));
     const nextEntry: CustomerBillingFeeCache = {
+      ...(existingEntry ?? {}),
       ...value,
       updatedAt: new Date().toISOString()
     };
@@ -794,24 +832,56 @@ export default function CustomersPage({
     if (!installationRegion) return [];
     return Object.keys(townshipData[installationRegion as keyof typeof townshipData]).sort();
   }, [installationRegion]);
+  const installationDistrictTownshipMap = useMemo(() => {
+    if (!installationRegion) return {} as Record<string, string[]>;
+    return (
+      (townshipData[installationRegion as keyof typeof townshipData] as Record<string, string[]>) ?? {}
+    );
+  }, [installationRegion]);
   const installationTownshipOptions = useMemo(() => {
-    if (!installationRegion || !installationDistrict) return [];
-    const districts =
-      townshipData[installationRegion as keyof typeof townshipData] as Record<string, string[]>;
-    const list = districts?.[installationDistrict] ?? [];
-    return [...list].sort();
-  }, [installationRegion, installationDistrict]);
+    if (!installationRegion) return [];
+    const list = installationDistrict
+      ? installationDistrictTownshipMap?.[installationDistrict] ?? []
+      : Object.values(installationDistrictTownshipMap).flatMap((items) => items);
+    return Array.from(new Set(list)).sort();
+  }, [installationRegion, installationDistrict, installationDistrictTownshipMap]);
+  const installationTownshipToDistrictMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    Object.entries(installationDistrictTownshipMap).forEach(([district, townships]) => {
+      townships.forEach((township) => {
+        if (!map[township]) {
+          map[township] = district;
+        }
+      });
+    });
+    return map;
+  }, [installationDistrictTownshipMap]);
   const billingDistrictOptions = useMemo(() => {
     if (!billingRegion) return [];
     return Object.keys(townshipData[billingRegion as keyof typeof townshipData]).sort();
   }, [billingRegion]);
+  const billingDistrictTownshipMap = useMemo(() => {
+    if (!billingRegion) return {} as Record<string, string[]>;
+    return (townshipData[billingRegion as keyof typeof townshipData] as Record<string, string[]>) ?? {};
+  }, [billingRegion]);
   const billingTownshipOptions = useMemo(() => {
-    if (!billingRegion || !billingDistrict) return [];
-    const districts =
-      townshipData[billingRegion as keyof typeof townshipData] as Record<string, string[]>;
-    const list = districts?.[billingDistrict] ?? [];
-    return [...list].sort();
-  }, [billingRegion, billingDistrict]);
+    if (!billingRegion) return [];
+    const list = billingDistrict
+      ? billingDistrictTownshipMap?.[billingDistrict] ?? []
+      : Object.values(billingDistrictTownshipMap).flatMap((items) => items);
+    return Array.from(new Set(list)).sort();
+  }, [billingRegion, billingDistrict, billingDistrictTownshipMap]);
+  const billingTownshipToDistrictMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    Object.entries(billingDistrictTownshipMap).forEach(([district, townships]) => {
+      townships.forEach((township) => {
+        if (!map[township]) {
+          map[township] = district;
+        }
+      });
+    });
+    return map;
+  }, [billingDistrictTownshipMap]);
   const activePlans = useMemo(
     () => plans.filter((plan) => plan.isActive !== false),
     [plans]
@@ -951,6 +1021,20 @@ export default function CustomersPage({
       setCustomBillingMonths('');
     }
   }, [billingCycle]);
+
+  useEffect(() => {
+    if (collectionService !== 'no') return;
+    setCollectionFee('');
+    setErrors((prev) => {
+      if (!prev.collectionFee) return prev;
+      const { collectionFee: _removed, ...rest } = prev;
+      return rest;
+    });
+    setNewCustomer((prev) => {
+      if (!prev.collectorId) return prev;
+      return { ...prev, collectorId: '' };
+    });
+  }, [collectionService]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1107,6 +1191,8 @@ export default function CustomersPage({
       setCustomBillingMonths(draft.customBillingMonths ?? '');
       setInstallationFee(draft.installationFee ?? '');
       setAdditionalFees(draft.additionalFees ?? '');
+      setCollectionService(draft.collectionService === 'no' ? 'no' : 'yes');
+      setCollectionFee(draft.collectionFee ?? '');
       setDiscountApplied(draft.discountApplied === 'yes' ? 'yes' : 'no');
       setDiscountAmount(draft.discountAmount ?? '');
       setDiscountPeriod(draft.discountPeriod ?? '');
@@ -1139,7 +1225,8 @@ export default function CustomersPage({
           serviceStartDate.trim() ||
           contractStartDate.trim() ||
           contractEndDate.trim() ||
-          installationDate.trim()
+          installationDate.trim() ||
+          collectionFee.trim()
       );
 
       if (!hasAnyInput) {
@@ -1209,6 +1296,8 @@ export default function CustomersPage({
         customBillingMonths,
         installationFee,
         additionalFees,
+        collectionService,
+        collectionFee,
         discountApplied,
         discountAmount,
         discountPeriod
@@ -1283,6 +1372,8 @@ export default function CustomersPage({
     customBillingMonths,
     installationFee,
     additionalFees,
+    collectionService,
+    collectionFee,
     discountApplied,
     discountAmount,
     discountPeriod,
@@ -1447,6 +1538,31 @@ export default function CustomersPage({
 
   const normalizeStatus = (status: 'enable' | 'disable' | 'takeoff') =>
     status === 'enable' ? 'active' : 'inactive';
+
+  const isCollectionServiceEnabledForCustomer = (customer: CustomerListRow) => {
+    const summary = customerSummaryById[customer.id] ?? {};
+    const explicit = normalizeCollectionServiceValue(
+      summary?.collectionService ??
+        summary?.collectionServiceEnabled ??
+        summary?.billingInformation?.collectionService ??
+        summary?.customer?.collectionService ??
+        summary?.customer?.collectionServiceEnabled
+    );
+    if (explicit) {
+      return explicit === 'yes';
+    }
+
+    const cached = resolveCustomerBillingFeeCache({
+      customerId: customer.id,
+      customerCode: String(customer.code ?? summary?.customerCode ?? '').trim(),
+      customerPhone: customer.phone
+    });
+    if (cached?.collectionService) {
+      return cached.collectionService === 'yes';
+    }
+
+    return true;
+  };
 
   const toSelectStatus = (status: 'active' | 'inactive' | 'enable' | 'disable' | 'takeoff') => {
     if (status === 'enable') return 'enable';
@@ -1711,7 +1827,8 @@ export default function CustomersPage({
         serviceStartDate.trim() ||
         contractStartDate.trim() ||
         contractEndDate.trim() ||
-        installationDate.trim()
+        installationDate.trim() ||
+        collectionFee.trim()
     );
 
     if (hasAnyInput) {
@@ -1775,6 +1892,8 @@ export default function CustomersPage({
         customBillingMonths,
         installationFee,
         additionalFees,
+        collectionService,
+        collectionFee,
         discountApplied,
         discountAmount,
         discountPeriod
@@ -2328,9 +2447,7 @@ export default function CustomersPage({
     if (primaryPhone.trim().length < 6 || primaryPhone.trim().length > 11) {
       nextErrors.primaryPhone = 'Enter 6-11 digits.';
     }
-    if (!contactEmail.trim()) {
-      nextErrors.contactEmail = 'Email is required.';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.trim())) {
+    if (contactEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.trim())) {
       nextErrors.contactEmail = 'Enter a valid email address.';
     }
     if (!installationRegion) {
@@ -2402,6 +2519,9 @@ export default function CustomersPage({
     if (!installationFee.trim()) {
       nextErrors.installationFee = 'Installation fee is required.';
     }
+    if (collectionService === 'yes' && !collectionFee.trim()) {
+      nextErrors.collectionFee = 'Collection fee is required when collection service is enabled.';
+    }
     if (discountApplied === 'yes') {
       if (!discountAmount.trim()) {
         nextErrors.discountAmount = 'Enter discount amount.';
@@ -2437,6 +2557,8 @@ export default function CustomersPage({
       return Number.isNaN(parsed) ? 0 : parsed;
     };
     const billingDayForPayload = resolveBillingDayByMode('fixed');
+    const baseAdditionalFees = toNumber(additionalFees);
+    const collectionFeeValue = collectionService === 'yes' ? toNumber(collectionFee) : 0;
 
     const payload = {
       customer: {
@@ -2468,7 +2590,7 @@ export default function CustomersPage({
         contactInformation: {
           primaryPhone,
           secondaryPhone,
-          email: contactEmail
+          ...(contactEmail.trim() ? { email: contactEmail.trim() } : {})
         },
         addressInformation: {
           installation: formatAddress({
@@ -2529,7 +2651,9 @@ export default function CustomersPage({
           currency: 'MMK',
           monthlySubscriptionFee: toNumber(monthlyFee),
           installationFee: toNumber(installationFee),
-          additionalFees: toNumber(additionalFees),
+          additionalFees: baseAdditionalFees,
+          collectionService,
+          collectionFee: collectionFeeValue,
           discountApplied,
           discountAmount: discountApplied === 'yes' ? toNumber(discountAmount) : 0,
           discountPeriod: discountApplied === 'yes' ? discountPeriod : ''
@@ -2540,6 +2664,7 @@ export default function CustomersPage({
     console.log('Add customer payload:', JSON.stringify(payload, null, 2));
 
     let createdCustomerId: string | null = null;
+    let createdCustomerCode: string | null = null;
     try {
       const response = await fetch(`${API_BASE_URL}/auth/customers`, {
         method: 'POST',
@@ -2586,7 +2711,7 @@ export default function CustomersPage({
       };
 
       createdCustomerId = extractCustomerId(data);
-      const createdCustomerCode = extractCustomerCode(data);
+      createdCustomerCode = extractCustomerCode(data);
       upsertCustomerBillingFeeCache(
         {
           customerId: createdCustomerId,
@@ -2596,12 +2721,86 @@ export default function CustomersPage({
         {
         monthlySubscriptionFee: toNumber(monthlyFee),
         installationFee: toNumber(installationFee),
-        additionalFees: toNumber(additionalFees),
+        additionalFees: baseAdditionalFees,
+        collectionService,
+        collectionFee: collectionFeeValue,
         discountApplied,
         discountAmount: discountApplied === 'yes' ? toNumber(discountAmount) : 0,
         discountPeriod: discountApplied === 'yes' ? discountPeriod : ''
       }
       );
+
+      const selectedCollectorCode =
+        collectionService === 'yes' ? String(newCustomer.collectorId || '').trim() : '';
+      if (selectedCollectorCode) {
+        let assignmentTargetCustomerId = createdCustomerId;
+
+        if (!assignmentTargetCustomerId && createdCustomerCode) {
+          try {
+            const customersResponse = await fetch(`${API_BASE_URL}/customers`, {
+              method: 'GET',
+              headers: { 'Content-Type': 'application/json' }
+            });
+            const customersData = await customersResponse.json().catch(() => null);
+            if (customersResponse.ok) {
+              const customersList: Array<{ id?: string; customerCode?: string }> = Array.isArray(customersData)
+                ? customersData
+                : Array.isArray(customersData?.customers)
+                  ? customersData.customers
+                  : [];
+              const matched = customersList.find(
+                (item) => String(item?.customerCode ?? '').trim() === createdCustomerCode
+              );
+              if (matched?.id) {
+                assignmentTargetCustomerId = String(matched.id);
+              }
+            }
+          } catch {
+            // ignore fallback lookup errors and allow manual assignment from list
+          }
+        }
+
+        if (assignmentTargetCustomerId) {
+          const resolvedTargetId = assignmentTargetCustomerId;
+          const assignResponse = await fetch(
+            `${API_BASE_URL}/customers/${resolvedTargetId}`,
+            {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ collectorCode: selectedCollectorCode })
+            }
+          );
+          const assignData = await assignResponse.json().catch(() => null);
+          if (!assignResponse.ok) {
+            const message =
+              Array.isArray(assignData?.message)
+                ? assignData.message.join(', ')
+                : assignData?.message ?? assignData?.error ?? 'Failed to assign collector';
+            toast({
+              title: 'Customer created',
+              description: `Customer is created, but collector assignment failed: ${String(message)}`,
+              variant: 'destructive'
+            });
+          } else {
+            createdCustomerId = resolvedTargetId;
+            updateRemoteCustomerCollector(resolvedTargetId, selectedCollectorCode);
+            setCustomerSummaryById((prev) => ({
+              ...prev,
+              [resolvedTargetId]: {
+                ...(prev[resolvedTargetId] ?? {}),
+                collectorCode: selectedCollectorCode
+              }
+            }));
+          }
+        } else {
+          toast({
+            title: 'Customer created',
+            description: 'Customer is created, but auto collector assignment could not be resolved.',
+            variant: 'destructive'
+          });
+        }
+      }
+
       const customerName =
         payload.customer.customerType === 'business'
           ? payload.customer.businessInformation?.companyName
@@ -2689,6 +2888,8 @@ export default function CustomersPage({
     setCustomBillingMonths('');
     setInstallationFee('');
     setAdditionalFees('');
+    setCollectionService('yes');
+    setCollectionFee('');
     setDiscountApplied('no');
     setDiscountAmount('');
     setDiscountPeriod('');
@@ -3241,6 +3442,34 @@ export default function CustomersPage({
       merged?.contactEmail ??
       customerProfile?.user?.email ??
       '';
+    const customerCodeForCache = String(
+      (customer as Customer & { code?: string })?.code ??
+        customerSummary?.customerCode ??
+        merged?.customerCode ??
+        ''
+    ).trim();
+    const cachedBillingInfo = resolveCustomerBillingFeeCache({
+      customerId: customer.id,
+      customerCode: customerCodeForCache,
+      customerPhone: resolvedPrimaryPhone
+    });
+    const collectionServiceFromSummary = normalizeCollectionServiceValue(
+      merged?.collectionService ??
+        merged?.collectionServiceEnabled ??
+        profileBilling?.collectionService ??
+        customerSummary?.collectionService ??
+        customerSummary?.collectionServiceEnabled
+    );
+    const resolvedCollectionService = collectionServiceFromSummary ?? cachedBillingInfo?.collectionService ?? 'yes';
+    const collectionFeeFromSummary = toNumber(
+      merged?.collectionFee ??
+        profileBilling?.collectionFee ??
+        customerSummary?.collectionFee
+    );
+    const resolvedCollectionFee =
+      collectionFeeFromSummary > 0
+        ? collectionFeeFromSummary
+        : toNumber(cachedBillingInfo?.collectionFee);
 
     setEditingCustomer(customer);
     setErrors({});
@@ -3366,6 +3595,12 @@ export default function CustomersPage({
         ? String(profileBilling.additionalFees)
         : ''
     );
+    setCollectionService(resolvedCollectionService === 'no' ? 'no' : 'yes');
+    setCollectionFee(
+      resolvedCollectionService === 'yes' && resolvedCollectionFee > 0
+        ? String(resolvedCollectionFee)
+        : ''
+    );
     setDiscountApplied(profileBilling?.discountApplied === 'yes' ? 'yes' : 'no');
     setDiscountAmount(
       profileBilling?.discountAmount !== undefined && profileBilling?.discountAmount !== null
@@ -3403,6 +3638,16 @@ export default function CustomersPage({
     );
     const nextPlanCode = selectedPlanCode || serviceId || '';
     const planChanged = Boolean(nextPlanCode && nextPlanCode !== previousPlanCode);
+    const collectionFeeValue = collectionService === 'yes' ? toNumber(collectionFee) : 0;
+    const nextCollectorCode =
+      collectionService === 'yes' ? newCustomer.collectorId || null : null;
+    const linkedUserId = String(customerProfileById[editingCustomer.id]?.user?.id ?? '').trim();
+    const linkedAccountPayload: Record<string, string> = {
+      phone: primaryPhone.trim()
+    };
+    if (contactEmail.trim()) {
+      linkedAccountPayload.email = contactEmail.trim();
+    }
     const customerNameForLog =
       customerType === 'business'
         ? companyName.trim() || editingCustomer.name
@@ -3432,16 +3677,25 @@ export default function CustomersPage({
             region: billingRegion,
             postalCode: billingPostalCode
           });
+    const installationMapLinkValue = installationMapLink.trim();
+    const billingMapLinkValue =
+      billingSameAsInstallation === 'yes'
+        ? installationMapLinkValue
+        : billingMapLink.trim();
 
     const patchPayloadRaw: Record<string, unknown> = {
       customerType,
       status: userStatus,
-      collectorCode: newCustomer.collectorId || null,
+      collectorCode: nextCollectorCode,
+      collectionServiceEnabled: collectionService === 'yes',
+      collectionFee: collectionFeeValue,
       primaryPhone: primaryPhone.trim(),
       secondaryPhone: secondaryPhone.trim() || undefined,
       contactEmail: contactEmail.trim() || undefined,
       installationAddress: installationAddressValue || undefined,
       billingAddress: billingAddressValue || undefined,
+      installationMapLink: installationMapLinkValue || undefined,
+      billingMapLink: billingMapLinkValue || undefined,
       personalName: customerType === 'individual' ? newCustomer.name.trim() : undefined,
       personalNrc:
         customerType === 'individual'
@@ -3500,6 +3754,51 @@ export default function CustomersPage({
         throw new Error(String(message));
       }
 
+      let linkedAccountWarning = '';
+      if (linkedUserId && Object.keys(linkedAccountPayload).length > 0) {
+        try {
+          const userResponse = await fetch(`${API_BASE_URL}/users/${linkedUserId}`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              account: linkedAccountPayload
+            })
+          });
+          const userData = await userResponse.json().catch(() => null);
+
+          if (!userResponse.ok) {
+            const message = Array.isArray(userData?.message)
+              ? userData.message.join(', ')
+              : userData?.message ?? userData?.error ?? 'Failed to update linked login account';
+            linkedAccountWarning = String(message);
+          } else {
+            setCustomerProfileById((prev) => ({
+              ...prev,
+              [editingCustomer.id]: {
+                ...(prev[editingCustomer.id] ?? {}),
+                user: {
+                  ...(prev[editingCustomer.id]?.user ?? {}),
+                  id: linkedUserId,
+                  phone:
+                    String(userData?.phone ?? '').trim().length > 0
+                      ? String(userData.phone)
+                      : linkedAccountPayload.phone,
+                  email:
+                    String(userData?.email ?? '').trim().length > 0
+                      ? String(userData.email)
+                      : (linkedAccountPayload.email ?? prev[editingCustomer.id]?.user?.email ?? '')
+                }
+              }
+            }));
+          }
+        } catch (error) {
+          linkedAccountWarning =
+            error instanceof Error ? error.message : 'Failed to update linked login account';
+        }
+      }
+
       updateCustomer(editingCustomer.id, {
         ...newCustomer,
         status: normalizeStatus(userStatus)
@@ -3515,7 +3814,7 @@ export default function CustomersPage({
                 package: nextPlanCode || row.package,
                 monthlyFee: toNumber(monthlyFee),
                 status: normalizeStatus(userStatus),
-                collectorId: newCustomer.collectorId || ''
+                collectorId: nextCollectorCode || ''
               }
             : row
         )
@@ -3536,7 +3835,12 @@ export default function CustomersPage({
           primaryPhone: primaryPhone.trim(),
           contactEmail: contactEmail.trim() || null,
           installationAddress: installationAddressValue || null,
-          collectorCode: newCustomer.collectorId || null,
+          billingAddress: billingAddressValue || null,
+          installationMapLink: installationMapLinkValue || null,
+          billingMapLink: billingMapLinkValue || null,
+          collectorCode: nextCollectorCode,
+          collectionServiceEnabled: collectionService === 'yes',
+          collectionFee: collectionFeeValue,
           subscription: {
             ...(prev[editingCustomer.id]?.subscription ?? {}),
             plan: {
@@ -3545,6 +3849,21 @@ export default function CustomersPage({
               planName: packageName || prev[editingCustomer.id]?.subscription?.plan?.planName || null,
               monthlyFee: toNumber(monthlyFee)
             }
+          }
+        }
+      }));
+      setCustomerProfileById((prev) => ({
+        ...prev,
+        [editingCustomer.id]: {
+          ...(prev[editingCustomer.id] ?? {}),
+          installationMapLink: installationMapLinkValue || null,
+          billingMapLink: billingMapLinkValue || null,
+          addressInformation: {
+            ...(prev[editingCustomer.id]?.addressInformation ?? {}),
+            installationAddress: installationAddressValue || null,
+            billingAddress: billingAddressValue || null,
+            installationMapLink: installationMapLinkValue || null,
+            billingMapLink: billingMapLinkValue || null
           }
         }
       }));
@@ -3563,6 +3882,8 @@ export default function CustomersPage({
           monthlySubscriptionFee: toNumber(monthlyFee),
           installationFee: toNumber(installationFee),
           additionalFees: toNumber(additionalFees),
+          collectionService,
+          collectionFee: collectionFeeValue,
           discountApplied,
           discountAmount: discountApplied === 'yes' ? toNumber(discountAmount) : 0,
           discountPeriod: discountApplied === 'yes' ? discountPeriod : ''
@@ -3587,6 +3908,13 @@ export default function CustomersPage({
         toast({
           title: 'Customer updated',
           description: 'Customer details updated successfully.'
+        });
+      }
+      if (linkedAccountWarning) {
+        toast({
+          title: 'Login account update warning',
+          description: linkedAccountWarning,
+          variant: 'destructive'
         });
       }
 
@@ -3647,6 +3975,8 @@ export default function CustomersPage({
       setCustomBillingMonths('');
       setInstallationFee('');
       setAdditionalFees('');
+      setCollectionService('yes');
+      setCollectionFee('');
       setDiscountApplied('no');
       setDiscountAmount('');
       setDiscountPeriod('');
@@ -3971,7 +4301,7 @@ export default function CustomersPage({
           </div>
           <div className="space-y-2 md:col-span-2">
             <Label htmlFor="contactEmail" className="text-sm font-medium text-slate-700">
-              Email <span className="text-rose-600">*</span>
+              Email
             </Label>
             <Input
               id="contactEmail"
@@ -4020,7 +4350,10 @@ export default function CustomersPage({
               value={installationDistrict}
               onValueChange={(value) => {
                 setInstallationDistrict(value);
-                setInstallationTownship('');
+                const townshipsForDistrict = installationDistrictTownshipMap[value] ?? [];
+                setInstallationTownship((prev) =>
+                  townshipsForDistrict.includes(prev) ? prev : ''
+                );
               }}
               options={installationDistrictSelectOptions}
               placeholder="Select district"
@@ -4036,7 +4369,13 @@ export default function CustomersPage({
             <SearchableSelect
               id="installationTownship"
               value={installationTownship}
-              onValueChange={setInstallationTownship}
+              onValueChange={(value) => {
+                setInstallationTownship(value);
+                const inferredDistrict = installationTownshipToDistrictMap[value];
+                if (inferredDistrict && inferredDistrict !== installationDistrict) {
+                  setInstallationDistrict(inferredDistrict);
+                }
+              }}
               options={installationTownshipSelectOptions}
               placeholder="Select township"
             />
@@ -4182,7 +4521,10 @@ export default function CustomersPage({
                 value={billingDistrict}
                 onValueChange={(value) => {
                   setBillingDistrict(value);
-                  setBillingTownship('');
+                  const townshipsForDistrict = billingDistrictTownshipMap[value] ?? [];
+                  setBillingTownship((prev) =>
+                    townshipsForDistrict.includes(prev) ? prev : ''
+                  );
                 }}
                 options={billingDistrictSelectOptions}
                 placeholder="Select district"
@@ -4198,7 +4540,13 @@ export default function CustomersPage({
               <SearchableSelect
                 id="billingTownship"
                 value={billingTownship}
-                onValueChange={setBillingTownship}
+                onValueChange={(value) => {
+                  setBillingTownship(value);
+                  const inferredDistrict = billingTownshipToDistrictMap[value];
+                  if (inferredDistrict && inferredDistrict !== billingDistrict) {
+                    setBillingDistrict(inferredDistrict);
+                  }
+                }}
                 options={billingTownshipSelectOptions}
                 placeholder="Select township"
               />
@@ -4817,6 +5165,45 @@ export default function CustomersPage({
               inputMode="numeric"
             />
           </div>
+          <>
+            <div className="space-y-2">
+              <Label className="text-sm font-medium text-slate-700">
+                Collection Service <span className="text-rose-600">*</span>
+              </Label>
+              <Select
+                value={collectionService}
+                onValueChange={(value) => setCollectionService(value as 'yes' | 'no')}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select collection service" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="yes">Yes</SelectItem>
+                  <SelectItem value="no">No</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {collectionService === 'yes' && (
+              <div className="space-y-2">
+                <Label htmlFor="collectionFee" className="text-sm font-medium text-slate-700">
+                  Collection Fees (Monthly) <span className="text-rose-600">*</span>
+                </Label>
+                <Input
+                  id="collectionFee"
+                  value={collectionFee}
+                  onChange={(e) => {
+                    const digitsOnly = e.target.value.replace(/\D/g, '');
+                    setCollectionFee(digitsOnly);
+                  }}
+                  placeholder="0"
+                  inputMode="numeric"
+                />
+                {errors.collectionFee && (
+                  <p className="text-xs text-rose-600">{errors.collectionFee}</p>
+                )}
+              </div>
+            )}
+          </>
           <div className="space-y-2 md:col-span-2">
             <Label className="text-sm font-medium text-slate-700">
               Discount Promotion Applied?
@@ -4892,8 +5279,23 @@ export default function CustomersPage({
             value={newCustomer.collectorId}
             onValueChange={(value) => setNewCustomer({ ...newCustomer, collectorId: value })}
             options={collectorSelectOptions}
-            placeholder={collectorsLoading ? 'Loading collectors...' : 'Select collector'}
+            placeholder={
+              collectionService === 'no'
+                ? 'Collection service is disabled'
+                : collectorsLoading
+                ? 'Loading collectors...'
+                : 'Select collector'
+            }
+            disabled={
+              collectionService === 'no' ||
+              collectorsLoading
+            }
           />
+          {collectionService === 'no' && (
+            <p className="text-xs text-slate-500">
+              Collector assignment is disabled when collection service is set to No.
+            </p>
+          )}
           {collectorsError && (
             <p className="text-xs text-rose-600">{collectorsError}</p>
           )}
@@ -5196,12 +5598,15 @@ export default function CustomersPage({
                       {filteredLiveCustomers.map((customer) => {
                         const customerRow = customer as CustomerListRow;
                         const isDraftRow = Boolean(customerRow.isDraft);
+                        const collectionServiceEnabled = isCollectionServiceEnabledForCustomer(customerRow);
                         const collectorValue = customer.collectorId || 'unassigned';
                         const existingInvoice = isDraftRow ? null : latestInvoiceByCustomerId[customer.id];
                         const assignPlaceholder = isAssigningCollector[customer.id]
                           ? 'Assigning...'
                           : collectorsLoading
                           ? 'Loading collectors...'
+                          : !collectionServiceEnabled
+                          ? 'Collection service off'
                           : 'Assign collector';
                         return (
                           <TableRow key={customer.id}>
@@ -5282,7 +5687,11 @@ export default function CustomersPage({
                                     onValueChange={(value) => handleAssignCollector(customer.id, value)}
                                     options={collectorSelectOptionsWithUnassigned}
                                     placeholder={assignPlaceholder}
-                                    disabled={collectorsLoading || isAssigningCollector[customer.id]}
+                                    disabled={
+                                      collectorsLoading ||
+                                      isAssigningCollector[customer.id] ||
+                                      !collectionServiceEnabled
+                                    }
                                   />
                                 </div>
                               )}
@@ -5340,12 +5749,15 @@ export default function CustomersPage({
                 {filteredLiveCustomers.map((customer) => {
                   const customerRow = customer as CustomerListRow;
                   const isDraftRow = Boolean(customerRow.isDraft);
+                  const collectionServiceEnabled = isCollectionServiceEnabledForCustomer(customerRow);
                   const collectorValue = customer.collectorId || 'unassigned';
                   const existingInvoice = isDraftRow ? null : latestInvoiceByCustomerId[customer.id];
                   const assignPlaceholder = isAssigningCollector[customer.id]
                     ? 'Assigning...'
                     : collectorsLoading
                     ? 'Loading collectors...'
+                    : !collectionServiceEnabled
+                    ? 'Collection service off'
                     : 'Assign collector';
                   const statusValue = toSelectStatus(
                     customer.status as 'active' | 'inactive' | 'enable' | 'disable' | 'takeoff'
@@ -5472,7 +5884,11 @@ export default function CustomersPage({
                                 onValueChange={(value) => handleAssignCollector(customer.id, value)}
                                 options={collectorSelectOptionsWithUnassigned}
                                 placeholder={assignPlaceholder}
-                                disabled={collectorsLoading || isAssigningCollector[customer.id]}
+                                disabled={
+                                  collectorsLoading ||
+                                  isAssigningCollector[customer.id] ||
+                                  !collectionServiceEnabled
+                                }
                               />
                             )}
                           </div>
@@ -5722,7 +6138,7 @@ export default function CustomersPage({
                             <Input value={formatDisplayDate(new Date())} readOnly />
                           </div>
                           <div className="space-y-2 md:col-span-2">
-                            <Label className="text-sm font-medium text-slate-700">Billing Rule</Label>
+                            <Label className="text-sm font-medium text-slate-700">Billing Rule (Optional)</Label>
                             <Select
                               value={manualInvoiceSelectedRuleId}
                               onValueChange={setManualInvoiceSelectedRuleId}
@@ -5735,7 +6151,7 @@ export default function CustomersPage({
                                       ? 'Loading rules...'
                                       : activeBillingRules.length === 0
                                       ? 'No active rules'
-                                      : 'Select billing rule'
+                                      : 'Select billing rule (optional)'
                                   }
                                 />
                               </SelectTrigger>
@@ -6065,14 +6481,6 @@ export default function CustomersPage({
                           });
                           return;
                         }
-                        if (activeBillingRules.length > 0 && !manualInvoiceSelectedRuleId) {
-                          toast({
-                            title: 'Billing rule required',
-                            description: 'Please select one billing rule before creating invoice.',
-                            variant: 'destructive'
-                          });
-                          return;
-                        }
                         await handleGenerateInvoice(
                           manualInvoiceCustomerId,
                           manualInvoiceAdjustmentRows,
@@ -6147,6 +6555,7 @@ export default function CustomersPage({
                           <p className="font-semibold">Invoice Information</p>
                           <p>Invoice No: {invoice.invoiceNo || invoice.id}</p>
                           <p>Invoice Date: {formatDisplayDate(invoice.invoiceDate)}</p>
+                          <p>Invoice Type: {formatInvoiceTypeLabel(invoice.invoiceType)}</p>
                           <p>
                             Billing Period:{' '}
                             {formatDisplayDateRange(
@@ -6170,6 +6579,56 @@ export default function CustomersPage({
                       <div className="mt-8">
                         <p className="mb-2 text-sm font-semibold">Charges Details</p>
                         <div className="overflow-x-auto">
+                          {(() => {
+                            const monthlyFeeAmount = toNumber(invoice.monthlyFee);
+                            const installationFeeAmount = toNumber(invoice.installationFee);
+                            const additionalFeeAmount = toNumber(invoice.additionalFees);
+                            const allAdjustments = invoice.adjustments || [];
+                            const isSystemMonthlyOffset = (adjustment: (typeof allAdjustments)[number]) => {
+                              const description = String(adjustment.description || '').trim().toLowerCase();
+                              if (description !== 'manual monthly fee adjustment') return false;
+                              if ((adjustment.type || '').toLowerCase() !== 'minus') return false;
+                              return Math.abs(toNumber(adjustment.amount) - monthlyFeeAmount) < 0.01;
+                            };
+                            const visibleAdjustments = allAdjustments.filter(
+                              (adjustment) => !isSystemMonthlyOffset(adjustment)
+                            );
+                            const hasSystemMonthlyOffset = visibleAdjustments.length !== allAdjustments.length;
+                            const visibleChargeRows: Array<{ description: string; qty: number; unitPrice: number; amount: number }> = [];
+                            if (!hasSystemMonthlyOffset && monthlyFeeAmount > 0) {
+                              visibleChargeRows.push({
+                                description: 'Monthly Internet Fee',
+                                qty: 1,
+                                unitPrice: monthlyFeeAmount,
+                                amount: monthlyFeeAmount
+                              });
+                            }
+                            if (installationFeeAmount > 0) {
+                              visibleChargeRows.push({
+                                description: 'Installation Fee',
+                                qty: 1,
+                                unitPrice: installationFeeAmount,
+                                amount: installationFeeAmount
+                              });
+                            }
+                            if (additionalFeeAmount > 0) {
+                              visibleChargeRows.push({
+                                description: 'Additional Fee',
+                                qty: 1,
+                                unitPrice: additionalFeeAmount,
+                                amount: additionalFeeAmount
+                              });
+                            }
+                            const displaySubtotal = visibleChargeRows.reduce((sum, row) => sum + row.amount, 0);
+                            const displayPlus = visibleAdjustments
+                              .filter((adjustment) => adjustment.type !== 'minus')
+                              .reduce((sum, adjustment) => sum + Math.abs(toNumber(adjustment.amount)), 0);
+                            const displayMinus = visibleAdjustments
+                              .filter((adjustment) => adjustment.type === 'minus')
+                              .reduce((sum, adjustment) => sum + Math.abs(toNumber(adjustment.amount)), 0);
+                            const displayTotal = displaySubtotal + displayPlus - displayMinus;
+
+                            return (
                           <Table>
                             <TableHeader>
                               <TableRow>
@@ -6181,48 +6640,24 @@ export default function CustomersPage({
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              <TableRow>
-                                <TableCell>1</TableCell>
-                                <TableCell>Monthly Internet Fee</TableCell>
-                                <TableCell className="text-right">1</TableCell>
-                                <TableCell className="text-right">
-                                  {formatMoney(invoice.monthlyFee, currency)}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  {formatMoney(invoice.monthlyFee, currency)}
-                                </TableCell>
-                              </TableRow>
-                              {toNumber(invoice.installationFee) > 0 && (
-                                <TableRow>
-                                  <TableCell>2</TableCell>
-                                  <TableCell>Installation Fee</TableCell>
-                                  <TableCell className="text-right">1</TableCell>
+                              {visibleChargeRows.map((row, index) => (
+                                <TableRow key={`charge-${row.description}-${index}`}>
+                                  <TableCell>{index + 1}</TableCell>
+                                  <TableCell>{row.description}</TableCell>
+                                  <TableCell className="text-right">{row.qty}</TableCell>
                                   <TableCell className="text-right">
-                                    {formatMoney(invoice.installationFee, currency)}
+                                    {formatMoney(row.unitPrice, currency)}
                                   </TableCell>
                                   <TableCell className="text-right">
-                                    {formatMoney(invoice.installationFee, currency)}
+                                    {formatMoney(row.amount, currency)}
                                   </TableCell>
                                 </TableRow>
-                              )}
-                              {toNumber(invoice.additionalFees) > 0 && (
-                                <TableRow>
-                                  <TableCell>3</TableCell>
-                                  <TableCell>Additional Fee</TableCell>
-                                  <TableCell className="text-right">1</TableCell>
-                                  <TableCell className="text-right">
-                                    {formatMoney(invoice.additionalFees, currency)}
-                                  </TableCell>
-                                  <TableCell className="text-right">
-                                    {formatMoney(invoice.additionalFees, currency)}
-                                  </TableCell>
-                                </TableRow>
-                              )}
-                              {(invoice.adjustments || []).map((adjustment, index) => (
+                              ))}
+                              {visibleAdjustments.map((adjustment, index) => (
                                 <TableRow
                                   key={adjustment.id || `${adjustment.description || 'adjustment'}-${index}`}
                                 >
-                                  <TableCell>{index + 4}</TableCell>
+                                  <TableCell>{visibleChargeRows.length + index + 1}</TableCell>
                                   <TableCell>{adjustment.description || 'Adjustment'}</TableCell>
                                   <TableCell className="text-right">1</TableCell>
                                   <TableCell className="text-right">
@@ -6236,32 +6671,38 @@ export default function CustomersPage({
                                   </TableCell>
                                 </TableRow>
                               ))}
-                              {(invoice.status || 'unpaid') !== 'paid' && (
+                              {(invoice.status || 'unpaid') !== 'paid' && !hasSystemMonthlyOffset && (
                                 <>
-                                  <TableRow>
-                                    <TableCell colSpan={4} className="text-right font-semibold">
-                                      Subtotal
-                                    </TableCell>
-                                    <TableCell className="text-right font-semibold">
-                                      {formatMoney(invoice.subtotalAmount, currency)}
-                                    </TableCell>
-                                  </TableRow>
-                                  <TableRow>
-                                    <TableCell colSpan={4} className="text-right font-semibold">
-                                      Plus
-                                    </TableCell>
-                                    <TableCell className="text-right font-semibold">
-                                      {formatMoney(invoice.plusAmount, currency)}
-                                    </TableCell>
-                                  </TableRow>
-                                  <TableRow>
-                                    <TableCell colSpan={4} className="text-right font-semibold">
-                                      Minus
-                                    </TableCell>
-                                    <TableCell className="text-right font-semibold">
-                                      {formatMoney(invoice.minusAmount, currency)}
-                                    </TableCell>
-                                  </TableRow>
+                                  {displaySubtotal > 0 && (
+                                    <TableRow>
+                                      <TableCell colSpan={4} className="text-right font-semibold">
+                                        Subtotal
+                                      </TableCell>
+                                      <TableCell className="text-right font-semibold">
+                                        {formatMoney(displaySubtotal, currency)}
+                                      </TableCell>
+                                    </TableRow>
+                                  )}
+                                  {displayPlus > 0 && (
+                                    <TableRow>
+                                      <TableCell colSpan={4} className="text-right font-semibold">
+                                        Plus
+                                      </TableCell>
+                                      <TableCell className="text-right font-semibold">
+                                        {formatMoney(displayPlus, currency)}
+                                      </TableCell>
+                                    </TableRow>
+                                  )}
+                                  {displayMinus > 0 && (
+                                    <TableRow>
+                                      <TableCell colSpan={4} className="text-right font-semibold">
+                                        Minus
+                                      </TableCell>
+                                      <TableCell className="text-right font-semibold">
+                                        {formatMoney(displayMinus, currency)}
+                                      </TableCell>
+                                    </TableRow>
+                                  )}
                                 </>
                               )}
                               <TableRow>
@@ -6269,11 +6710,13 @@ export default function CustomersPage({
                                   Total Amount
                                 </TableCell>
                                 <TableCell className="text-right text-base font-bold">
-                                  {formatMoney(invoice.totalAmount, currency)}
+                                  {formatMoney(hasSystemMonthlyOffset ? displayTotal : invoice.totalAmount, currency)}
                                 </TableCell>
                               </TableRow>
                             </TableBody>
                           </Table>
+                            );
+                          })()}
                         </div>
                       </div>
 

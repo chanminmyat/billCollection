@@ -6,6 +6,7 @@ import { useRouter, usePathname } from 'next/navigation';
 interface CollectorProfile {
   id?: string;
   collectorCode?: string;
+  language?: string;
   address?: string;
   township?: string;
   region?: string;

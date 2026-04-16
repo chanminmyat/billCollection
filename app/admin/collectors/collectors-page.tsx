@@ -20,6 +20,66 @@ import { useToast } from '@/hooks/use-toast';
 import { appendActivityLog } from '@/lib/activity-log';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
+const CUSTOMER_BILLING_FEE_CACHE_STORAGE_KEY = 'billpro_customer_billing_fee_cache_v1';
+
+const normalizePhoneCacheKey = (value: string | null | undefined) =>
+  String(value || '')
+    .replace(/\D/g, '')
+    .trim();
+
+const normalizeCollectionServiceValue = (value: unknown): 'yes' | 'no' | null => {
+  if (typeof value === 'boolean') return value ? 'yes' : 'no';
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
+  if (['yes', 'true', '1', 'enable', 'enabled', 'active', 'on'].includes(normalized)) {
+    return 'yes';
+  }
+  if (['no', 'false', '0', 'disable', 'disabled', 'off'].includes(normalized)) {
+    return 'no';
+  }
+  return null;
+};
+
+const readCustomerBillingFeeCache = (): Record<
+  string,
+  { collectionService?: 'yes' | 'no' }
+> => {
+  if (typeof window === 'undefined') return {};
+  const raw = window.localStorage.getItem(CUSTOMER_BILLING_FEE_CACHE_STORAGE_KEY);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const resolveCollectionServiceFromCache = (
+  cache: Record<string, { collectionService?: 'yes' | 'no' }>,
+  identifiers: { id?: string | null; code?: string | null; phone?: string | null }
+) => {
+  const normalizedId = String(identifiers.id || '').trim();
+  const normalizedCode = String(identifiers.code || '').trim();
+  const normalizedPhone = normalizePhoneCacheKey(identifiers.phone);
+  const lookupKeys = [
+    normalizedId,
+    normalizedId ? `id:${normalizedId}` : '',
+    normalizedCode,
+    normalizedCode ? `code:${normalizedCode}` : '',
+    normalizedPhone,
+    normalizedPhone ? `phone:${normalizedPhone}` : ''
+  ].filter(Boolean);
+
+  for (const key of lookupKeys) {
+    const matched = cache[key];
+    if (matched?.collectionService) {
+      return matched.collectionService;
+    }
+  }
+  return null;
+};
 
 type SelectOption = { value: string; label: string };
 
@@ -107,6 +167,7 @@ export default function CollectorsPage({
   const [searchTerm, setSearchTerm] = useState('');
   const [editingCollector, setEditingCollector] = useState<Collector | null>(null);
   const [remoteCollectors, setRemoteCollectors] = useState<Collector[]>([]);
+  const [collectorUserIdByCollectorId, setCollectorUserIdByCollectorId] = useState<Record<string, string>>({});
   const [hasFetchedCollectors, setHasFetchedCollectors] = useState(false);
   const [collectorsLoading, setCollectorsLoading] = useState(false);
   const [collectorsError, setCollectorsError] = useState('');
@@ -400,26 +461,36 @@ export default function CollectorsPage({
           ? data.data
           : [];
 
-        const normalized = list.map((item: any, index: number) => ({
-          id: String(item?.id ?? item?.user?.id ?? index + 1),
-          collectorCode: item?.collectorCode ?? item?.user?.username ?? '',
-          name: item?.user?.name ?? 'Unknown',
-          phone: item?.user?.phone ?? '',
-          email: item?.user?.email ?? '',
-          area: item?.area ?? item?.township ?? '',
-          status: item?.status ?? item?.user?.status ?? 'enable',
-          nrc: item?.nrc ?? '',
-          address: item?.address ?? ''
-        })) as Collector[];
+        const userIdMap: Record<string, string> = {};
+        const normalized = list.map((item: any, index: number) => {
+          const collectorId = String(item?.id ?? item?.user?.id ?? index + 1);
+          const linkedUserId = String(item?.user?.id ?? '').trim();
+          if (collectorId && linkedUserId) {
+            userIdMap[collectorId] = linkedUserId;
+          }
+          return {
+            id: collectorId,
+            collectorCode: item?.collectorCode ?? item?.user?.username ?? '',
+            name: item?.user?.name ?? 'Unknown',
+            phone: item?.user?.phone ?? '',
+            email: item?.user?.email ?? '',
+            area: item?.area ?? item?.township ?? '',
+            status: item?.status ?? item?.user?.status ?? 'enable',
+            nrc: item?.nrc ?? '',
+            address: item?.address ?? ''
+          };
+        }) as Collector[];
 
         if (isMounted) {
           setRemoteCollectors(normalized);
+          setCollectorUserIdByCollectorId(userIdMap);
           setHasFetchedCollectors(true);
         }
       } catch (error) {
         if (isMounted) {
           setCollectorsError(error instanceof Error ? error.message : 'Failed to load collectors');
           setRemoteCollectors([]);
+          setCollectorUserIdByCollectorId({});
           setHasFetchedCollectors(true);
         }
       } finally {
@@ -459,20 +530,49 @@ export default function CollectorsPage({
 
         const data = await response.json().catch(() => ([]));
         const list = Array.isArray(data) ? data : Array.isArray(data?.customers) ? data.customers : [];
-        const normalized = list.map((item: any, index: number) => {
-          const collectorIdRaw =
-            item?.collectorCode ?? item?.collectorId ?? item?.collector?.id ?? '';
-          const collectorId = collectorIdRaw ? String(collectorIdRaw) : '';
-          return {
-            id: String(item?.id ?? index + 1),
-            name:
-              item?.personalName ||
-              item?.companyName ||
-              item?.name ||
-              'Unknown',
-            collectorId
-          };
-        });
+        const billingFeeCache = readCustomerBillingFeeCache();
+        const normalized = list
+          .map((item: any, index: number) => {
+            const id = String(item?.id ?? index + 1);
+            const collectorIdRaw =
+              item?.collectorCode ?? item?.collectorId ?? item?.collector?.id ?? '';
+            const collectorId = collectorIdRaw ? String(collectorIdRaw) : '';
+            const customerCode = String(item?.customerCode ?? '');
+            const primaryPhone =
+              item?.primaryPhone ??
+              item?.contactInformation?.primaryPhone ??
+              item?.phone ??
+              '';
+            const explicitCollectionService = normalizeCollectionServiceValue(
+              item?.collectionService ??
+                item?.collectionServiceEnabled ??
+                item?.billingInformation?.collectionService ??
+                item?.customer?.collectionService ??
+                item?.customer?.collectionServiceEnabled
+            );
+            const cachedCollectionService = resolveCollectionServiceFromCache(billingFeeCache, {
+              id,
+              code: customerCode,
+              phone: primaryPhone
+            });
+            const collectionService = explicitCollectionService ?? cachedCollectionService ?? 'yes';
+            return {
+              id,
+              name:
+                item?.personalName ||
+                item?.companyName ||
+                item?.name ||
+                'Unknown',
+              collectorId,
+              collectionService
+            };
+          })
+          .filter((item: { collectionService: 'yes' | 'no' }) => item.collectionService !== 'no')
+          .map((item: { id: string; name: string; collectorId?: string }) => ({
+            id: item.id,
+            name: item.name,
+            collectorId: item.collectorId
+          }));
 
         if (isMounted) {
           setAvailableCustomers(normalized);
@@ -520,11 +620,17 @@ export default function CollectorsPage({
       postalCode: collectorPostalCode
     });
 
+    const enteredEmail = newCollector.email.trim();
+    const fallbackGeneratedEmail = `collector-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}@billpro.local`;
+    const emailForCreate = enteredEmail || fallbackGeneratedEmail;
+
     const payload = {
       collector: {
         name: newCollector.name,
         phone: newCollector.phone,
-        email: newCollector.email,
+        email: emailForCreate,
         area: collectorTownship || collectorDistrict || newCollector.area,
         status: collectorStatus,
         nrc: nrcValue,
@@ -535,6 +641,7 @@ export default function CollectorsPage({
     console.log('Add collector payload:', JSON.stringify(payload, null, 2));
 
     let createdCollectorId: string | undefined;
+    let createdCollectorCode: string | undefined;
     try {
       const response = await fetch(`${API_BASE_URL}/auth/collectors`, {
         method: 'POST',
@@ -556,6 +663,31 @@ export default function CollectorsPage({
       createdCollectorId =
         (directId ? String(directId) : undefined) ||
         (data?.collector?.id ? String(data.collector.id) : undefined);
+      createdCollectorCode =
+        (data?.collectorProfile?.collectorCode
+          ? String(data.collectorProfile.collectorCode)
+          : undefined) ||
+        (data?.collector?.collectorCode ? String(data.collector.collectorCode) : undefined) ||
+        (data?.collectorCode ? String(data.collectorCode) : undefined) ||
+        (data?.username ? String(data.username) : undefined) ||
+        (data?.user?.username ? String(data.user.username) : undefined);
+
+      const assignmentValue = createdCollectorCode || createdCollectorId;
+      const selectedCustomerIds = Array.from(new Set(assignedCustomerIds.filter(Boolean)));
+      if (assignmentValue && selectedCustomerIds.length > 0) {
+        await Promise.all(
+          selectedCustomerIds.map((customerId) =>
+            updateCustomerCollector(customerId, assignmentValue)
+          )
+        );
+        setAvailableCustomers((prev) =>
+          prev.map((customer) =>
+            selectedCustomerIds.includes(customer.id)
+              ? { ...customer, collectorId: assignmentValue }
+              : customer
+          )
+        );
+      }
     } catch (error) {
       console.error('Failed to create collector', error);
       setIsAddingCollector(false);
@@ -660,12 +792,19 @@ export default function CollectorsPage({
       const payload = {
         name: newCollector.name,
         phone: newCollector.phone,
-        email: newCollector.email,
+        ...(newCollector.email.trim() ? { email: newCollector.email.trim() } : {}),
         area: collectorTownship || collectorDistrict || newCollector.area,
         status: collectorStatus,
         nrc: nrcValue,
         address: addressValue
       };
+      const linkedUserId = String(collectorUserIdByCollectorId[editingCollector.id] ?? '').trim();
+      const linkedAccountPayload: Record<string, string> = {
+        phone: newCollector.phone.trim()
+      };
+      if (newCollector.email.trim()) {
+        linkedAccountPayload.email = newCollector.email.trim();
+      }
 
       try {
         const response = await fetch(`${API_BASE_URL}/collectors/${editingCollector.id}`, {
@@ -682,6 +821,29 @@ export default function CollectorsPage({
           console.error(message, data);
           setIsUpdatingCollector(false);
           return;
+        }
+
+        if (linkedUserId && Object.keys(linkedAccountPayload).length > 0) {
+          const userResponse = await fetch(`${API_BASE_URL}/users/${linkedUserId}`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              account: linkedAccountPayload
+            })
+          });
+          if (!userResponse.ok) {
+            const userData = await userResponse.json().catch(() => null);
+            const message = Array.isArray(userData?.message)
+              ? userData.message.join(', ')
+              : userData?.message ?? userData?.error ?? 'Failed to update linked login account';
+            toast({
+              title: 'Login account update warning',
+              description: String(message),
+              variant: 'destructive'
+            });
+          }
         }
       } catch (error) {
         console.error('Failed to update collector', error);
@@ -900,7 +1062,7 @@ export default function CollectorsPage({
         </div>
         <div className="space-y-2">
           <Label htmlFor="collector-email" className="text-sm font-medium text-slate-700">
-            Email Address <span className="text-rose-600">*</span>
+            Email Address
           </Label>
           <Input
             id="collector-email"
