@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -187,6 +188,18 @@ type BillingRule = {
   version: number;
 };
 
+type PaymentAccountKind = 'wallet' | 'account';
+
+type PaymentAccount = {
+  id: string;
+  kind: PaymentAccountKind;
+  walletType?: string | null;
+  bankType?: string | null;
+  accountName: string;
+  accountNumber: string;
+  isActive?: boolean;
+};
+
 type EngineRowStatus =
   | 'no_invoice'
   | 'waiting_payment'
@@ -335,10 +348,19 @@ const normalizeInvoiceStatusLabel = (status: string | null | undefined) => {
   return normalized;
 };
 
+const getInvoiceDisplayStatusLabel = (invoice: Pick<InvoiceRecord, 'status' | 'receiptNo'>) => {
+  const normalized = normalizeInvoiceStatusLabel(invoice.status);
+  if (normalized === 'cancelled' && Boolean(invoice.receiptNo?.trim())) {
+    return 'cancelled receipt';
+  }
+  return normalized;
+};
+
 const statusBadgeVariant = (status: InvoiceStatus | string) => {
   const normalized = normalizeInvoiceStatusLabel(status);
   if (normalized === 'paid') return 'default';
   if (normalized === 'unpaid') return 'secondary';
+  if (normalized === 'cancelled receipt') return 'secondary';
   return 'destructive';
 };
 
@@ -363,12 +385,56 @@ const isCollectionActionRequired = (status: CollectionWorkflowStatus) =>
   status === 'collected_pending_admin' || status === 'office_transfer';
 
 const getAdminCollectionStatusLabel = (status: CollectionWorkflowStatus) =>
-  isCollectionActionRequired(status) ? 'Action Required' : getCollectionWorkflowStatusLabel(status);
+  status === 'collected_pending_admin'
+    ? 'Collected'
+    : status === 'office_transfer'
+      ? 'Office Transfer'
+      : getCollectionWorkflowStatusLabel(status);
 
 const getAdminCollectionStatusClassName = (status: CollectionWorkflowStatus) =>
   isCollectionActionRequired(status)
     ? 'bg-amber-100 text-amber-800'
     : getCollectionWorkflowStatusClassName(status);
+
+const getAdminCollectionStatusLabelForInvoice = (invoice: Pick<InvoiceRecord, 'status' | 'receiptNo'>, status: CollectionWorkflowStatus) => {
+  const invoiceStatus = normalizeInvoiceStatusLabel(invoice.status);
+  if (invoiceStatus === 'cancelled' && Boolean(invoice.receiptNo?.trim())) {
+    return 'Cancelled Invoice';
+  }
+  return getAdminCollectionStatusLabel(status);
+};
+
+const getAdminCollectionStatusClassNameForInvoice = (invoice: Pick<InvoiceRecord, 'status' | 'receiptNo'>, status: CollectionWorkflowStatus) => {
+  const invoiceStatus = normalizeInvoiceStatusLabel(invoice.status);
+  if (invoiceStatus === 'cancelled' && Boolean(invoice.receiptNo?.trim())) {
+    return 'bg-rose-100 text-rose-700';
+  }
+  return getAdminCollectionStatusClassName(status);
+};
+
+const parseCollectedPaymentSummary = (note?: string | null) => {
+  const raw = String(note ?? '').trim();
+  if (!raw) return null;
+
+  const parts = raw
+    .split('|')
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const paymentMethodPart = parts.find((part) => part.toLowerCase().startsWith('payment method:'));
+  const paymentAccountPart = parts.find((part) => part.toLowerCase().startsWith('payment account:'));
+  const freeFormNote = parts.filter(
+    (part) =>
+      !part.toLowerCase().startsWith('payment method:') &&
+      !part.toLowerCase().startsWith('payment account:'),
+  );
+
+  return {
+    paymentMethod: paymentMethodPart ? paymentMethodPart.replace(/^payment method:\s*/i, '').trim() : '',
+    paymentAccount: paymentAccountPart ? paymentAccountPart.replace(/^payment account:\s*/i, '').trim() : '',
+    note: freeFormNote.join(' | ').trim(),
+  };
+};
 
 const applyLocalCancelledStatuses = (
   list: InvoiceRecord[],
@@ -560,6 +626,18 @@ const inferBillingMode = (
   return 'fixed';
 };
 
+const formatPaymentMethodLabel = (account: PaymentAccount) => {
+  const provider =
+    account.kind === 'wallet'
+      ? account.walletType?.trim() || 'Wallet'
+      : account.bankType?.trim() || 'Bank';
+  const accountName = account.accountName.trim();
+  const accountNumber = account.accountNumber.trim();
+  return accountNumber
+    ? `${provider} - ${accountName} (${accountNumber})`
+    : `${provider} - ${accountName}`;
+};
+
 export default function BillingPage() {
   const { user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
@@ -615,10 +693,15 @@ export default function BillingPage() {
   const [invoiceDetailMode, setInvoiceDetailMode] = useState<'view' | 'edit'>('view');
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceRecord | null>(null);
   const [adjustmentRows, setAdjustmentRows] = useState<AdjustmentFormRow[]>([]);
-  const [paymentMethod, setPaymentMethod] = useState('KBZPay');
+  const [paymentMethod, setPaymentMethod] = useState('Cash');
+  const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([]);
+  const [paymentAccountsLoading, setPaymentAccountsLoading] = useState(false);
   const [receiptNo, setReceiptNo] = useState('');
   const [isSavingAdjustments, setIsSavingAdjustments] = useState(false);
   const [isMarkingPaid, setIsMarkingPaid] = useState(false);
+  const [isGeneratingReceiptByInvoice, setIsGeneratingReceiptByInvoice] = useState<
+    Record<string, boolean>
+  >({});
   const [globalAdjustments, setGlobalAdjustments] = useState<GlobalAdjustmentOption[]>([]);
   const [globalAdjustmentsLoading, setGlobalAdjustmentsLoading] = useState(false);
   const [globalAdjustmentsError, setGlobalAdjustmentsError] = useState('');
@@ -669,6 +752,27 @@ export default function BillingPage() {
       ),
     [customers],
   );
+  const paymentMethodOptions = useMemo(() => {
+    const options: Array<{ value: string; label: string }> = [{ value: 'Cash', label: 'Cash' }];
+    const seen = new Set<string>(['cash']);
+
+    paymentAccounts
+      .filter((account) => account.isActive !== false)
+      .forEach((account) => {
+        const label = formatPaymentMethodLabel(account);
+        const key = label.trim().toLowerCase();
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        options.push({ value: label, label });
+      });
+
+    const currentValue = paymentMethod.trim();
+    if (currentValue && !seen.has(currentValue.toLowerCase())) {
+      options.push({ value: currentValue, label: currentValue });
+    }
+
+    return options;
+  }, [paymentAccounts, paymentMethod]);
 
   const getInvoiceRuleDetails = useCallback(
     (invoice: InvoiceRecord) => {
@@ -768,6 +872,67 @@ export default function BillingPage() {
       targetName,
       metadata
     });
+  };
+
+  const cancelInvoiceInBackend = async (invoiceId: string) => {
+    const cancelCandidates: Array<{ method: 'PATCH' | 'POST'; path: string; body?: Record<string, unknown> }> = [
+      { method: 'POST', path: `${API_BASE_URL}/billing/invoices/${invoiceId}/cancel` },
+      { method: 'PATCH', path: `${API_BASE_URL}/billing/invoices/${invoiceId}/cancel` },
+      {
+        method: 'PATCH',
+        path: `${API_BASE_URL}/billing/invoices/${invoiceId}`,
+        body: { status: 'cancelled' },
+      },
+      {
+        method: 'PATCH',
+        path: `${API_BASE_URL}/billing/invoices/${invoiceId}`,
+        body: { status: 'canceled' },
+      },
+      {
+        method: 'PATCH',
+        path: `${API_BASE_URL}/billing/invoices/${invoiceId}`,
+        body: { invoiceStatus: 'cancelled' },
+      },
+      {
+        method: 'PATCH',
+        path: `${API_BASE_URL}/billing/invoices/${invoiceId}`,
+        body: { invoiceStatus: 'canceled' },
+      },
+      {
+        method: 'PATCH',
+        path: `${API_BASE_URL}/billing/invoices/${invoiceId}/status`,
+        body: { status: 'cancelled' },
+      },
+      {
+        method: 'PATCH',
+        path: `${API_BASE_URL}/billing/invoices/${invoiceId}/status`,
+        body: { status: 'canceled' },
+      },
+    ];
+
+    let cancelError = 'Failed to cancel invoice in backend.';
+    for (const candidate of cancelCandidates) {
+      try {
+        const cancelResponse = await fetch(candidate.path, {
+          method: candidate.method,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: candidate.body ? JSON.stringify(candidate.body) : undefined,
+        });
+        const cancelData = await cancelResponse.json().catch(() => null);
+        if (cancelResponse.ok) {
+          return true;
+        }
+        cancelError = Array.isArray(cancelData?.message)
+          ? cancelData.message.join(', ')
+          : cancelData?.message ?? cancelError;
+      } catch {
+        // try next endpoint variant
+      }
+    }
+
+    throw new Error(cancelError);
   };
 
   const fetchInvoices = async (cancelledOverrides?: Record<string, boolean>) => {
@@ -974,6 +1139,51 @@ export default function BillingPage() {
     }
   };
 
+  const fetchPaymentAccounts = async () => {
+    setPaymentAccountsLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/billing/payment-accounts`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(
+          Array.isArray(payload?.message)
+            ? payload.message.join(', ')
+            : payload?.message ?? 'Failed to load payment methods',
+        );
+      }
+
+      const list = Array.isArray(payload) ? payload : [];
+      const normalized = list
+        .map((item) => {
+          const kindValue: PaymentAccountKind =
+            String(item?.kind ?? '').toLowerCase() === 'account' ? 'account' : 'wallet';
+          return {
+            id: String(item?.id ?? ''),
+            kind: kindValue,
+            walletType: item?.walletType ?? null,
+            bankType: item?.bankType ?? null,
+            accountName: String(item?.accountName ?? ''),
+            accountNumber: String(item?.accountNumber ?? ''),
+            isActive: Boolean(item?.isActive ?? true),
+          } as PaymentAccount;
+        })
+        .filter((item) => item.id && item.accountName);
+
+      setPaymentAccounts(normalized);
+    } catch {
+      setPaymentAccounts([]);
+    } finally {
+      setPaymentAccountsLoading(false);
+    }
+  };
+
   const fetchBillingRules = async () => {
     setBillingRulesLoading(true);
     setBillingRulesError('');
@@ -1096,6 +1306,7 @@ export default function BillingPage() {
       fetchCustomers();
       fetchGlobalAdjustments();
       fetchBillingRules();
+      fetchPaymentAccounts();
       refreshCollectionMap();
       refreshCollectorActivityLogs();
       refreshInvoiceEditActivityLogs();
@@ -1269,12 +1480,25 @@ export default function BillingPage() {
     return collectionMap[selectedInvoice.id]?.events ?? [];
   }, [collectionMap, selectedInvoice]);
 
+  const selectedCollectedPaymentSummary = useMemo(() => {
+    const latestCollectorEvent = selectedCollectionTimeline
+      .slice()
+      .reverse()
+      .find((event) => event.type === 'collector_collected' || event.type === 'admin_confirmed');
+    return parseCollectedPaymentSummary(latestCollectorEvent?.note ?? null);
+  }, [selectedCollectionTimeline]);
+
   const selectedInvoiceStatus = useMemo<InvoiceStatus | null>(() => {
     if (!selectedInvoice) return null;
     return normalizeInvoiceStatusLabel(selectedInvoice.status) as InvoiceStatus;
   }, [selectedInvoice]);
 
   const canEditSelectedInvoiceInDialog = useMemo(() => {
+    if (!selectedInvoiceStatus) return false;
+    return invoiceDetailMode === 'edit' && selectedInvoiceStatus !== 'paid';
+  }, [invoiceDetailMode, selectedInvoiceStatus]);
+
+  const canMarkPaidSelectedInvoiceInDialog = useMemo(() => {
     if (!selectedInvoiceStatus) return false;
     return invoiceDetailMode === 'edit' && selectedInvoiceStatus !== 'paid' && selectedInvoiceStatus !== 'cancelled';
   }, [invoiceDetailMode, selectedInvoiceStatus]);
@@ -2247,7 +2471,7 @@ export default function BillingPage() {
         sortOrder: adjustment.sortOrder ?? index,
       })) ?? [];
     setAdjustmentRows(rows);
-    setPaymentMethod(invoice.paymentMethod || 'KBZPay');
+    setPaymentMethod(invoice.paymentMethod || 'Cash');
     setReceiptNo(invoice.receiptNo || '');
     setEditedInvoiceRuleId(invoiceRuleDetails.id || INVOICE_RULE_NONE_VALUE);
     setDetailOpen(true);
@@ -2385,10 +2609,10 @@ export default function BillingPage() {
   const saveAdjustments = async () => {
     if (!selectedInvoice) return;
     const invoiceStatus = normalizeInvoiceStatusLabel(selectedInvoice.status);
-    if (invoiceStatus === 'paid' || invoiceStatus === 'cancelled') {
+    if (invoiceStatus === 'paid') {
       toast({
         title: 'Invoice is locked',
-        description: 'Paid or cancelled invoices cannot be changed.',
+        description: 'Paid invoices cannot be changed.',
         variant: 'destructive',
       });
       return;
@@ -2444,67 +2668,10 @@ export default function BillingPage() {
         null;
       const effectiveRuleId = selectedRuleIdFromEditor ?? selectedRule?.id ?? localRuleId ?? null;
 
-      const cancelCandidates: Array<{ method: 'PATCH' | 'POST'; path: string; body?: Record<string, unknown> }> = [
-        { method: 'POST', path: `${API_BASE_URL}/billing/invoices/${selectedInvoice.id}/cancel` },
-        { method: 'PATCH', path: `${API_BASE_URL}/billing/invoices/${selectedInvoice.id}/cancel` },
-        {
-          method: 'PATCH',
-          path: `${API_BASE_URL}/billing/invoices/${selectedInvoice.id}`,
-          body: { status: 'cancelled' },
-        },
-        {
-          method: 'PATCH',
-          path: `${API_BASE_URL}/billing/invoices/${selectedInvoice.id}`,
-          body: { status: 'canceled' },
-        },
-        {
-          method: 'PATCH',
-          path: `${API_BASE_URL}/billing/invoices/${selectedInvoice.id}`,
-          body: { invoiceStatus: 'cancelled' },
-        },
-        {
-          method: 'PATCH',
-          path: `${API_BASE_URL}/billing/invoices/${selectedInvoice.id}`,
-          body: { invoiceStatus: 'canceled' },
-        },
-        {
-          method: 'PATCH',
-          path: `${API_BASE_URL}/billing/invoices/${selectedInvoice.id}/status`,
-          body: { status: 'cancelled' },
-        },
-        {
-          method: 'PATCH',
-          path: `${API_BASE_URL}/billing/invoices/${selectedInvoice.id}/status`,
-          body: { status: 'canceled' },
-        },
-      ];
-
-      let cancelledInBackend = false;
-      let cancelError = 'Failed to cancel current invoice in backend.';
-      for (const candidate of cancelCandidates) {
-        try {
-          const cancelResponse = await fetch(candidate.path, {
-            method: candidate.method,
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: candidate.body ? JSON.stringify(candidate.body) : undefined,
-          });
-          const cancelData = await cancelResponse.json().catch(() => null);
-          if (cancelResponse.ok) {
-            cancelledInBackend = true;
-            break;
-          }
-          cancelError = Array.isArray(cancelData?.message)
-            ? cancelData.message.join(', ')
-            : cancelData?.message ?? cancelError;
-        } catch {
-          // try next endpoint variant
-        }
-      }
-
+      let cancelledInBackend = invoiceStatus === 'cancelled';
       if (!cancelledInBackend) {
-        throw new Error(cancelError);
+        await cancelInvoiceInBackend(selectedInvoice.id);
+        cancelledInBackend = true;
       }
 
       if (localCancelledInvoiceIds[selectedInvoice.id]) {
@@ -2872,20 +3039,25 @@ export default function BillingPage() {
 
     setIsMarkingPaid(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/billing/invoices/${selectedInvoice.id}/pay`, {
+      const shouldUseManualPaymentFields = selectedCollectionStatus === 'office_transfer';
+      const response = await fetch(`${API_BASE_URL}/billing/invoices/${selectedInvoice.id}/receipt`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          paymentMethod: paymentMethod.trim() || undefined,
-          receiptNo: receiptNo.trim() || undefined,
-        }),
+        body: JSON.stringify(
+          shouldUseManualPaymentFields
+            ? {
+                paymentMethod: paymentMethod.trim() || undefined,
+                receiptNo: receiptNo.trim() || undefined,
+              }
+            : {},
+        ),
       });
 
       if (!response.ok) {
         const data = await response.json().catch(() => null);
-        throw new Error(data?.message ?? 'Failed to mark invoice as paid');
+        throw new Error(data?.message ?? 'Failed to confirm payment');
       }
 
       const updatedRaw = (await response.json().catch(() => null)) as Partial<InvoiceRecord> | null;
@@ -2910,28 +3082,119 @@ export default function BillingPage() {
 
       logAdminActivity(
         'invoice_paid',
-        'Invoice marked as paid.',
+        'Invoice confirmed, receipt generated, and marked as paid.',
         'invoice',
         updated.id,
         updated.invoiceNo || updated.id,
         {
-          paymentMethod: paymentMethod.trim() || null,
-          receiptNo: receiptNo.trim() || null
+          paymentMethod: shouldUseManualPaymentFields ? paymentMethod.trim() || null : null,
+          receiptNo: shouldUseManualPaymentFields ? receiptNo.trim() || null : null
         }
       );
 
       toast({
-        title: 'Payment updated',
-        description: 'Invoice marked as paid. Next invoice is now scheduled in billing engine.',
+        title: 'Payment confirmed',
+        description: 'Receipt generated and invoice marked as paid. Next invoice is now scheduled in billing engine.',
       });
     } catch (error) {
       toast({
-        title: 'Payment failed',
-        description: error instanceof Error ? error.message : 'Failed to mark paid',
+        title: 'Confirmation failed',
+        description: error instanceof Error ? error.message : 'Failed to confirm payment',
         variant: 'destructive',
       });
     } finally {
       setIsMarkingPaid(false);
+    }
+  };
+
+  const generateReceiptForInvoice = async (invoice: InvoiceRecord) => {
+    const invoiceStatus = normalizeInvoiceStatusLabel(invoice.status);
+    if (invoiceStatus !== 'paid') {
+      toast({
+        title: 'Receipt unavailable',
+        description: 'Only paid invoices can generate receipts.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (isGeneratingReceiptByInvoice[invoice.id]) return;
+
+    setIsGeneratingReceiptByInvoice((prev) => ({ ...prev, [invoice.id]: true }));
+    try {
+      const response = await fetch(`${API_BASE_URL}/billing/invoices/${invoice.id}/receipt`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = Array.isArray(data?.message)
+          ? data.message.join(', ')
+          : data?.message ?? 'Failed to generate receipt';
+        throw new Error(message);
+      }
+
+      const nextStatus = normalizeInvoiceStatusLabel(data?.status ?? invoice.status);
+      const nextReceiptNo = data?.receiptNo ?? invoice.receiptNo ?? null;
+      const nextPaymentMethod = data?.paymentMethod ?? invoice.paymentMethod ?? null;
+
+      setInvoices((prev) =>
+        prev.map((item) =>
+          item.id === invoice.id
+            ? {
+                ...item,
+                ...(data ?? {}),
+                status: nextStatus as InvoiceStatus,
+                receiptNo: nextReceiptNo,
+                paymentMethod: nextPaymentMethod,
+              }
+            : item,
+        ),
+      );
+
+      if (selectedInvoice?.id === invoice.id) {
+        setSelectedInvoice((prev) =>
+          prev
+            ? {
+                ...prev,
+                ...(data ?? {}),
+                status: nextStatus as InvoiceStatus,
+                receiptNo: nextReceiptNo,
+                paymentMethod: nextPaymentMethod,
+              }
+            : prev,
+        );
+        if (nextReceiptNo) {
+          setReceiptNo(nextReceiptNo);
+        }
+      }
+
+      logAdminActivity(
+        'receipt_generated',
+        'Receipt generated from invoice list.',
+        'invoice',
+        invoice.id,
+        invoice.invoiceNo || invoice.id,
+        {
+          receiptNo: nextReceiptNo,
+          paymentMethod: nextPaymentMethod,
+        },
+      );
+
+      toast({
+        title: 'Receipt generated',
+        description: nextReceiptNo ? `Receipt: ${nextReceiptNo}` : 'Receipt generated successfully.',
+      });
+    } catch (error) {
+      toast({
+        title: 'Generate receipt failed',
+        description: error instanceof Error ? error.message : 'Failed to generate receipt.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsGeneratingReceiptByInvoice((prev) => ({ ...prev, [invoice.id]: false }));
     }
   };
 
@@ -3628,6 +3891,7 @@ export default function BillingPage() {
     fetchCustomers();
     fetchGlobalAdjustments();
     fetchBillingRules();
+    fetchPaymentAccounts();
   };
 
   const engineStatusLabel = (status: EngineRowStatus) => {
@@ -3821,6 +4085,7 @@ export default function BillingPage() {
                       <SelectItem value="paid">Paid</SelectItem>
                       <SelectItem value="unpaid">Unpaid</SelectItem>
                       <SelectItem value="overdue">Overdue</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -3861,7 +4126,12 @@ export default function BillingPage() {
                           'Unknown Customer';
                         const ruleDetails = getInvoiceRuleDetails(invoice);
                         const invoiceStatus = normalizeInvoiceStatusLabel(invoice.status);
-                        const canEditInvoice = invoiceStatus !== 'paid' && invoiceStatus !== 'cancelled';
+                        const displayInvoiceStatus = getInvoiceDisplayStatusLabel(invoice);
+                        const canEditInvoice = invoiceStatus !== 'paid';
+                        const collectionStatus = getCollectionStatusForInvoice(invoice);
+                        const canConfirmCollectedInvoice = collectionStatus === 'collected_pending_admin';
+                        const hasReceipt = Boolean((invoice.receiptNo ?? '').trim());
+                        const isCancelledReceipt = displayInvoiceStatus === 'cancelled receipt';
                         return (
                           <TableRow key={invoice.id}>
                             <TableCell>
@@ -3884,16 +4154,20 @@ export default function BillingPage() {
                             </TableCell>
                             <TableCell>{formatMoney(invoice.totalAmount, invoice.currency)}</TableCell>
                             <TableCell>
-                              <Badge variant={statusBadgeVariant(invoiceStatus)}>{invoiceStatus}</Badge>
+                              <Badge variant={statusBadgeVariant(displayInvoiceStatus)}>{displayInvoiceStatus}</Badge>
                             </TableCell>
                             <TableCell>
                               <Badge
                                 variant="secondary"
-                                className={getAdminCollectionStatusClassName(
+                                className={getAdminCollectionStatusClassNameForInvoice(
+                                  invoice,
                                   getCollectionStatusForInvoice(invoice),
                                 )}
                               >
-                                {getAdminCollectionStatusLabel(getCollectionStatusForInvoice(invoice))}
+                                {getAdminCollectionStatusLabelForInvoice(
+                                  invoice,
+                                  getCollectionStatusForInvoice(invoice),
+                                )}
                               </Badge>
                             </TableCell>
                             <TableCell>
@@ -3914,6 +4188,36 @@ export default function BillingPage() {
                                   <Edit className="mr-2 h-4 w-4" />
                                   Edit
                                 </Button>
+                                {canConfirmCollectedInvoice ? (
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => openInvoiceDetail(invoice, 'edit')}
+                                  >
+                                    <CheckCircle2 className="mr-2 h-4 w-4" />
+                                    Confirm
+                                  </Button>
+                                ) : hasReceipt && !isCancelledReceipt ? (
+                                  <Button variant="outline" size="sm" asChild>
+                                    <Link
+                                      href={`/admin/billing/receipt/list?q=${encodeURIComponent(
+                                        invoice.receiptNo ?? formatInvoiceNo(invoice.invoiceNo, invoice.id),
+                                      )}`}
+                                    >
+                                      <FileText className="mr-2 h-4 w-4" />
+                                      Receipt
+                                    </Link>
+                                  </Button>
+                                ) : (
+                                  <Button variant="outline" size="sm" asChild>
+                                    <Link
+                                      href={`/admin/billing/receipt/create?invoiceId=${encodeURIComponent(invoice.id)}`}
+                                    >
+                                      <FileText className="mr-2 h-4 w-4" />
+                                      Create Receipt
+                                    </Link>
+                                  </Button>
+                                )}
                               </div>
                             </TableCell>
                           </TableRow>
@@ -3929,7 +4233,12 @@ export default function BillingPage() {
                       invoice.customer?.personalName || invoice.customer?.companyName || 'Unknown Customer';
                     const ruleDetails = getInvoiceRuleDetails(invoice);
                     const invoiceStatus = normalizeInvoiceStatusLabel(invoice.status);
-                    const canEditInvoice = invoiceStatus !== 'paid' && invoiceStatus !== 'cancelled';
+                    const displayInvoiceStatus = getInvoiceDisplayStatusLabel(invoice);
+                    const canEditInvoice = invoiceStatus !== 'paid';
+                    const collectionStatus = getCollectionStatusForInvoice(invoice);
+                    const canConfirmCollectedInvoice = collectionStatus === 'collected_pending_admin';
+                    const hasReceipt = Boolean((invoice.receiptNo ?? '').trim());
+                    const isCancelledReceipt = displayInvoiceStatus === 'cancelled receipt';
                     return (
                       <Card key={invoice.id}>
                         <CardContent className="space-y-3 pt-4">
@@ -3938,7 +4247,7 @@ export default function BillingPage() {
                               <p className="text-sm text-slate-500">{formatInvoiceNo(invoice.invoiceNo, invoice.id)}</p>
                               <p className="text-base font-semibold text-slate-900">{customerName}</p>
                             </div>
-                            <Badge variant={statusBadgeVariant(invoiceStatus)}>{invoiceStatus}</Badge>
+                            <Badge variant={statusBadgeVariant(displayInvoiceStatus)}>{displayInvoiceStatus}</Badge>
                           </div>
 
                           <div className="space-y-1 text-sm text-slate-700">
@@ -3946,15 +4255,18 @@ export default function BillingPage() {
                             <p>Due Date: {formatDisplayDate(invoice.dueDate)}</p>
                             <p>Rule: {ruleDetails.name}</p>
                             <p>Total: {formatMoney(invoice.totalAmount, invoice.currency)}</p>
-                            <p>
+                              <p>
                               Collection:{' '}
                               <span className="font-medium">
-                                {getAdminCollectionStatusLabel(getCollectionStatusForInvoice(invoice))}
+                                {getAdminCollectionStatusLabelForInvoice(
+                                  invoice,
+                                  getCollectionStatusForInvoice(invoice),
+                                )}
                               </span>
                             </p>
                           </div>
 
-                          <div className="grid grid-cols-2 gap-2">
+                          <div className="grid gap-2 grid-cols-1 sm:grid-cols-4">
                             <Button
                               className="w-full"
                               variant="outline"
@@ -3971,6 +4283,36 @@ export default function BillingPage() {
                               <Edit className="mr-2 h-4 w-4" />
                               Edit
                             </Button>
+                            {canConfirmCollectedInvoice ? (
+                              <Button
+                                className="w-full"
+                                variant="secondary"
+                                onClick={() => openInvoiceDetail(invoice, 'edit')}
+                              >
+                                <CheckCircle2 className="mr-2 h-4 w-4" />
+                                Confirm
+                              </Button>
+                            ) : hasReceipt && !isCancelledReceipt ? (
+                              <Button className="w-full" variant="outline" asChild>
+                                <Link
+                                  href={`/admin/billing/receipt/list?q=${encodeURIComponent(
+                                    invoice.receiptNo ?? formatInvoiceNo(invoice.invoiceNo, invoice.id),
+                                  )}`}
+                                >
+                                  <FileText className="mr-2 h-4 w-4" />
+                                  Receipt
+                                </Link>
+                              </Button>
+                            ) : (
+                              <Button className="w-full" variant="outline" asChild>
+                                <Link
+                                  href={`/admin/billing/receipt/create?invoiceId=${encodeURIComponent(invoice.id)}`}
+                                >
+                                  <FileText className="mr-2 h-4 w-4" />
+                                  Create Receipt
+                                </Link>
+                              </Button>
+                            )}
                           </div>
                         </CardContent>
                       </Card>
@@ -4546,12 +4888,14 @@ export default function BillingPage() {
                               </TableCell>
                               <TableCell className="font-medium">{formatInvoiceNo(invoice.invoiceNo, invoice.id)}</TableCell>
                               <TableCell>
-                                <div className="font-medium text-slate-900">{customerName}</div>
+                              <div className="font-medium text-slate-900">{customerName}</div>
                                 <div className="text-xs text-slate-500">{customerCode}</div>
                               </TableCell>
                               <TableCell>{formatDisplayDate(invoice.invoiceDate)}</TableCell>
                               <TableCell>
-                                <Badge variant={statusBadgeVariant(invoice.status)}>{invoice.status}</Badge>
+                                <Badge variant={statusBadgeVariant(getInvoiceDisplayStatusLabel(invoice))}>
+                                  {getInvoiceDisplayStatusLabel(invoice)}
+                                </Badge>
                               </TableCell>
                               <TableCell>{formatMoney(invoice.totalAmount, invoice.currency || 'MMK')}</TableCell>
                             </TableRow>
@@ -4757,7 +5101,7 @@ export default function BillingPage() {
               setSelectedInvoice(null);
               setAdjustmentRows([]);
               setReceiptNo('');
-              setPaymentMethod('KBZPay');
+              setPaymentMethod('Cash');
               setSelectedGlobalAdjustmentIds([]);
               setEditedInvoiceRuleId(INVOICE_RULE_NONE_VALUE);
             }
@@ -4974,184 +5318,186 @@ export default function BillingPage() {
                         </div>
                       </div>
 
-                      <div className="mt-8 space-y-3 rounded-md border border-slate-200 bg-slate-50 p-4">
-                        <p className="text-sm font-semibold text-slate-900">
-                          Additional Fees / Discounts Setup
-                        </p>
-                        <div className="grid gap-2 md:grid-cols-[1fr_auto]">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                className="w-full justify-between font-normal"
-                                disabled={globalAdjustmentsLoading || activeGlobalAdjustments.length === 0}
-                              >
-                                {globalAdjustmentsLoading
-                                  ? 'Loading global adjustments...'
-                                  : activeGlobalAdjustments.length === 0
-                                    ? 'No active global adjustments'
-                                    : selectedGlobalAdjustmentIds.length > 0
-                                      ? `${selectedGlobalAdjustmentIds.length} adjustment${
-                                          selectedGlobalAdjustmentIds.length > 1 ? 's' : ''
-                                        } selected`
-                                      : 'Select global adjustments'}
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent className="max-h-72 w-[420px] overflow-y-auto">
-                              {activeGlobalAdjustments.map((item, index) => {
-                                const key = getGlobalAdjustmentKey(item, index);
-                                const checked = selectedGlobalAdjustmentIds.includes(key);
-                                return (
-                                  <DropdownMenuCheckboxItem
-                                    key={key}
-                                    checked={checked}
-                                    onCheckedChange={(nextChecked) => {
-                                      setSelectedGlobalAdjustmentIds((prev) => {
-                                        if (nextChecked === true) {
-                                          return Array.from(new Set([...prev, key]));
-                                        }
-                                        return prev.filter((id) => id !== key);
-                                      });
-                                    }}
-                                  >
-                                    {item.description} ({item.type === 'plus' ? '+' : '-'}{' '}
-                                    {item.valueType === 'percent'
-                                      ? `${toNumber(item.value)}%`
-                                      : formatMoney(item.value)})
-                                  </DropdownMenuCheckboxItem>
-                                );
-                              })}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            onClick={addSelectedGlobalAdjustment}
-                            disabled={
-                              globalAdjustmentsLoading ||
-                              activeGlobalAdjustments.length === 0 ||
-                              selectedGlobalAdjustmentIds.length === 0
-                            }
-                          >
-                            Add Selected
-                          </Button>
-                        </div>
-
-                        {globalAdjustmentsError && (
-                          <p className="text-sm text-rose-600">{globalAdjustmentsError}</p>
-                        )}
-
-                        <div className="flex flex-wrap gap-2">
-                          <Button type="button" size="sm" variant="outline" onClick={() => addAdjustmentRow('plus')}>
-                            <Plus className="mr-2 h-4 w-4" />
-                            Add Plus Fee
-                          </Button>
-                          <Button type="button" size="sm" variant="outline" onClick={() => addAdjustmentRow('minus')}>
-                            <Minus className="mr-2 h-4 w-4" />
-                            Add Minus Fee
-                          </Button>
-                        </div>
-
-                        {adjustmentRows.length === 0 && (
-                          <p className="text-sm text-slate-500">
-                            No adjustment rows. Add from global dropdown or use plus/minus buttons.
+                      {!canMarkPaidSelectedInvoiceInDialog && (
+                        <div className="mt-8 space-y-3 rounded-md border border-slate-200 bg-slate-50 p-4">
+                          <p className="text-sm font-semibold text-slate-900">
+                            Additional Fees / Discounts Setup
                           </p>
-                        )}
+                          <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="w-full justify-between font-normal"
+                                  disabled={globalAdjustmentsLoading || activeGlobalAdjustments.length === 0}
+                                >
+                                  {globalAdjustmentsLoading
+                                    ? 'Loading global adjustments...'
+                                    : activeGlobalAdjustments.length === 0
+                                      ? 'No active global adjustments'
+                                      : selectedGlobalAdjustmentIds.length > 0
+                                        ? `${selectedGlobalAdjustmentIds.length} adjustment${
+                                            selectedGlobalAdjustmentIds.length > 1 ? 's' : ''
+                                          } selected`
+                                        : 'Select global adjustments'}
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent className="max-h-72 w-[420px] overflow-y-auto">
+                                {activeGlobalAdjustments.map((item, index) => {
+                                  const key = getGlobalAdjustmentKey(item, index);
+                                  const checked = selectedGlobalAdjustmentIds.includes(key);
+                                  return (
+                                    <DropdownMenuCheckboxItem
+                                      key={key}
+                                      checked={checked}
+                                      onCheckedChange={(nextChecked) => {
+                                        setSelectedGlobalAdjustmentIds((prev) => {
+                                          if (nextChecked === true) {
+                                            return Array.from(new Set([...prev, key]));
+                                          }
+                                          return prev.filter((id) => id !== key);
+                                        });
+                                      }}
+                                    >
+                                      {item.description} ({item.type === 'plus' ? '+' : '-'}{' '}
+                                      {item.valueType === 'percent'
+                                        ? `${toNumber(item.value)}%`
+                                        : formatMoney(item.value)})
+                                    </DropdownMenuCheckboxItem>
+                                  );
+                                })}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              onClick={addSelectedGlobalAdjustment}
+                              disabled={
+                                globalAdjustmentsLoading ||
+                                activeGlobalAdjustments.length === 0 ||
+                                selectedGlobalAdjustmentIds.length === 0
+                              }
+                            >
+                              Add Selected
+                            </Button>
+                          </div>
 
-                        <div className="space-y-3">
-                          {adjustmentRows.map((row, index) => (
-                            <div key={index} className="rounded-md border bg-white p-3">
-                              <div className="grid gap-3 md:grid-cols-6">
-                                <div className="md:col-span-2">
-                                  <Label>Description</Label>
-                                  <Input
-                                    value={row.description}
-                                    onChange={(event) =>
-                                      updateAdjustmentRow(index, 'description', event.target.value)
-                                    }
-                                    placeholder="e.g. Router Fee / Promo Discount"
-                                  />
-                                </div>
+                          {globalAdjustmentsError && (
+                            <p className="text-sm text-rose-600">{globalAdjustmentsError}</p>
+                          )}
 
-                                <div>
-                                  <Label>Type</Label>
-                                  <Select
-                                    value={row.type}
-                                    onValueChange={(value) =>
-                                      updateAdjustmentRow(index, 'type', value as AdjustmentType)
-                                    }
-                                  >
-                                    <SelectTrigger>
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="plus">Plus</SelectItem>
-                                      <SelectItem value="minus">Minus</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button type="button" size="sm" variant="outline" onClick={() => addAdjustmentRow('plus')}>
+                              <Plus className="mr-2 h-4 w-4" />
+                              Add Plus Fee
+                            </Button>
+                            <Button type="button" size="sm" variant="outline" onClick={() => addAdjustmentRow('minus')}>
+                              <Minus className="mr-2 h-4 w-4" />
+                              Add Minus Fee
+                            </Button>
+                          </div>
 
-                                <div>
-                                  <Label>Value Type</Label>
-                                  <Select
-                                    value={row.valueType}
-                                    onValueChange={(value) =>
-                                      updateAdjustmentRow(index, 'valueType', value as AdjustmentValueType)
-                                    }
-                                  >
-                                    <SelectTrigger>
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="fixed">Fixed</SelectItem>
-                                      <SelectItem value="percent">Percent</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
+                          {adjustmentRows.length === 0 && (
+                            <p className="text-sm text-slate-500">
+                              No adjustment rows. Add from global dropdown or use plus/minus buttons.
+                            </p>
+                          )}
 
-                                <div>
-                                  <Label>{row.valueType === 'percent' ? 'Percent' : 'Amount'}</Label>
-                                  <Input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    value={row.value}
-                                    onChange={(event) => updateAdjustmentRow(index, 'value', event.target.value)}
-                                  />
-                                </div>
-
-                                <div>
-                                  <Label>Remember</Label>
-                                  <div className="mt-2 flex items-center gap-2">
-                                    <Checkbox
-                                      checked={row.rememberForNext}
-                                      onCheckedChange={(checked) =>
-                                        updateAdjustmentRow(index, 'rememberForNext', checked === true)
+                          <div className="space-y-3">
+                            {adjustmentRows.map((row, index) => (
+                              <div key={index} className="rounded-md border bg-white p-3">
+                                <div className="grid gap-3 md:grid-cols-6">
+                                  <div className="md:col-span-2">
+                                    <Label>Description</Label>
+                                    <Input
+                                      value={row.description}
+                                      onChange={(event) =>
+                                        updateAdjustmentRow(index, 'description', event.target.value)
                                       }
+                                      placeholder="e.g. Router Fee / Promo Discount"
                                     />
-                                    <span className="text-xs text-slate-600">Use in next invoice</span>
+                                  </div>
+
+                                  <div>
+                                    <Label>Type</Label>
+                                    <Select
+                                      value={row.type}
+                                      onValueChange={(value) =>
+                                        updateAdjustmentRow(index, 'type', value as AdjustmentType)
+                                      }
+                                    >
+                                      <SelectTrigger>
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="plus">Plus</SelectItem>
+                                        <SelectItem value="minus">Minus</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+
+                                  <div>
+                                    <Label>Value Type</Label>
+                                    <Select
+                                      value={row.valueType}
+                                      onValueChange={(value) =>
+                                        updateAdjustmentRow(index, 'valueType', value as AdjustmentValueType)
+                                      }
+                                    >
+                                      <SelectTrigger>
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="fixed">Fixed</SelectItem>
+                                        <SelectItem value="percent">Percent</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+
+                                  <div>
+                                    <Label>{row.valueType === 'percent' ? 'Percent' : 'Amount'}</Label>
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      value={row.value}
+                                      onChange={(event) => updateAdjustmentRow(index, 'value', event.target.value)}
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <Label>Remember</Label>
+                                    <div className="mt-2 flex items-center gap-2">
+                                      <Checkbox
+                                        checked={row.rememberForNext}
+                                        onCheckedChange={(checked) =>
+                                          updateAdjustmentRow(index, 'rememberForNext', checked === true)
+                                        }
+                                      />
+                                      <span className="text-xs text-slate-600">Use in next invoice</span>
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
 
-                              <div className="mt-3 flex justify-end">
-                                <Button size="sm" variant="ghost" onClick={() => removeAdjustmentRow(index)}>
-                                  <Trash2 className="mr-2 h-4 w-4" />
-                                  Remove
-                                </Button>
+                                <div className="mt-3 flex justify-end">
+                                  <Button size="sm" variant="ghost" onClick={() => removeAdjustmentRow(index)}>
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Remove
+                                  </Button>
+                                </div>
                               </div>
-                            </div>
-                          ))}
-                        </div>
+                            ))}
+                          </div>
 
-                        <div className="flex justify-end">
-                          <Button onClick={saveAdjustments} disabled={isSavingAdjustments}>
-                            <Save className="mr-2 h-4 w-4" />
-                            {isSavingAdjustments ? 'Saving...' : 'Save Adjustments'}
-                          </Button>
+                          <div className="flex justify-end">
+                            <Button onClick={saveAdjustments} disabled={isSavingAdjustments}>
+                              <Save className="mr-2 h-4 w-4" />
+                              {isSavingAdjustments ? 'Saving...' : 'Save Adjustments'}
+                            </Button>
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   </div>
                 ) : (
@@ -5338,20 +5684,6 @@ export default function BillingPage() {
                     })()}
 
                     <div className="mt-8 space-y-1 text-sm">
-                      <p className="font-semibold">Payment Information</p>
-                      <p>Payment Method: {selectedInvoice.paymentMethod || '—'}</p>
-                      <p>Payment Status: {normalizeInvoiceStatusLabel(selectedInvoice.status)}</p>
-                      <p>
-                        Collection Status:{' '}
-                        <span className="font-medium">
-                          {getAdminCollectionStatusLabel(selectedCollectionStatus)}
-                        </span>
-                      </p>
-                      <p>Payment Date: {formatDisplayDate(selectedInvoice.paidAt, '__________')}</p>
-                      <p>Receipt No: {selectedInvoice.receiptNo || '__________'}</p>
-                    </div>
-
-                    <div className="mt-8 space-y-1 text-sm">
                       <p className="font-semibold">Notes / Terms</p>
                       <p>Please pay before the due date to avoid service suspension.</p>
                       <p>No refund after billing period started.</p>
@@ -5362,9 +5694,12 @@ export default function BillingPage() {
                       <p className="text-sm font-semibold">Collection Timeline</p>
                       <Badge
                         variant="secondary"
-                        className={getAdminCollectionStatusClassName(selectedCollectionStatus)}
+                        className={getAdminCollectionStatusClassNameForInvoice(
+                          selectedInvoice,
+                          selectedCollectionStatus,
+                        )}
                       >
-                        {getAdminCollectionStatusLabel(selectedCollectionStatus)}
+                        {getAdminCollectionStatusLabelForInvoice(selectedInvoice, selectedCollectionStatus)}
                       </Badge>
 
                       {selectedCollectionTimeline.length === 0 ? (
@@ -5390,37 +5725,104 @@ export default function BillingPage() {
                   </div>
                 )}
 
-                {canEditSelectedInvoiceInDialog ? (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>
-                        {isCollectionActionRequired(selectedCollectionStatus)
-                          ? 'Admin Action Required'
-                          : 'Mark Invoice Paid'}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      {selectedCollectionStatus === 'collected_pending_admin' && (
-                        <p className="text-sm text-amber-700">
-                          Collector already marked this invoice as collected. Confirm here after receiving money at
-                          office.
+                {canMarkPaidSelectedInvoiceInDialog ? (
+                  <div className="rounded-lg border border-slate-300 bg-white p-5 text-slate-900 shadow-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Payment Confirmation</p>
+                        <h3 className="mt-1 text-xl font-semibold">
+                          {isCollectionActionRequired(selectedCollectionStatus)
+                            ? 'Admin Action Required'
+                            : 'Mark Invoice Paid'}
+                        </h3>
+                        <p className="mt-1 text-sm text-slate-600">
+                          {selectedCollectionStatus === 'collected_pending_admin'
+                            ? 'Collector has already completed collection. Confirm and generate the receipt from this summary.'
+                            : 'Customer will pay at office. Confirm the payment details below before generating the receipt.'}
                         </p>
-                      )}
-                      {selectedCollectionStatus === 'office_transfer' && (
-                        <p className="text-sm text-amber-700">
-                          Customer said they will pay at office. Confirm payment here when office receives money.
+                      </div>
+                      <Badge
+                        variant="secondary"
+                        className={getAdminCollectionStatusClassNameForInvoice(
+                          selectedInvoice,
+                          selectedCollectionStatus,
+                        )}
+                      >
+                        {getAdminCollectionStatusLabelForInvoice(selectedInvoice, selectedCollectionStatus)}
+                      </Badge>
+                    </div>
+
+                    <div className="mt-5 grid gap-4 md:grid-cols-2">
+                      <div className="space-y-1 text-sm">
+                        <p className="font-semibold text-slate-900">Invoice Information</p>
+                        <p>Invoice No: {formatInvoiceNo(selectedInvoice.invoiceNo, selectedInvoice.id)}</p>
+                        <p>Invoice Date: {formatDisplayDate(selectedInvoice.invoiceDate)}</p>
+                        <p>Customer: {selectedInvoice.customer?.personalName || selectedInvoice.customer?.companyName || 'Unknown'}</p>
+                      </div>
+
+                      <div className="space-y-1 text-sm md:text-right">
+                        <p className="font-semibold text-slate-900">Amount Summary</p>
+                        <p>
+                          Total Amount:{' '}
+                          <span className="text-base font-semibold text-slate-900">
+                            {formatMoney(selectedInvoice.totalAmount, selectedInvoice.currency)}
+                          </span>
                         </p>
-                      )}
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <div>
-                          <Label>Payment Method</Label>
-                          <Input
-                            value={paymentMethod}
-                            onChange={(event) => setPaymentMethod(event.target.value)}
-                            placeholder="KBZPay / Cash / Transfer"
-                          />
+                        <p>
+                          Collection Status:{' '}
+                          {getAdminCollectionStatusLabelForInvoice(selectedInvoice, selectedCollectionStatus)}
+                        </p>
+                      </div>
+                    </div>
+
+                    {selectedCollectionStatus === 'collected_pending_admin' && (
+                      <div className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                        <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Collector Payment Details</p>
+                        <div className="mt-2 space-y-1">
+                          <p>
+                            Payment Method:{' '}
+                            <span className="font-medium text-slate-900">
+                              {selectedCollectedPaymentSummary?.paymentMethod || selectedInvoice.paymentMethod || '—'}
+                            </span>
+                          </p>
+                          {selectedCollectedPaymentSummary?.paymentAccount && (
+                            <p>
+                              Payment Account:{' '}
+                              <span className="font-medium text-slate-900">
+                                {selectedCollectedPaymentSummary.paymentAccount}
+                              </span>
+                            </p>
+                          )}
+                          {selectedCollectedPaymentSummary?.note && (
+                            <p className="text-xs text-slate-500">{selectedCollectedPaymentSummary.note}</p>
+                          )}
                         </div>
-                        <div>
+                      </div>
+                    )}
+
+                    {selectedCollectionStatus === 'office_transfer' && (
+                      <div className="mt-5 grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Payment Method</Label>
+                          <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Choose payment method" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {paymentMethodOptions.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-slate-500">
+                            {paymentAccountsLoading
+                              ? 'Loading methods from payment config...'
+                              : 'Methods are loaded from payment config.'}
+                          </p>
+                        </div>
+                        <div className="space-y-2">
                           <Label>Receipt No</Label>
                           <Input
                             value={receiptNo}
@@ -5429,27 +5831,27 @@ export default function BillingPage() {
                           />
                         </div>
                       </div>
+                    )}
 
-                      <div className="flex justify-end">
-                        <Button onClick={markInvoicePaid} disabled={isMarkingPaid}>
-                          <CheckCircle2 className="mr-2 h-4 w-4" />
-                          {isMarkingPaid
-                            ? 'Updating...'
-                            : isCollectionActionRequired(selectedCollectionStatus)
-                              ? 'Confirm Received & Complete'
-                              : 'Mark as Paid'}
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
+                    <div className="mt-6 flex justify-end">
+                      <Button onClick={markInvoicePaid} disabled={isMarkingPaid}>
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        {isMarkingPaid
+                          ? 'Updating...'
+                          : isCollectionActionRequired(selectedCollectionStatus)
+                            ? 'Confirm & Generate Receipt'
+                            : 'Mark as Paid'}
+                      </Button>
+                    </div>
+                  </div>
                 ) : (
-                  <Card>
+                    <Card>
                     <CardHeader>
                       <CardTitle>
                         {selectedInvoiceStatus === 'paid'
                           ? 'Final Amount (Paid Invoice)'
                           : selectedInvoiceStatus === 'cancelled'
-                            ? 'Cancelled Invoice'
+                            ? 'Cancelled Receipt'
                             : 'View Only'}
                       </CardTitle>
                     </CardHeader>
@@ -5458,7 +5860,7 @@ export default function BillingPage() {
                         {selectedInvoiceStatus === 'paid'
                           ? 'This invoice is already paid and locked.'
                           : selectedInvoiceStatus === 'cancelled'
-                            ? 'This invoice is cancelled. You can only view details.'
+                            ? 'This receipt was cancelled. You can still edit it to create a new invoice revision.'
                             : 'This is view mode. Use Edit to change adjustments or payment.'}
                       </p>
                       <p className="mt-2 text-lg font-semibold text-slate-900">

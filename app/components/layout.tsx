@@ -84,6 +84,8 @@ export default function Layout({ children }: LayoutProps) {
             children: [
               { label: 'Invoice List', href: '/admin/billing' },
               { label: 'Create Invoice', href: '/admin/billing/create-invoice' },
+              { label: 'Create Receipt', href: '/admin/billing/receipt/create' },
+              { label: 'Receipt List', href: '/admin/billing/receipt/list' },
             ],
           },
           {

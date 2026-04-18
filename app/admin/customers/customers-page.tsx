@@ -42,6 +42,8 @@ const CUSTOMER_LIST_DRAFTS_STORAGE_KEY = 'billpro_customer_list_drafts_v1';
 const CONTINUE_DRAFT_SESSION_KEY = 'billpro_customer_continue_draft_v1';
 const POST_CREATE_INVOICE_PROMPT_SESSION_KEY = 'billpro_post_create_invoice_prompt_customer_v1';
 const CUSTOMER_BILLING_FEE_CACHE_STORAGE_KEY = 'billpro_customer_billing_fee_cache_v1';
+const CUSTOMER_DRAFT_TTL_DAYS = 7;
+const CUSTOMER_DRAFT_TTL_MS = CUSTOMER_DRAFT_TTL_DAYS * 24 * 60 * 60 * 1000;
 
 type SelectOption = { value: string; label: string };
 type PlanOption = {
@@ -246,6 +248,13 @@ const createDefaultNewCustomer = () => ({
 
 const createDraftId = () =>
   `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const isDraftExpired = (savedAt: string | undefined, now = Date.now()) => {
+  if (!savedAt) return false;
+  const timestamp = Date.parse(savedAt);
+  if (!Number.isFinite(timestamp)) return false;
+  return now - timestamp >= CUSTOMER_DRAFT_TTL_MS;
+};
 
 const toNumber = (value: string | number | null | undefined) => {
   if (value === null || value === undefined || value === '') return 0;
@@ -673,7 +682,7 @@ export default function CustomersPage({
     try {
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
-      return parsed
+      const normalizedDrafts = parsed
         .filter((item): item is CustomerCreateDraft => Boolean(item && typeof item === 'object'))
         .map((item) => ({
           ...item,
@@ -682,6 +691,26 @@ export default function CustomersPage({
               ? item.draftId
               : createDraftId()
         }));
+      const now = Date.now();
+      const validDrafts = normalizedDrafts.filter((draft) => !isDraftExpired(draft.savedAt, now));
+
+      if (validDrafts.length !== normalizedDrafts.length) {
+        window.localStorage.setItem(CUSTOMER_LIST_DRAFTS_STORAGE_KEY, JSON.stringify(validDrafts));
+
+        const activeDraftRaw = window.localStorage.getItem(CUSTOMER_CREATE_DRAFT_STORAGE_KEY);
+        if (activeDraftRaw) {
+          try {
+            const activeDraft = JSON.parse(activeDraftRaw) as Partial<CustomerCreateDraft>;
+            if (activeDraft && typeof activeDraft === 'object' && isDraftExpired(activeDraft.savedAt, now)) {
+              window.localStorage.removeItem(CUSTOMER_CREATE_DRAFT_STORAGE_KEY);
+            }
+          } catch {
+            window.localStorage.removeItem(CUSTOMER_CREATE_DRAFT_STORAGE_KEY);
+          }
+        }
+      }
+
+      return validDrafts;
     } catch {
       return [];
     }

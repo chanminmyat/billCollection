@@ -1415,6 +1415,7 @@ export default function CollectorDashboard() {
       label: string;
       title: string;
       note?: string;
+      paymentMethod?: string;
     },
   ): Promise<boolean> => {
     if (isUpdatingCollection) return false;
@@ -1431,6 +1432,7 @@ export default function CollectorDashboard() {
           type: payload.type,
           label: payload.label,
           note: (payload.note ?? collectionNote) || undefined,
+          paymentMethod: payload.paymentMethod || undefined,
           actorName: user?.name || undefined,
           actorRole: user?.role || undefined,
         }),
@@ -1491,6 +1493,7 @@ export default function CollectorDashboard() {
           customerCode: invoice.customer?.customerCode,
           status: payload.status,
           note: (payload.note ?? collectionNote) || undefined,
+          paymentMethod: payload.paymentMethod || undefined,
         },
       });
 
@@ -1621,6 +1624,7 @@ export default function CollectorDashboard() {
       label: copy.collectorCollectedLabel,
       title: copy.markedAsCollected,
       note: paymentNoteParts.join(' | '),
+      paymentMethod: paymentMethodName,
     });
   };
 
