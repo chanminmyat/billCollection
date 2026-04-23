@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Layout from '@/app/components/layout';
 import { useAuth } from '@/app/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
@@ -19,6 +20,7 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FilePlus2, Minus, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import {
   DEFAULT_FIXED_BILLING_WINDOW,
@@ -148,6 +150,7 @@ const EPSILON = 0.0001;
 export default function CreateInvoicePage() {
   const { user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
+  const router = useRouter();
 
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [globalAdjustments, setGlobalAdjustments] = useState<GlobalAdjustmentOption[]>([]);
@@ -858,6 +861,21 @@ export default function CreateInvoicePage() {
             Refresh
           </Button>
         </div>
+
+        <Tabs
+          value="create-invoice"
+          onValueChange={(value) => {
+            if (value === 'create-invoice') return;
+            router.push(`/admin/billing?tab=${encodeURIComponent(value)}`);
+          }}
+        >
+          <TabsList>
+            <TabsTrigger value="create-invoice">Create Invoice</TabsTrigger>
+            <TabsTrigger value="invoice-list">Invoice List</TabsTrigger>
+            <TabsTrigger value="next-engine">Next Invoice Engine</TabsTrigger>
+            <TabsTrigger value="transactions">Transactions</TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         <Card>
           <CardHeader>

@@ -84,6 +84,7 @@ export default function Layout({ children }: LayoutProps) {
             children: [
               { label: 'Invoice List', href: '/admin/billing' },
               { label: 'Create Invoice', href: '/admin/billing/create-invoice' },
+              { label: 'Rule Config', href: '/admin/billing?tab=rule-config' },
               { label: 'Create Receipt', href: '/admin/billing/receipt/create' },
               { label: 'Receipt List', href: '/admin/billing/receipt/list' },
             ],
@@ -376,7 +377,11 @@ export default function Layout({ children }: LayoutProps) {
                       }
                     >
                       {item.children.map((child) => {
-                        const isChildActive = pathname === child.href;
+                        const [childPath, childQuery] = child.href.split('?');
+                        const tabQuery = childQuery?.startsWith('tab=') ? childQuery.slice(4) : null;
+                        const isChildActive =
+                          pathname === childPath &&
+                          (tabQuery ? searchParams.get('tab') === tabQuery : true);
                         return (
                           <Link
                             key={child.href}

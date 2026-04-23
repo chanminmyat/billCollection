@@ -201,6 +201,7 @@ type CustomerCreateDraft = {
   networkZone: string;
   billingCycle: string;
   customBillingMonths: string;
+  billingRuleId: string;
   installationFee: string;
   additionalFees: string;
   collectionService: 'yes' | 'no';
@@ -521,6 +522,16 @@ export default function CustomersPage({
   const [manualInvoiceCustomerId, setManualInvoiceCustomerId] = useState<string | null>(null);
   const [postCreateInvoicePromptOpen, setPostCreateInvoicePromptOpen] = useState(false);
   const [postCreateInvoiceCustomerId, setPostCreateInvoiceCustomerId] = useState<string | null>(null);
+  const [postCreateInvoiceCustomerMeta, setPostCreateInvoiceCustomerMeta] = useState<{
+    customerId: string;
+    customerCode: string;
+    customerName: string;
+    customerPhone: string;
+    customerAddress: string;
+    customerPackage: string;
+    billingRuleId: string;
+    billingRuleName: string;
+  } | null>(null);
   const [manualInvoiceAdjustmentRows, setManualInvoiceAdjustmentRows] = useState<InvoiceAdjustmentInput[]>([]);
   const [globalAdjustments, setGlobalAdjustments] = useState<GlobalAdjustmentOption[]>([]);
   const [globalAdjustmentsLoading, setGlobalAdjustmentsLoading] = useState(false);
@@ -529,9 +540,6 @@ export default function CustomersPage({
   const [generatedInvoicePreview, setGeneratedInvoicePreview] = useState<GeneratedInvoice | null>(null);
   const [generatedInvoiceDialogOpen, setGeneratedInvoiceDialogOpen] = useState(false);
   const [latestInvoiceByCustomerId, setLatestInvoiceByCustomerId] = useState<Record<string, GeneratedInvoice>>({});
-  const [generatedInvoicePaymentMethod, setGeneratedInvoicePaymentMethod] = useState('KBZPay');
-  const [generatedInvoiceReceiptNo, setGeneratedInvoiceReceiptNo] = useState('');
-  const [isMarkingGeneratedInvoicePaid, setIsMarkingGeneratedInvoicePaid] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState<Record<string, boolean>>({});
   const [isAssigningCollector, setIsAssigningCollector] = useState<Record<string, boolean>>({});
   const [isGeneratingInvoice, setIsGeneratingInvoice] = useState<Record<string, boolean>>({});
@@ -560,7 +568,7 @@ export default function CustomersPage({
   const [primaryPhone, setPrimaryPhone] = useState('');
   const [secondaryPhone, setSecondaryPhone] = useState('');
   const [contactEmail, setContactEmail] = useState('');
-  const [installationRegion, setInstallationRegion] = useState('');
+  const [installationRegion, setInstallationRegion] = useState('Yangon Region');
   const [installationDistrict, setInstallationDistrict] = useState('');
   const [installationTownship, setInstallationTownship] = useState('');
   const [installationCity, setInstallationCity] = useState('');
@@ -591,7 +599,7 @@ export default function CustomersPage({
   const [contractEndDateInput, setContractEndDateInput] = useState('');
   const [installationDate, setInstallationDate] = useState('');
   const [installationDateInput, setInstallationDateInput] = useState('');
-  const [ipType, setIpType] = useState('');
+  const [ipType, setIpType] = useState('Dynamic');
   const [staticIpAddress, setStaticIpAddress] = useState('');
   const [routerId, setRouterId] = useState('');
   const [macAddress, setMacAddress] = useState('');
@@ -603,8 +611,9 @@ export default function CustomersPage({
     DEFAULT_FIXED_BILLING_WINDOW
   );
   const [customBillingMonths, setCustomBillingMonths] = useState('');
-  const [installationFee, setInstallationFee] = useState('');
-  const [additionalFees, setAdditionalFees] = useState('');
+  const [customerCreateBillingRuleId, setCustomerCreateBillingRuleId] = useState('');
+  const [installationFee, setInstallationFee] = useState('0');
+  const [additionalFees, setAdditionalFees] = useState('0');
   const [collectionService, setCollectionService] = useState<'yes' | 'no'>('yes');
   const [collectionFee, setCollectionFee] = useState('');
   const [discountApplied, setDiscountApplied] = useState<'yes' | 'no'>('no');
@@ -1005,16 +1014,6 @@ export default function CustomersPage({
       })),
     [activePlans]
   );
-  const bandwidthSelectOptions = useMemo<SelectOption[]>(
-    () => {
-      const list = activePlans
-        .map((plan) => plan.bandwidthPlan)
-        .filter((value): value is string => Boolean(value));
-      const unique = Array.from(new Set(list));
-      return unique.map((option) => ({ value: option, label: option }));
-    },
-    [activePlans]
-  );
   const ipTypeSelectOptions = useMemo<SelectOption[]>(
     () => ipTypeOptions.map((option) => ({ value: option, label: option })),
     [ipTypeOptions]
@@ -1044,6 +1043,14 @@ export default function CustomersPage({
     selectedPlan?.monthlyFee !== undefined && selectedPlan?.monthlyFee !== null
       ? String(selectedPlan.monthlyFee)
       : '';
+
+  useEffect(() => {
+    if (selectedPlan) {
+      setBandwidthPlan(selectedPlan.bandwidthPlan ?? '');
+      return;
+    }
+    setBandwidthPlan('');
+  }, [selectedPlan]);
 
   useEffect(() => {
     if (billingCycle !== 'Custom') {
@@ -1101,12 +1108,49 @@ export default function CustomersPage({
 
   useEffect(() => {
     if (inlineForm || typeof window === 'undefined') return;
-    const pendingCustomerId = window.sessionStorage.getItem(
+    const pendingCustomerRaw = window.sessionStorage.getItem(
       POST_CREATE_INVOICE_PROMPT_SESSION_KEY
     );
-    if (!pendingCustomerId) return;
+    if (!pendingCustomerRaw) return;
     window.sessionStorage.removeItem(POST_CREATE_INVOICE_PROMPT_SESSION_KEY);
+    try {
+      const parsed = JSON.parse(pendingCustomerRaw);
+      if (parsed && typeof parsed === 'object') {
+        const customerId = String(parsed.customerId ?? parsed.id ?? '').trim();
+        const customerCode = String(parsed.customerCode ?? '').trim();
+        const customerName = String(parsed.customerName ?? '').trim();
+        if (customerId) {
+          setPostCreateInvoiceCustomerId(customerId);
+          setPostCreateInvoiceCustomerMeta({
+            customerId,
+            customerCode,
+            customerName,
+            customerPhone: String(parsed.customerPhone ?? '').trim(),
+            customerAddress: String(parsed.customerAddress ?? '').trim(),
+            customerPackage: String(parsed.customerPackage ?? '').trim(),
+            billingRuleId: String(parsed.billingRuleId ?? '').trim(),
+            billingRuleName: String(parsed.billingRuleName ?? '').trim(),
+          });
+          setPostCreateInvoicePromptOpen(true);
+          return;
+        }
+      }
+    } catch {
+      // fall back to legacy id-only payload below
+    }
+    const pendingCustomerId = String(pendingCustomerRaw).trim();
+    if (!pendingCustomerId) return;
     setPostCreateInvoiceCustomerId(pendingCustomerId);
+    setPostCreateInvoiceCustomerMeta({
+      customerId: pendingCustomerId,
+      customerCode: '',
+      customerName: '',
+      customerPhone: '',
+      customerAddress: '',
+      customerPackage: '',
+      billingRuleId: '',
+      billingRuleName: '',
+    });
     setPostCreateInvoicePromptOpen(true);
   }, [inlineForm]);
 
@@ -1181,7 +1225,7 @@ export default function CustomersPage({
       setPrimaryPhone(draft.primaryPhone ?? '');
       setSecondaryPhone(draft.secondaryPhone ?? '');
       setContactEmail(draft.contactEmail ?? '');
-      setInstallationRegion(draft.installationRegion ?? '');
+      setInstallationRegion(draft.installationRegion ?? 'Yangon Region');
       setInstallationDistrict(draft.installationDistrict ?? '');
       setInstallationTownship(draft.installationTownship ?? '');
       setInstallationCity(draft.installationCity ?? '');
@@ -1209,7 +1253,7 @@ export default function CustomersPage({
       setContractStartDate(draft.contractStartDate ?? '');
       setContractEndDate(draft.contractEndDate ?? '');
       setInstallationDate(draft.installationDate ?? '');
-      setIpType(draft.ipType ?? '');
+      setIpType(draft.ipType ?? 'Dynamic');
       setStaticIpAddress(draft.staticIpAddress ?? '');
       setRouterId(draft.routerId ?? '');
       setMacAddress(draft.macAddress ?? '');
@@ -1218,8 +1262,9 @@ export default function CustomersPage({
       setNetworkZone(draft.networkZone ?? '');
       setBillingCycle(draft.billingCycle ?? 'Monthly');
       setCustomBillingMonths(draft.customBillingMonths ?? '');
-      setInstallationFee(draft.installationFee ?? '');
-      setAdditionalFees(draft.additionalFees ?? '');
+      setCustomerCreateBillingRuleId(draft.billingRuleId ?? '');
+      setInstallationFee(draft.installationFee ?? '0');
+      setAdditionalFees(draft.additionalFees ?? '0');
       setCollectionService(draft.collectionService === 'no' ? 'no' : 'yes');
       setCollectionFee(draft.collectionFee ?? '');
       setDiscountApplied(draft.discountApplied === 'yes' ? 'yes' : 'no');
@@ -1251,6 +1296,7 @@ export default function CustomersPage({
           installationTownship.trim() ||
           installationWard.trim() ||
           selectedPlanCode.trim() ||
+          customerCreateBillingRuleId.trim() ||
           serviceStartDate.trim() ||
           contractStartDate.trim() ||
           contractEndDate.trim() ||
@@ -1323,6 +1369,7 @@ export default function CustomersPage({
         networkZone,
         billingCycle,
         customBillingMonths,
+        billingRuleId: customerCreateBillingRuleId,
         installationFee,
         additionalFees,
         collectionService,
@@ -1399,6 +1446,7 @@ export default function CustomersPage({
     networkZone,
     billingCycle,
     customBillingMonths,
+    customerCreateBillingRuleId,
     installationFee,
     additionalFees,
     collectionService,
@@ -1806,6 +1854,7 @@ export default function CustomersPage({
   const closePostCreateInvoicePrompt = () => {
     setPostCreateInvoicePromptOpen(false);
     setPostCreateInvoiceCustomerId(null);
+    setPostCreateInvoiceCustomerMeta(null);
   };
 
   const handleCreateInvoiceAfterCustomerCreate = () => {
@@ -1814,7 +1863,8 @@ export default function CustomersPage({
       return;
     }
     const nextCustomerId = postCreateInvoiceCustomerId;
-    closePostCreateInvoicePrompt();
+    setPostCreateInvoicePromptOpen(false);
+    setPostCreateInvoiceCustomerId(null);
     openManualInvoicePrompt(nextCustomerId);
   };
 
@@ -1853,6 +1903,7 @@ export default function CustomersPage({
         installationTownship.trim() ||
         installationWard.trim() ||
         selectedPlanCode.trim() ||
+        customerCreateBillingRuleId.trim() ||
         serviceStartDate.trim() ||
         contractStartDate.trim() ||
         contractEndDate.trim() ||
@@ -1919,6 +1970,7 @@ export default function CustomersPage({
         networkZone,
         billingCycle,
         customBillingMonths,
+        billingRuleId: customerCreateBillingRuleId,
         installationFee,
         additionalFees,
         collectionService,
@@ -2454,9 +2506,6 @@ export default function CustomersPage({
       if (!businessRegNo.trim()) {
         nextErrors.businessRegNo = 'Registration number is required.';
       }
-      if (!taxId.trim()) {
-        nextErrors.taxId = 'Tax ID is required.';
-      }
       if (!contactPerson.trim()) {
         nextErrors.contactPerson = 'Contact person is required.';
       }
@@ -2525,28 +2574,19 @@ export default function CustomersPage({
     const normalizedContractEndDate = parseDdMmYyyyToIso(contractEndDateInput);
     const normalizedInstallationDate = parseDdMmYyyyToIso(installationDateInput);
 
-    if (!serviceStartDateInput.trim()) {
-      nextErrors.serviceStartDate = 'Enter service start date.';
-    } else if (!normalizedServiceStartDate) {
+    if (serviceStartDateInput.trim() && !normalizedServiceStartDate) {
       nextErrors.serviceStartDate = 'Use dd/mm/yyyy format.';
     }
-    if (!contractStartDateInput.trim()) {
-      nextErrors.contractStartDate = 'Enter contract start date.';
-    } else if (!normalizedContractStartDate) {
+    if (contractStartDateInput.trim() && !normalizedContractStartDate) {
       nextErrors.contractStartDate = 'Use dd/mm/yyyy format.';
     }
-    if (!contractEndDateInput.trim()) {
-      nextErrors.contractEndDate = 'Enter contract end date.';
-    } else if (!normalizedContractEndDate) {
+    if (contractEndDateInput.trim() && !normalizedContractEndDate) {
       nextErrors.contractEndDate = 'Use dd/mm/yyyy format.';
     }
     if (!installationDateInput.trim()) {
       nextErrors.installationDate = 'Enter installation date.';
     } else if (!normalizedInstallationDate) {
       nextErrors.installationDate = 'Use dd/mm/yyyy format.';
-    }
-    if (!installationFee.trim()) {
-      nextErrors.installationFee = 'Installation fee is required.';
     }
     if (collectionService === 'yes' && !collectionFee.trim()) {
       nextErrors.collectionFee = 'Collection fee is required when collection service is enabled.';
@@ -2621,6 +2661,15 @@ export default function CustomersPage({
           secondaryPhone,
           ...(contactEmail.trim() ? { email: contactEmail.trim() } : {})
         },
+        collectorCode:
+          collectionService === 'yes' ? String(newCustomer.collectorId || '').trim() || null : null,
+        ...(customerCreateBillingRuleId
+          ? {
+              billingRuleId: customerCreateBillingRuleId,
+              billingRuleName:
+                activeBillingRules.find((rule) => rule.id === customerCreateBillingRuleId)?.name ?? undefined
+            }
+          : {}),
         addressInformation: {
           installation: formatAddress({
             building: installationBuilding,
@@ -2656,10 +2705,10 @@ export default function CustomersPage({
           serviceType,
           packageName,
           bandwidthPlan,
-          serviceStartDate: normalizedServiceStartDate ?? '',
-          contractStartDate: normalizedContractStartDate ?? '',
-          contractEndDate: normalizedContractEndDate ?? '',
-          installationDate: normalizedInstallationDate ?? '',
+          ...(normalizedServiceStartDate ? { serviceStartDate: normalizedServiceStartDate } : {}),
+          ...(normalizedContractStartDate ? { contractStartDate: normalizedContractStartDate } : {}),
+          ...(normalizedContractEndDate ? { contractEndDate: normalizedContractEndDate } : {}),
+          ...(normalizedInstallationDate ? { installationDate: normalizedInstallationDate } : {}),
           ipType,
           staticIpAddress: staticIpAddress.trim()
         },
@@ -2830,16 +2879,35 @@ export default function CustomersPage({
         }
       }
 
-      const customerName =
+      const createdCustomerName =
         payload.customer.customerType === 'business'
           ? payload.customer.businessInformation?.companyName
           : payload.customer.personalInformation?.name;
+      if (createdCustomerId && typeof window !== 'undefined') {
+        window.sessionStorage.setItem(
+          POST_CREATE_INVOICE_PROMPT_SESSION_KEY,
+          JSON.stringify({
+            customerId: createdCustomerId,
+            customerCode: createdCustomerCode ?? '',
+            customerName: createdCustomerName || '',
+            customerPhone: payload.customer.contactInformation.primaryPhone ?? '',
+            customerAddress: payload.customer.addressInformation?.installation ?? '',
+            customerPackage:
+              payload.customer.services.packageName ??
+              payload.customer.services.serviceId ??
+              '',
+            billingRuleId: customerCreateBillingRuleId || '',
+            billingRuleName:
+              activeBillingRules.find((rule) => rule.id === customerCreateBillingRuleId)?.name ?? ''
+          })
+        );
+      }
       logAdminActivity(
         'customer_created',
         'New customer created.',
         'customer',
         createdCustomerId ?? undefined,
-        customerName || undefined,
+        createdCustomerName || undefined,
         {
           customerType: payload.customer.customerType,
           status: payload.customer.userStatus
@@ -2878,7 +2946,7 @@ export default function CustomersPage({
     setPrimaryPhone('');
     setSecondaryPhone('');
     setContactEmail('');
-    setInstallationRegion('');
+    setInstallationRegion('Yangon Region');
     setInstallationDistrict('');
     setInstallationTownship('');
     setInstallationCity('');
@@ -2906,7 +2974,7 @@ export default function CustomersPage({
     setContractStartDate('');
     setContractEndDate('');
     setInstallationDate('');
-    setIpType('');
+    setIpType('Dynamic');
     setStaticIpAddress('');
     setRouterId('');
     setMacAddress('');
@@ -2915,8 +2983,9 @@ export default function CustomersPage({
     setNetworkZone('');
     setBillingCycle('Monthly');
     setCustomBillingMonths('');
-    setInstallationFee('');
-    setAdditionalFees('');
+    setCustomerCreateBillingRuleId('');
+    setInstallationFee('0');
+    setAdditionalFees('0');
     setCollectionService('yes');
     setCollectionFee('');
     setDiscountApplied('no');
@@ -2924,13 +2993,6 @@ export default function CustomersPage({
     setDiscountPeriod('');
     setErrors({});
     setNewCustomer(createDefaultNewCustomer());
-
-    if (createdCustomerId && typeof window !== 'undefined') {
-      window.sessionStorage.setItem(
-        POST_CREATE_INVOICE_PROMPT_SESSION_KEY,
-        createdCustomerId
-      );
-    }
 
     toast({
       title: 'Customer added',
@@ -3014,12 +3076,16 @@ export default function CustomersPage({
 
   const openManualInvoicePrompt = (customerId: string) => {
     const customerSummary = customerSummaryById[customerId];
+    const metaRuleId =
+      postCreateInvoiceCustomerMeta?.customerId === customerId
+        ? String(postCreateInvoiceCustomerMeta.billingRuleId ?? '').trim()
+        : '';
     const assignedRuleId = String(
       customerSummary?.billingRuleId ??
       customerSummary?.ruleId ??
       customerSummary?.billingRule?.id ??
       customerSummary?.rule?.id ??
-      ''
+      metaRuleId
     ).trim();
     const fallbackRuleId =
       assignedRuleId && activeBillingRules.some((rule) => rule.id === assignedRuleId)
@@ -3034,9 +3100,95 @@ export default function CustomersPage({
 
   const openGeneratedInvoiceDialog = (invoice: GeneratedInvoice) => {
     setGeneratedInvoicePreview(invoice);
-    setGeneratedInvoicePaymentMethod(invoice.paymentMethod || 'KBZPay');
-    setGeneratedInvoiceReceiptNo(invoice.receiptNo || '');
     setGeneratedInvoiceDialogOpen(true);
+  };
+
+  const navigateToCustomerInvoices = (customer: Customer & { code?: string }) => {
+    const customerCode = String(customer.code || '').trim();
+    const customerName = String(customer.name || '').trim();
+    const params = new URLSearchParams();
+    params.set('tab', 'invoice-list');
+    if (customerCode) {
+      params.set('customerCode', customerCode);
+    } else if (customerName) {
+      params.set('customerName', customerName);
+    }
+    router.push(`/admin/billing?${params.toString()}`);
+  };
+
+  const resolveInvoiceCustomerId = async (
+    customerId: string,
+    fallback?: {
+      customerCode?: string | null;
+      customerPhone?: string | null;
+      customerName?: string | null;
+    }
+  ) => {
+    const normalizedId = String(customerId || '').trim();
+    if (!normalizedId) return '';
+
+    const normalize = (value: string | null | undefined) => String(value ?? '').trim().toLowerCase();
+    const normalizedCode = normalize(fallback?.customerCode);
+    const normalizedPhone = normalize(fallback?.customerPhone);
+    const normalizedName = normalize(fallback?.customerName);
+
+    const findFromRows = (rows: Array<any>) => {
+      const byId = rows.find((item) => String(item?.id ?? '').trim() === normalizedId);
+      if (byId?.id) return String(byId.id);
+
+      if (normalizedCode) {
+        const byCode = rows.find(
+          (item) => normalize(item?.code ?? item?.customerCode) === normalizedCode
+        );
+        if (byCode?.id) return String(byCode.id);
+      }
+
+      if (normalizedPhone) {
+        const byPhone = rows.find(
+          (item) =>
+            normalize(item?.phone ?? item?.primaryPhone ?? item?.contactInformation?.primaryPhone) ===
+            normalizedPhone
+        );
+        if (byPhone?.id) return String(byPhone.id);
+      }
+
+      if (normalizedName) {
+        const byName = rows.find(
+          (item) =>
+            normalize(item?.name ?? item?.personalName ?? item?.companyName) === normalizedName
+        );
+        if (byName?.id) return String(byName.id);
+      }
+
+      return '';
+    };
+
+    const localResolved = findFromRows(liveRows);
+    if (localResolved) return localResolved;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/customers`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      if (!response.ok) return normalizedId;
+
+      const data = await response.json().catch(() => ({}));
+      const list = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.customers)
+        ? data.customers
+        : Array.isArray(data?.data)
+        ? data.data
+        : [];
+
+      const resolvedFromApi = findFromRows(list);
+      return resolvedFromApi || normalizedId;
+    } catch {
+      return normalizedId;
+    }
   };
 
   const handleGenerateInvoice = async (
@@ -3048,9 +3200,21 @@ export default function CustomersPage({
 
     setIsGeneratingInvoice((prev) => ({ ...prev, [customerId]: true }));
     try {
-      const selectedCustomer = customersSource.find((item) => item.id === customerId) ?? null;
-      const selectedCustomerSummary = customerSummaryById[customerId] ?? {};
-      const selectedCustomerProfile = customerProfileById[customerId] ?? {};
+      const postCreateMetaForCustomer =
+        postCreateInvoiceCustomerMeta?.customerId === customerId ? postCreateInvoiceCustomerMeta : null;
+      const resolvedCustomerId = await resolveInvoiceCustomerId(customerId, {
+        customerCode: postCreateMetaForCustomer?.customerCode ?? null,
+        customerPhone: postCreateMetaForCustomer?.customerPhone ?? null,
+        customerName: postCreateMetaForCustomer?.customerName ?? null
+      });
+      const selectedCustomer =
+        customersSource.find((item) => item.id === resolvedCustomerId) ??
+        customersSource.find((item) => item.id === customerId) ??
+        null;
+      const selectedCustomerSummary =
+        customerSummaryById[resolvedCustomerId] ?? customerSummaryById[customerId] ?? {};
+      const selectedCustomerProfile =
+        customerProfileById[resolvedCustomerId] ?? customerProfileById[customerId] ?? {};
       const cachedBillingInfo = resolveCustomerBillingFeeCache({
         customerId,
         customerCode:
@@ -3134,42 +3298,47 @@ export default function CustomersPage({
         }
         return fixedBillingWindow.startDay;
       })();
-      const response = await fetch(`${API_BASE_URL}/billing/customers/${customerId}/invoices/generate`, {
+      const generateInvoicePayload: Record<string, unknown> = {};
+      if (selectedRuleId) {
+        generateInvoicePayload.billingRuleId = selectedRuleId;
+        generateInvoicePayload.billingRuleName = selectedRule?.name ?? undefined;
+        generateInvoicePayload.billingCycle = derivedBillingCycle;
+        generateInvoicePayload.firstInvoiceMode = effectiveInvoiceMode;
+        generateInvoicePayload.billingMode = selectedRule?.billingMode ?? undefined;
+        generateInvoicePayload.customMonths = (() => {
+          if (
+            normalizedRuleBillingMode === 'bi-yearly' ||
+            normalizedRuleBillingMode === 'bi_yearly' ||
+            normalizedRuleBillingMode === 'biyearly' ||
+            normalizedRuleBillingMode === 'semiannual' ||
+            normalizedRuleBillingMode === 'semi-annual'
+          ) {
+            return 6;
+          }
+          if (!hasCustomMode) return undefined;
+          const parsed = Number.parseInt(selectedRule?.customMonths || '', 10);
+          if (Number.isFinite(parsed) && parsed > 0) return parsed;
+          return inferredCustomMonthsFromRuleName;
+        })();
+        generateInvoicePayload.dueAfterDays = (() => {
+          const raw = selectedRule?.dueAfterDays ?? '';
+          if (!raw.trim()) return undefined;
+          const parsed = Number.parseInt(raw, 10);
+          return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+        })();
+        generateInvoicePayload.fixedStartDay = resolvedFixedStartDay;
+        generateInvoicePayload.fixedDueDay = fixedBillingWindow.dueDay;
+      }
+      const response = await fetch(
+        `${API_BASE_URL}/billing/customers/${resolvedCustomerId}/invoices/generate`,
+        {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          billingRuleId: selectedRuleId,
-          billingRuleName: selectedRule?.name ?? undefined,
-          billingCycle: derivedBillingCycle,
-          firstInvoiceMode: effectiveInvoiceMode,
-          billingMode: selectedRule?.billingMode ?? undefined,
-          customMonths: (() => {
-            if (
-              normalizedRuleBillingMode === 'bi-yearly' ||
-              normalizedRuleBillingMode === 'bi_yearly' ||
-              normalizedRuleBillingMode === 'biyearly' ||
-              normalizedRuleBillingMode === 'semiannual' ||
-              normalizedRuleBillingMode === 'semi-annual'
-            ) {
-              return 6;
-            }
-            if (!hasCustomMode) return undefined;
-            const parsed = Number.parseInt(selectedRule?.customMonths || '', 10);
-            if (Number.isFinite(parsed) && parsed > 0) return parsed;
-            return inferredCustomMonthsFromRuleName;
-          })(),
-          dueAfterDays: (() => {
-            const raw = selectedRule?.dueAfterDays ?? '';
-            if (!raw.trim()) return undefined;
-            const parsed = Number.parseInt(raw, 10);
-            return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
-          })(),
-          fixedStartDay: resolvedFixedStartDay,
-          fixedDueDay: fixedBillingWindow.dueDay
-        })
-      });
+        body: JSON.stringify(generateInvoicePayload)
+      }
+      );
 
       const data = await response.json().catch(() => null);
 
@@ -3286,7 +3455,7 @@ export default function CustomersPage({
         createdInvoice.id,
         createdInvoice.invoiceNo || createdInvoice.id,
         {
-          customerId,
+          customerId: resolvedCustomerId,
           adjustmentCount: finalAdjustmentRows.length,
           billingRuleId: selectedRuleId || null
         }
@@ -3299,87 +3468,6 @@ export default function CustomersPage({
       });
     } finally {
       setIsGeneratingInvoice((prev) => ({ ...prev, [customerId]: false }));
-    }
-  };
-
-  const handleMarkGeneratedInvoicePaid = async () => {
-    if (!generatedInvoicePreview) return;
-
-    setIsMarkingGeneratedInvoicePaid(true);
-    try {
-      const response = await fetch(`${API_BASE_URL}/billing/invoices/${generatedInvoicePreview.id}/pay`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          paymentMethod: generatedInvoicePaymentMethod.trim() || undefined,
-          receiptNo: generatedInvoiceReceiptNo.trim() || undefined
-        })
-      });
-
-      const data = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        const message =
-          Array.isArray(data?.message)
-            ? data.message.join(', ')
-            : data?.message ?? 'Failed to mark invoice as paid';
-        throw new Error(message);
-      }
-
-      const updatedRaw = (data ?? null) as Partial<GeneratedInvoice> | null;
-      const updated: GeneratedInvoice = {
-        ...(generatedInvoicePreview ?? {}),
-        ...(updatedRaw ?? {}),
-        status:
-          String(updatedRaw?.status ?? '').trim().length > 0
-            ? (updatedRaw?.status as GeneratedInvoice['status'])
-            : 'paid'
-      } as GeneratedInvoice;
-      setGeneratedInvoicePreview(updated);
-      setGeneratedInvoicePaymentMethod(updated.paymentMethod || generatedInvoicePaymentMethod);
-      setGeneratedInvoiceReceiptNo(updated.receiptNo || generatedInvoiceReceiptNo);
-
-      const updatedInvoiceCustomerId = updated.customer?.id;
-      if (updatedInvoiceCustomerId) {
-        setLatestInvoiceByCustomerId((prev) => ({
-          ...prev,
-          [updatedInvoiceCustomerId]: updated
-        }));
-      }
-
-      if (updated.customer?.id) {
-        setRemoteCustomers((prev) =>
-          prev.map((customer) =>
-            customer.id === updated.customer?.id ? { ...customer, status: 'active' } : customer
-          )
-        );
-      }
-
-      toast({
-        title: 'Payment updated',
-        description: 'Invoice marked as paid. Next invoice is now scheduled in billing engine.'
-      });
-      logAdminActivity(
-        'invoice_paid',
-        'Invoice marked as paid from customer invoice dialog.',
-        'invoice',
-        updated.id,
-        updated.invoiceNo || updated.id,
-        {
-          paymentMethod: generatedInvoicePaymentMethod,
-          receiptNo: generatedInvoiceReceiptNo || null
-        }
-      );
-    } catch (error) {
-      toast({
-        title: 'Payment failed',
-        description: error instanceof Error ? error.message : 'Failed to mark invoice as paid',
-        variant: 'destructive'
-      });
-    } finally {
-      setIsMarkingGeneratedInvoicePaid(false);
     }
   };
 
@@ -3593,7 +3681,7 @@ export default function CustomersPage({
     setIpType(
       profileServices?.ipType ??
         summarySubscription?.ipType ??
-        ''
+        'Dynamic'
     );
     setStaticIpAddress(
       profileServices?.staticIpAddress ??
@@ -3617,16 +3705,20 @@ export default function CustomersPage({
     setInstallationFee(
       profileBilling?.installationFee !== undefined && profileBilling?.installationFee !== null
         ? String(profileBilling.installationFee)
-        : ''
+        : merged?.defaultInstallationFee !== undefined && merged?.defaultInstallationFee !== null
+          ? String(merged.defaultInstallationFee)
+          : ''
     );
     setAdditionalFees(
-      profileBilling?.additionalFees !== undefined && profileBilling?.additionalFees !== null
+      profileBilling?.additionalFees !== undefined && profileBilling.additionalFees !== null
         ? String(profileBilling.additionalFees)
-        : ''
+        : merged?.defaultAdditionalFees !== undefined && merged?.defaultAdditionalFees !== null
+          ? String(merged.defaultAdditionalFees)
+          : ''
     );
     setCollectionService(resolvedCollectionService === 'no' ? 'no' : 'yes');
     setCollectionFee(
-      resolvedCollectionService === 'yes' && resolvedCollectionFee > 0
+      resolvedCollectionService === 'yes'
         ? String(resolvedCollectionFee)
         : ''
     );
@@ -3965,7 +4057,7 @@ export default function CustomersPage({
       setPrimaryPhone('');
       setSecondaryPhone('');
       setContactEmail('');
-      setInstallationRegion('');
+      setInstallationRegion('Yangon Region');
       setInstallationDistrict('');
       setInstallationTownship('');
       setInstallationCity('');
@@ -3993,7 +4085,7 @@ export default function CustomersPage({
       setContractStartDate('');
       setContractEndDate('');
       setInstallationDate('');
-      setIpType('');
+      setIpType('Dynamic');
       setStaticIpAddress('');
       setRouterId('');
       setMacAddress('');
@@ -4002,8 +4094,8 @@ export default function CustomersPage({
       setNetworkZone('');
       setBillingCycle('Monthly');
       setCustomBillingMonths('');
-      setInstallationFee('');
-      setAdditionalFees('');
+      setInstallationFee('0');
+      setAdditionalFees('0');
       setCollectionService('yes');
       setCollectionFee('');
       setDiscountApplied('no');
@@ -4189,7 +4281,7 @@ export default function CustomersPage({
             </div>
             <div className="space-y-2">
               <Label htmlFor="taxId" className="text-sm font-medium text-slate-700">
-                Tax Identification Number (VAT/GST) <span className="text-rose-600">*</span>
+                Tax Identification Number (VAT/GST)
               </Label>
               <Input
                 id="taxId"
@@ -4739,20 +4831,21 @@ export default function CustomersPage({
             <Label htmlFor="bandwidthPlan" className="text-sm font-medium text-slate-700">
               Bandwidth (Download / Upload) Mbps <span className="text-rose-600">*</span>
             </Label>
-            <SearchableSelect
+            <Input
               id="bandwidthPlan"
               value={bandwidthPlan}
-              onValueChange={setBandwidthPlan}
-              options={bandwidthSelectOptions}
-              placeholder="Select bandwidth"
+              readOnly
+              placeholder="Auto-filled from selected plan"
+              className="bg-slate-50"
             />
             {errors.bandwidthPlan && (
               <p className="text-xs text-rose-600">{errors.bandwidthPlan}</p>
             )}
+            <p className="text-xs text-slate-500">Bandwidth is auto-filled from the selected plan and cannot be edited.</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="serviceStartDate" className="text-sm font-medium text-slate-700">
-              Service Start Date <span className="text-rose-600">*</span>
+              Service Start Date
             </Label>
             <div className="flex gap-2">
               <Input
@@ -4823,7 +4916,7 @@ export default function CustomersPage({
           </div>
           <div className="space-y-2">
             <Label htmlFor="contractStartDate" className="text-sm font-medium text-slate-700">
-              Contract Start Date <span className="text-rose-600">*</span>
+              Contract Start Date
             </Label>
             <div className="flex gap-2">
               <Input
@@ -4894,7 +4987,7 @@ export default function CustomersPage({
           </div>
           <div className="space-y-2">
             <Label htmlFor="contractEndDate" className="text-sm font-medium text-slate-700">
-              Contract End Date <span className="text-rose-600">*</span>
+              Contract End Date
             </Label>
             <div className="flex gap-2">
               <Input
@@ -5153,6 +5246,36 @@ export default function CustomersPage({
               MMK
             </div>
           </div>
+          {!editingCustomer && (
+            <div className="space-y-2">
+              <Label className="text-sm font-medium text-slate-700">Default Billing Rule</Label>
+              <Select
+                value={customerCreateBillingRuleId}
+                onValueChange={setCustomerCreateBillingRuleId}
+                disabled={billingRulesLoading || activeBillingRules.length === 0}
+              >
+                <SelectTrigger>
+                  <SelectValue
+                    placeholder={
+                      billingRulesLoading
+                        ? 'Loading rules...'
+                        : activeBillingRules.length === 0
+                        ? 'No active rules'
+                        : 'Select billing rule (optional)'
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {activeBillingRules.map((rule) => (
+                    <SelectItem key={rule.id} value={rule.id}>
+                      {rule.name} ({rule.billingType}, {rule.billingMode})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {billingRulesError && <p className="text-xs text-rose-600">{billingRulesError}</p>}
+            </div>
+          )}
           <div className="space-y-2">
             <Label className="text-sm font-medium text-slate-700">
               Monthly Subscription Fee
@@ -5163,7 +5286,7 @@ export default function CustomersPage({
           </div>
           <div className="space-y-2">
             <Label htmlFor="installationFee" className="text-sm font-medium text-slate-700">
-              Installation Fee <span className="text-rose-600">*</span>
+              Installation Fee
             </Label>
             <Input
               id="installationFee"
@@ -5178,21 +5301,6 @@ export default function CustomersPage({
             {errors.installationFee && (
               <p className="text-xs text-rose-600">{errors.installationFee}</p>
             )}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="additionalFees" className="text-sm font-medium text-slate-700">
-              Additional Services Fees
-            </Label>
-            <Input
-              id="additionalFees"
-              value={additionalFees}
-              onChange={(e) => {
-                const digitsOnly = e.target.value.replace(/\D/g, '');
-                setAdditionalFees(digitsOnly);
-              }}
-              placeholder="0"
-              inputMode="numeric"
-            />
           </div>
           <>
             <div className="space-y-2">
@@ -5746,7 +5854,7 @@ export default function CustomersPage({
                                       size="sm"
                                       onClick={() => {
                                         if (existingInvoice) {
-                                          openGeneratedInvoiceDialog(existingInvoice);
+                                          navigateToCustomerInvoices(customer as Customer & { code?: string });
                                           return;
                                         }
                                         openManualInvoicePrompt(customer.id);
@@ -5832,7 +5940,7 @@ export default function CustomersPage({
                                   size="sm"
                                   onClick={() => {
                                     if (existingInvoice) {
-                                      openGeneratedInvoiceDialog(existingInvoice);
+                                      navigateToCustomerInvoices(customer as Customer & { code?: string });
                                       return;
                                     }
                                     openManualInvoicePrompt(customer.id);
@@ -5947,9 +6055,16 @@ export default function CustomersPage({
               <DialogHeader>
                 <DialogTitle>Create First Invoice</DialogTitle>
                 <DialogDescription>
-                  {(postCreatePromptCustomer?.name || postCreateInvoiceCustomerId)
+                  {(postCreatePromptCustomer?.name ||
+                    postCreatePromptCustomer?.code ||
+                    postCreateInvoiceCustomerMeta?.customerName ||
+                    postCreateInvoiceCustomerMeta?.customerCode)
                     ? `Customer ${
-                        postCreatePromptCustomer?.name || postCreateInvoiceCustomerId
+                        postCreatePromptCustomer?.code ||
+                        postCreateInvoiceCustomerMeta?.customerCode ||
+                        postCreatePromptCustomer?.name ||
+                        postCreateInvoiceCustomerMeta?.customerName ||
+                        '—'
                       } was created successfully. Do you want to create invoice now or later?`
                     : 'Customer was created successfully. Do you want to create invoice now or later?'}
                 </DialogDescription>
@@ -5985,6 +6100,10 @@ export default function CustomersPage({
               const selectedCustomer = manualInvoiceCustomerId
                 ? customersSource.find((item) => item.id === manualInvoiceCustomerId)
                 : null;
+              const customerMetaFallback =
+                manualInvoiceCustomerId && postCreateInvoiceCustomerMeta?.customerId === manualInvoiceCustomerId
+                  ? postCreateInvoiceCustomerMeta
+                  : null;
               const selectedCustomerSummary = manualInvoiceCustomerId
                 ? customerSummaryById[manualInvoiceCustomerId]
                 : null;
@@ -6013,11 +6132,38 @@ export default function CustomersPage({
                 selectedCustomerSummary?.billing ??
                 selectedCustomerSummary?.customer?.billingInformation ??
                 {};
-              const customerCode = (selectedCustomer as Customer & { code?: string } | null)?.code || '—';
-              const customerName = selectedCustomer?.name || 'Unknown';
-              const customerPhone = selectedCustomer?.phone || '—';
-              const customerAddress = selectedCustomer?.address || '—';
-              const packageCode = selectedCustomer?.package || '—';
+              const customerCode =
+                (selectedCustomer as Customer & { code?: string } | null)?.code ||
+                selectedCustomerSummary?.customerCode ||
+                customerMetaFallback?.customerCode ||
+                '—';
+              const customerName =
+                selectedCustomer?.name ||
+                selectedCustomerSummary?.name ||
+                customerMetaFallback?.customerName ||
+                'Unknown';
+              const customerPhone =
+                selectedCustomer?.phone ||
+                selectedCustomerSummary?.phone ||
+                selectedCustomerSummary?.primaryPhone ||
+                selectedCustomerSummary?.contactInformation?.primaryPhone ||
+                customerMetaFallback?.customerPhone ||
+                '—';
+              const customerAddress =
+                selectedCustomer?.address ||
+                selectedCustomerSummary?.address ||
+                selectedCustomerSummary?.installationAddress ||
+                selectedCustomerSummary?.addressInformation?.installation ||
+                customerMetaFallback?.customerAddress ||
+                '—';
+              const packageCode =
+                selectedCustomer?.package ||
+                selectedCustomerSummary?.package ||
+                selectedCustomerSummary?.subscription?.plan?.planCode ||
+                selectedCustomerSummary?.services?.packageName ||
+                selectedCustomerSummary?.services?.serviceId ||
+                customerMetaFallback?.customerPackage ||
+                '—';
               const currency = 'MMK';
               const monthlyAmount = toNumber(
                 selectedCustomerBillingInfo?.monthlySubscriptionFee ??
@@ -6039,6 +6185,14 @@ export default function CustomersPage({
                 selectedCustomerSummary?.billingInformation?.additionalFees ??
                 selectedCustomerSummary?.billing?.additionalFees ??
                 selectedCustomerSummary?.additionalFees
+              );
+              const collectionFeeAmount = toNumber(
+                selectedCustomerBillingInfo?.collectionFee ??
+                cachedCustomerBillingInfo?.collectionFee ??
+                selectedCustomerSummary?.collectionFee ??
+                selectedCustomerSummary?.billingInformation?.collectionFee ??
+                selectedCustomerSummary?.billing?.collectionFee ??
+                0
               );
               const normalizedRuleBillingMode = String(selectedManualInvoiceRule?.billingMode ?? '')
                 .trim()
@@ -6100,12 +6254,17 @@ export default function CustomersPage({
                   : monthlyAmount * billingCycleMonths;
               const adjustmentPreviewRows = manualInvoiceAdjustmentRows.map((row, index) => {
                 const value = toNumber(row.value);
-                const baseForPercent = cycleAmount + installationAmount + additionalAmount;
+                const baseForPercent = cycleAmount + installationAmount + additionalAmount + collectionFeeAmount;
                 const calculatedAmount =
                   row.valueType === 'percent' ? (baseForPercent * value) / 100 : value;
                 return {
                   ...row,
-                  rowNo: index + 2 + (installationAmount > 0 ? 1 : 0) + (additionalAmount > 0 ? 1 : 0),
+                  rowNo:
+                    index +
+                    2 +
+                    (installationAmount > 0 ? 1 : 0) +
+                    (additionalAmount > 0 ? 1 : 0) +
+                    (collectionFeeAmount > 0 ? 1 : 0),
                   calculatedAmount
                 };
               });
@@ -6115,7 +6274,7 @@ export default function CustomersPage({
               const minusTotal = adjustmentPreviewRows
                 .filter((row) => row.type === 'minus')
                 .reduce((sum, row) => sum + row.calculatedAmount, 0);
-              const subtotalAmount = cycleAmount + installationAmount + additionalAmount;
+              const subtotalAmount = cycleAmount + installationAmount + additionalAmount + collectionFeeAmount;
               const totalAmount = subtotalAmount + plusTotal - minusTotal;
 
               return (
@@ -6248,6 +6407,21 @@ export default function CustomersPage({
                                 </TableCell>
                                 <TableCell className="text-right">
                                   {formatMoney(additionalAmount, currency)}
+                                </TableCell>
+                              </TableRow>
+                            )}
+                            {collectionFeeAmount > 0 && (
+                              <TableRow>
+                                <TableCell>
+                                  {1 + (installationAmount > 0 ? 1 : 0) + (additionalAmount > 0 ? 1 : 0)}
+                                </TableCell>
+                                <TableCell>Collection Fee</TableCell>
+                                <TableCell className="text-right">1</TableCell>
+                                <TableCell className="text-right">
+                                  {formatMoney(collectionFeeAmount, currency)}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {formatMoney(collectionFeeAmount, currency)}
                                 </TableCell>
                               </TableRow>
                             )}
@@ -6543,8 +6717,6 @@ export default function CustomersPage({
             setGeneratedInvoiceDialogOpen(open);
             if (!open) {
               setGeneratedInvoicePreview(null);
-              setGeneratedInvoicePaymentMethod('KBZPay');
-              setGeneratedInvoiceReceiptNo('');
             }
           }}
         >
@@ -6767,41 +6939,6 @@ export default function CustomersPage({
                         <p>This is a system-generated invoice.</p>
                       </div>
 
-                      {(invoice.status || 'unpaid') !== 'paid' && (
-                        <div className="mt-8 rounded-md border border-slate-200 bg-slate-50 p-4">
-                          <p className="mb-3 text-sm font-semibold text-slate-900">Mark Invoice Paid</p>
-                          <div className="grid gap-3 md:grid-cols-2">
-                            <div>
-                              <Label>Payment Method</Label>
-                              <Input
-                                value={generatedInvoicePaymentMethod}
-                                onChange={(event) =>
-                                  setGeneratedInvoicePaymentMethod(event.target.value)
-                                }
-                                placeholder="KBZPay / Cash / Transfer"
-                              />
-                            </div>
-                            <div>
-                              <Label>Receipt No</Label>
-                              <Input
-                                value={generatedInvoiceReceiptNo}
-                                onChange={(event) =>
-                                  setGeneratedInvoiceReceiptNo(event.target.value)
-                                }
-                                placeholder="Optional"
-                              />
-                            </div>
-                          </div>
-                          <div className="mt-4 flex justify-end">
-                            <Button
-                              onClick={handleMarkGeneratedInvoicePaid}
-                              disabled={isMarkingGeneratedInvoicePaid}
-                            >
-                              {isMarkingGeneratedInvoicePaid ? 'Updating...' : 'Mark as Paid'}
-                            </Button>
-                          </div>
-                        </div>
-                      )}
                     </div>
                   </div>
                 );

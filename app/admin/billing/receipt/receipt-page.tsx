@@ -24,12 +24,15 @@ type ReceiptPageProps = {
 
 type ReceiptInvoice = {
   id: string;
+  sourceInvoiceId?: string;
+  isHistoryRow?: boolean;
   invoiceNo?: string | null;
   invoiceDate?: string | null;
   billingPeriodFrom?: string | null;
   billingPeriodTo?: string | null;
   dueDate?: string | null;
   receiptNo?: string | null;
+  receiptStatus?: 'none' | 'issued' | 'cancelled' | string | null;
   paymentMethod?: string | null;
   paidAt?: string | null;
   status?: string | null;
@@ -42,6 +45,7 @@ type ReceiptInvoice = {
   minusAmount?: string | number | null;
   totalAmount?: string | number | null;
   currency?: string | null;
+  collectionEvents?: Array<{ note?: string | null; label?: string | null; timestamp?: string | null }> | null;
   adjustments?: Array<{
     id?: string | null;
     description?: string | null;
@@ -100,10 +104,48 @@ const formatStatus = (value?: string | null) => {
   return normalized;
 };
 
-const formatReceiptStatusLabel = (value?: string | null) => {
-  const status = formatStatus(value);
-  if (status === 'cancelled') return 'cancelled receipt';
-  return status;
+const normalizeReceiptStatus = (value?: string | null) => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized || normalized === 'none') return 'none';
+  if (normalized === 'issued' || normalized === 'active') return 'issued';
+  if (normalized === 'canceled' || normalized === 'cancelled' || normalized === 'void') return 'cancelled';
+  return normalized;
+};
+
+const getCancelledReceiptNosFromEvents = (
+  events?: Array<{ note?: string | null; label?: string | null }> | null,
+) =>
+  (Array.isArray(events) ? events : []).reduce((set, event) => {
+    const text = `${String(event?.note ?? '')} ${String(event?.label ?? '')}`;
+    const match = text.match(/cancelled\s+receipt\s*:\s*([A-Z0-9-]+)/i);
+    const cancelledNo = String(match?.[1] ?? '').trim().toUpperCase();
+    if (cancelledNo) set.add(cancelledNo);
+    return set;
+  }, new Set<string>());
+
+const isReceiptCurrentlyCancelled = (
+  invoice: Pick<ReceiptInvoice, 'receiptStatus' | 'receiptNo' | 'collectionEvents'>,
+) => {
+  const receiptStatus = normalizeReceiptStatus(invoice.receiptStatus);
+  if (receiptStatus === 'cancelled') return true;
+  if (receiptStatus === 'issued') return false;
+
+  const currentReceiptNo = String(invoice.receiptNo ?? '').trim().toUpperCase();
+  const cancelledNos = getCancelledReceiptNosFromEvents(invoice.collectionEvents ?? []);
+  if (currentReceiptNo) {
+    return cancelledNos.has(currentReceiptNo);
+  }
+  return cancelledNos.size > 0;
+};
+
+const getReceiptStatusLabel = (invoice: Pick<ReceiptInvoice, 'status' | 'receiptStatus' | 'receiptNo'>) => {
+  const receiptStatus = normalizeReceiptStatus(invoice.receiptStatus);
+  if (receiptStatus === 'cancelled') return 'cancelled receipt';
+  if (receiptStatus === 'issued') return 'issued';
+  const invoiceStatus = formatStatus(invoice.status);
+  if (invoiceStatus === 'cancelled' && Boolean(invoice.receiptNo?.trim())) return 'cancelled receipt';
+  if (invoiceStatus === 'paid' && Boolean(invoice.receiptNo?.trim())) return 'issued';
+  return invoiceStatus;
 };
 
 const formatCollectionStatus = (value?: string | null) => {
@@ -114,10 +156,19 @@ const formatCollectionStatus = (value?: string | null) => {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 };
 
-const isPaidInvoice = (value?: string | null) => formatStatus(value) === 'paid';
+const isInvoiceEffectivelyPaid = (
+  invoice?: Pick<ReceiptInvoice, 'status' | 'receiptStatus'> | null,
+) =>
+  Boolean(
+    invoice &&
+      formatStatus(invoice.status) === 'paid' &&
+      normalizeReceiptStatus(invoice.receiptStatus) !== 'cancelled',
+  );
 
-const statusBadgeClassName = (value?: string | null) => {
-  const status = formatStatus(value);
+const statusBadgeClassName = (invoice: Pick<ReceiptInvoice, 'status' | 'receiptStatus' | 'receiptNo'>) => {
+  const status = getReceiptStatusLabel(invoice);
+  if (status === 'issued') return 'bg-emerald-100 text-emerald-700';
+  if (status === 'cancelled receipt') return 'bg-slate-200 text-slate-700';
   if (status === 'paid') return 'bg-emerald-100 text-emerald-700';
   if (status === 'overdue') return 'bg-rose-100 text-rose-700';
   if (status === 'cancelled') return 'bg-slate-200 text-slate-700';
@@ -136,6 +187,9 @@ const formatInvoiceNo = (invoiceNo?: string | null, fallbackId?: string | null) 
 
 const getCustomerName = (invoice: ReceiptInvoice) =>
   invoice.customer?.personalName || invoice.customer?.companyName || 'Unknown Customer';
+
+const resolveInvoiceId = (invoice: Pick<ReceiptInvoice, 'id' | 'sourceInvoiceId'>) =>
+  invoice.sourceInvoiceId?.trim() || invoice.id;
 
 const extractErrorMessage = (payload: unknown, fallback: string): string => {
   if (!payload || typeof payload !== 'object') return fallback;
@@ -174,7 +228,6 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
   const [selectedPaymentAccountId, setSelectedPaymentAccountId] = useState('');
   const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([]);
   const [isLoadingPaymentAccounts, setIsLoadingPaymentAccounts] = useState(false);
-  const [customReceiptNo, setCustomReceiptNo] = useState('');
   const [paidAtInput, setPaidAtInput] = useState('');
   const [receiptDialogOpen, setReceiptDialogOpen] = useState(false);
   const [selectedReceipt, setSelectedReceipt] = useState<ReceiptInvoice | null>(null);
@@ -182,6 +235,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
   const [isDownloadingReceipt, setIsDownloadingReceipt] = useState(false);
   const [isPaymentDetailsOpen, setIsPaymentDetailsOpen] = useState(false);
   const [isCancellingReceiptById, setIsCancellingReceiptById] = useState<Record<string, boolean>>({});
+  const listInvoiceFilterId = searchParams.get('invoiceId')?.trim() ?? '';
 
   const fetchInvoiceCandidates = useCallback(async () => {
     const response = await fetch(`${API_BASE_URL}/billing/invoices`, {
@@ -201,6 +255,13 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
         billingPeriodTo: item?.billingPeriodTo ?? null,
         dueDate: item?.dueDate ?? null,
         receiptNo: item?.receiptNo ?? null,
+        receiptStatus: isReceiptCurrentlyCancelled({
+          receiptStatus: item?.receiptStatus,
+          receiptNo: item?.receiptNo,
+          collectionEvents: item?.collectionEvents,
+        })
+          ? 'cancelled'
+          : normalizeReceiptStatus(item?.receiptStatus),
         paymentMethod: item?.paymentMethod ?? null,
         paidAt: item?.paidAt ?? null,
         status: item?.status ?? null,
@@ -216,7 +277,15 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
         adjustments: Array.isArray(item?.adjustments) ? item.adjustments : [],
         customer: item?.customer ?? null,
       }))
-      .filter((item) => item.id && formatStatus(item.status) !== 'cancelled');
+      .filter(
+        (item) =>
+          item.id &&
+          (() => {
+            const invoiceStatus = formatStatus(item.status);
+            if (invoiceStatus === 'paid' || invoiceStatus === 'cancelled') return false;
+            return true;
+          })(),
+      );
   }, []);
 
   const fetchReceipts = useCallback(async () => {
@@ -229,29 +298,64 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
     }
     const list = Array.isArray(payload) ? payload : [];
     return list
-      .map((item) => ({
-        id: String(item?.id ?? ''),
-        invoiceNo: item?.invoiceNo ?? null,
-        invoiceDate: item?.invoiceDate ?? null,
-        billingPeriodFrom: item?.billingPeriodFrom ?? null,
-        billingPeriodTo: item?.billingPeriodTo ?? null,
-        dueDate: item?.dueDate ?? null,
-        receiptNo: item?.receiptNo ?? null,
-        paymentMethod: item?.paymentMethod ?? null,
-        paidAt: item?.paidAt ?? null,
-        status: item?.status ?? null,
-        collectionStatus: item?.collectionStatus ?? null,
-        monthlyFee: item?.monthlyFee ?? null,
-        installationFee: item?.installationFee ?? null,
-        additionalFees: item?.additionalFees ?? null,
-        subtotalAmount: item?.subtotalAmount ?? null,
-        plusAmount: item?.plusAmount ?? null,
-        minusAmount: item?.minusAmount ?? null,
-        totalAmount: item?.totalAmount ?? null,
-        currency: item?.currency ?? 'MMK',
-        adjustments: Array.isArray(item?.adjustments) ? item.adjustments : [],
-        customer: item?.customer ?? null,
-      }))
+      .flatMap((item) => {
+        const base: ReceiptInvoice = {
+          id: String(item?.id ?? ''),
+          invoiceNo: item?.invoiceNo ?? null,
+          invoiceDate: item?.invoiceDate ?? null,
+          billingPeriodFrom: item?.billingPeriodFrom ?? null,
+          billingPeriodTo: item?.billingPeriodTo ?? null,
+          dueDate: item?.dueDate ?? null,
+          receiptNo: item?.receiptNo ?? null,
+          receiptStatus: normalizeReceiptStatus(item?.receiptStatus),
+          paymentMethod: item?.paymentMethod ?? null,
+          paidAt: item?.paidAt ?? null,
+          status: item?.status ?? null,
+          collectionStatus: item?.collectionStatus ?? null,
+          monthlyFee: item?.monthlyFee ?? null,
+          installationFee: item?.installationFee ?? null,
+          additionalFees: item?.additionalFees ?? null,
+          subtotalAmount: item?.subtotalAmount ?? null,
+          plusAmount: item?.plusAmount ?? null,
+          minusAmount: item?.minusAmount ?? null,
+          totalAmount: item?.totalAmount ?? null,
+          currency: item?.currency ?? 'MMK',
+          collectionEvents: Array.isArray(item?.collectionEvents) ? item.collectionEvents : [],
+          adjustments: Array.isArray(item?.adjustments) ? item.adjustments : [],
+          customer: item?.customer ?? null,
+        };
+        if (!base.id) return [];
+
+        const historyRows: ReceiptInvoice[] = [];
+        const seenCancelledReceiptNos = new Set<string>();
+        const currentReceiptNo = String(base.receiptNo ?? '').trim().toUpperCase();
+        const events = base.collectionEvents ?? [];
+        for (let index = 0; index < events.length; index += 1) {
+          const event = events[index];
+          const sourceText = `${String(event?.note ?? '')} ${String(event?.label ?? '')}`;
+          const match = sourceText.match(/cancelled\s+receipt\s*:\s*([A-Z0-9-]+)/i);
+          if (!match?.[1]) continue;
+          const cancelledReceiptNo = match[1].toUpperCase();
+          if (
+            !cancelledReceiptNo ||
+            cancelledReceiptNo === currentReceiptNo ||
+            seenCancelledReceiptNos.has(cancelledReceiptNo)
+          ) {
+            continue;
+          }
+          seenCancelledReceiptNos.add(cancelledReceiptNo);
+          historyRows.push({
+            ...base,
+            id: `${base.id}::cancelled::${cancelledReceiptNo}::${index}`,
+            sourceInvoiceId: base.id,
+            isHistoryRow: true,
+            receiptNo: cancelledReceiptNo,
+            receiptStatus: 'cancelled',
+            paidAt: event?.timestamp ?? base.paidAt ?? null,
+          });
+        }
+        return [base, ...historyRows];
+      })
       .filter((item) => item.id);
   }, []);
 
@@ -272,6 +376,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
       billingPeriodTo: payload?.billingPeriodTo ?? null,
       dueDate: payload?.dueDate ?? null,
       receiptNo: payload?.receiptNo ?? null,
+      receiptStatus: normalizeReceiptStatus(payload?.receiptStatus),
       paymentMethod: payload?.paymentMethod ?? null,
       paidAt: payload?.paidAt ?? null,
       status: payload?.status ?? null,
@@ -284,6 +389,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
       minusAmount: payload?.minusAmount ?? null,
       totalAmount: payload?.totalAmount ?? null,
       currency: payload?.currency ?? 'MMK',
+      collectionEvents: Array.isArray(payload?.collectionEvents) ? payload.collectionEvents : [],
       adjustments: Array.isArray(payload?.adjustments) ? payload.adjustments : [],
       customer: payload?.customer ?? null,
     } as ReceiptInvoice;
@@ -433,6 +539,10 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
     () => invoiceCandidates.find((invoice) => invoice.id === selectedInvoiceId) ?? null,
     [invoiceCandidates, selectedInvoiceId],
   );
+  const selectedInvoiceReceiptLabel = selectedInvoice
+    ? getReceiptStatusLabel(selectedInvoice)
+    : '';
+  const isSelectedInvoiceReceiptIssued = selectedInvoiceReceiptLabel === 'issued';
 
   const activePaymentAccounts = useMemo(
     () => paymentAccounts.filter((account) => account.isActive !== false),
@@ -461,14 +571,12 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
     if (!selectedInvoice) {
       setPaymentMethodType('');
       setSelectedPaymentAccountId('');
-      setCustomReceiptNo('');
       setPaidAtInput('');
       setIsPaymentDetailsOpen(false);
       return;
     }
     setPaymentMethodType('');
     setSelectedPaymentAccountId('');
-    setCustomReceiptNo(selectedInvoice.receiptNo || '');
     setPaidAtInput(selectedInvoice.paidAt ? selectedInvoice.paidAt.slice(0, 16) : '');
     setIsPaymentDetailsOpen(false);
   }, [selectedInvoice]);
@@ -480,9 +588,17 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
   }, [paymentMethodType, selectedPaymentAccount]);
 
   const filteredReceipts = useMemo(() => {
+    const byInvoice =
+      listInvoiceFilterId.length > 0
+        ? receipts.filter(
+            (item) =>
+              String(item.id ?? '').trim() === listInvoiceFilterId ||
+              String(item.sourceInvoiceId ?? '').trim() === listInvoiceFilterId,
+          )
+        : receipts;
     const keyword = search.trim().toLowerCase();
-    if (!keyword) return receipts;
-    return receipts.filter((item) => {
+    if (!keyword) return byInvoice;
+    return byInvoice.filter((item) => {
       const customerName = getCustomerName(item).toLowerCase();
       const customerCode = String(item.customer?.customerCode ?? '').toLowerCase();
       const receiptNo = String(item.receiptNo ?? '').toLowerCase();
@@ -496,7 +612,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
         paymentMethod.includes(keyword)
       );
     });
-  }, [receipts, search]);
+  }, [listInvoiceFilterId, receipts, search]);
 
   const generateReceipt = async () => {
     if (!selectedInvoiceId) {
@@ -506,7 +622,19 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
       });
       return;
     }
-    if (selectedInvoice && !isPaidInvoice(selectedInvoice.status) && !hasSelectedPaymentMethod) {
+    if (
+      selectedInvoice &&
+      formatStatus(selectedInvoice.status) === 'cancelled' &&
+      getReceiptStatusLabel(selectedInvoice) !== 'cancelled receipt'
+    ) {
+      toast({
+        title: 'Cannot create receipt',
+        description: 'Cancelled invoices cannot create receipt.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (selectedInvoice && !isInvoiceEffectivelyPaid(selectedInvoice) && !hasSelectedPaymentMethod) {
       toast({
         title: 'Payment method is required',
         description: 'Please choose cash, wallet, or account.',
@@ -516,7 +644,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
     }
     if (
       selectedInvoice &&
-      !isPaidInvoice(selectedInvoice.status) &&
+      !isInvoiceEffectivelyPaid(selectedInvoice) &&
       requiresPaymentAccount &&
       !selectedPaymentAccount
     ) {
@@ -527,7 +655,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
       });
       return;
     }
-    if (selectedInvoice && !isPaidInvoice(selectedInvoice.status) && !resolvedPaymentMethod.trim()) {
+    if (selectedInvoice && !isInvoiceEffectivelyPaid(selectedInvoice) && !resolvedPaymentMethod.trim()) {
       toast({
         title: 'Payment method is required',
         description: 'Please complete payment method step.',
@@ -540,7 +668,6 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
     try {
       const requestBody: Record<string, string> = {};
       if (resolvedPaymentMethod.trim()) requestBody.paymentMethod = resolvedPaymentMethod.trim();
-      if (customReceiptNo.trim()) requestBody.receiptNo = customReceiptNo.trim();
       if (paidAtInput.trim()) requestBody.paidAt = new Date(paidAtInput).toISOString();
 
       const response = await fetch(`${API_BASE_URL}/billing/invoices/${selectedInvoiceId}/receipt`, {
@@ -606,8 +733,16 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
 
   const cancelReceipt = async (receipt: ReceiptInvoice) => {
     if (isCancellingReceiptById[receipt.id]) return;
+    if (receipt.isHistoryRow) {
+      toast({
+        title: 'History row',
+        description: 'Cancelled history receipt cannot be cancelled again.',
+      });
+      return;
+    }
     const status = formatStatus(receipt.status);
-    if (status === 'cancelled') {
+    const receiptStatusLabel = getReceiptStatusLabel(receipt);
+    if (status === 'cancelled' || receiptStatusLabel === 'cancelled receipt') {
       toast({
         title: 'Already cancelled',
         description: 'This receipt is already cancelled.',
@@ -617,20 +752,23 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
 
     setIsCancellingReceiptById((prev) => ({ ...prev, [receipt.id]: true }));
     try {
-      await cancelReceiptInBackend(receipt.id);
+      const invoiceId = resolveInvoiceId(receipt);
+      await cancelReceiptInBackend(invoiceId);
 
       setReceipts((prev) =>
         prev.map((item) =>
-          item.id === receipt.id ? { ...item, status: 'cancelled' } : item,
+          item.id === receipt.id ? { ...item, status: 'unpaid', receiptStatus: 'cancelled' } : item,
         ),
       );
       setInvoiceCandidates((prev) =>
         prev.map((item) =>
-          item.id === receipt.id ? { ...item, status: 'cancelled' } : item,
+          item.id === receipt.id ? { ...item, status: 'unpaid', receiptStatus: 'cancelled' } : item,
         ),
       );
       setSelectedReceipt((prev) =>
-        prev && prev.id === receipt.id ? { ...prev, status: 'cancelled' } : prev,
+        prev && prev.id === receipt.id
+          ? { ...prev, status: 'unpaid', receiptStatus: 'cancelled' }
+          : prev,
       );
 
       appendActivityLog({
@@ -641,17 +779,17 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
         actorName: user?.name,
         actorRole: user?.role,
         targetType: 'invoice',
-        targetId: receipt.id,
-        targetName: formatInvoiceNo(receipt.invoiceNo, receipt.id),
+        targetId: invoiceId,
+        targetName: formatInvoiceNo(receipt.invoiceNo, invoiceId),
         metadata: {
           receiptNo: receipt.receiptNo ?? null,
-          invoiceStatus: 'cancelled',
+          receiptStatus: 'cancelled',
         },
       });
 
       toast({
         title: 'Receipt cancelled',
-        description: 'Invoice status changed to cancelled receipt status.',
+        description: 'Receipt status changed to cancelled.',
       });
       await refreshAll();
     } catch (error) {
@@ -935,6 +1073,9 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
             <Button variant={mode === 'list' ? 'default' : 'outline'} asChild>
               <Link href="/admin/billing/receipt/list">Receipt List</Link>
             </Button>
+            <Button variant="outline" asChild>
+              <Link href="/admin/billing?tab=invoice-list">Invoice List</Link>
+            </Button>
           </CardContent>
         </Card>
 
@@ -972,8 +1113,8 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                 <div className="space-y-4 rounded-lg border border-slate-300 bg-white p-5 text-slate-900">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h3 className="text-base font-semibold">Invoice Preview</h3>
-                    <Badge variant="secondary" className={statusBadgeClassName(selectedInvoice.status)}>
-                      {formatStatus(selectedInvoice.status)}
+                    <Badge variant="secondary" className={statusBadgeClassName(selectedInvoice)}>
+                      {getReceiptStatusLabel(selectedInvoice)}
                     </Badge>
                   </div>
 
@@ -1104,7 +1245,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                 </div>
               )}
 
-              {selectedInvoice && !isPaidInvoice(selectedInvoice.status) && (
+              {selectedInvoice && !isInvoiceEffectivelyPaid(selectedInvoice) && (
                 <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
                   <h4 className="font-semibold text-amber-900">Payment Flow</h4>
                   <div className="grid gap-3 md:grid-cols-3">
@@ -1179,15 +1320,6 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                     </div>
                   </div>
 
-                  <div className="space-y-1">
-                    <Label>Custom Receipt No (Optional)</Label>
-                    <Input
-                      value={customReceiptNo}
-                      onChange={(event) => setCustomReceiptNo(event.target.value)}
-                      placeholder="RC-03260001"
-                    />
-                  </div>
-
                   {requiresPaymentAccount && selectedPaymentAccount ? (
                     <Button
                       type="button"
@@ -1201,10 +1333,23 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                 </div>
               )}
 
-              <Button onClick={generateReceipt} disabled={isGenerating || !selectedInvoiceId}>
+              <Button
+                onClick={generateReceipt}
+                disabled={
+                  isGenerating ||
+                  !selectedInvoiceId ||
+                  isSelectedInvoiceReceiptIssued ||
+                  (selectedInvoice
+                    ? formatStatus(selectedInvoice.status) === 'cancelled' &&
+                      selectedInvoiceReceiptLabel !== 'cancelled receipt'
+                    : false)
+                }
+              >
                 {isGenerating
                   ? 'Processing...'
-                  : selectedInvoice && !isPaidInvoice(selectedInvoice.status)
+                  : isSelectedInvoiceReceiptIssued
+                    ? 'Receipt Already Issued'
+                  : selectedInvoice && !isInvoiceEffectivelyPaid(selectedInvoice)
                     ? 'Confirm Payment & Create Receipt'
                     : 'Create Receipt'}
               </Button>
@@ -1255,7 +1400,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                     {filteredReceipts.map((receipt) => (
                       <TableRow key={receipt.id}>
                         <TableCell className="font-medium">{receipt.receiptNo || '—'}</TableCell>
-                        <TableCell>{formatInvoiceNo(receipt.invoiceNo, receipt.id)}</TableCell>
+                        <TableCell>{formatInvoiceNo(receipt.invoiceNo, resolveInvoiceId(receipt))}</TableCell>
                         <TableCell>
                           <div>{getCustomerName(receipt)}</div>
                           <div className="text-xs text-slate-500">{receipt.customer?.customerCode || '—'}</div>
@@ -1264,7 +1409,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                         <TableCell className="capitalize">{receipt.paymentMethod || '—'}</TableCell>
                         <TableCell>{formatDisplayDate(receipt.paidAt)}</TableCell>
                         <TableCell>
-                        <Badge variant="secondary">{formatReceiptStatusLabel(receipt.status)}</Badge>
+                        <Badge variant="secondary">{getReceiptStatusLabel(receipt)}</Badge>
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
@@ -1272,7 +1417,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                               type="button"
                               size="sm"
                               variant="outline"
-                              onClick={() => void openReceiptDetail(receipt.id)}
+                              onClick={() => void openReceiptDetail(resolveInvoiceId(receipt))}
                             >
                               <Eye className="mr-2 h-4 w-4" />
                               View
@@ -1293,7 +1438,11 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                               variant="outline"
                               className="border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
                               onClick={() => void cancelReceipt(receipt)}
-                              disabled={Boolean(isCancellingReceiptById[receipt.id]) || formatStatus(receipt.status) === 'cancelled'}
+                              disabled={
+                                Boolean(isCancellingReceiptById[receipt.id]) ||
+                                Boolean(receipt.isHistoryRow) ||
+                                getReceiptStatusLabel(receipt) === 'cancelled receipt'
+                              }
                             >
                               {isCancellingReceiptById[receipt.id] ? 'Cancelling...' : 'Cancel Receipt'}
                             </Button>
@@ -1451,7 +1600,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                     <p>Receipt No: {selectedReceipt.receiptNo || '__________'}</p>
                     <p>Invoice No: {formatInvoiceNo(selectedReceipt.invoiceNo, selectedReceipt.id)}</p>
                     <p>Invoice Date: {formatDisplayDate(selectedReceipt.invoiceDate)}</p>
-                    <p>Status: {formatReceiptStatusLabel(selectedReceipt.status)}</p>
+                    <p>Status: {getReceiptStatusLabel(selectedReceipt)}</p>
                   </div>
 
                   <div className="space-y-1 text-sm">
@@ -1554,7 +1703,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                   </p>
                   <p>
                     Payment Status:{' '}
-                    <span className="font-medium">{formatReceiptStatusLabel(selectedReceipt.status)}</span>
+                    <span className="font-medium">{getReceiptStatusLabel(selectedReceipt)}</span>
                   </p>
                   <p>
                     Collection Status:{' '}
@@ -1578,7 +1727,8 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                       onClick={() => void cancelReceipt(selectedReceipt)}
                       disabled={
                         Boolean(isCancellingReceiptById[selectedReceipt.id]) ||
-                        formatStatus(selectedReceipt.status) === 'cancelled'
+                        Boolean(selectedReceipt.isHistoryRow) ||
+                        getReceiptStatusLabel(selectedReceipt) === 'cancelled receipt'
                       }
                     >
                       {isCancellingReceiptById[selectedReceipt.id] ? 'Cancelling...' : 'Cancel Receipt'}
