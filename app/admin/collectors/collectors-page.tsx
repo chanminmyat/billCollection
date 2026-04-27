@@ -41,6 +41,15 @@ const normalizeCollectionServiceValue = (value: unknown): 'yes' | 'no' | null =>
   return null;
 };
 
+const toMyanmarPhoneLocal = (value: string | null | undefined) => {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('959')) return digits.slice(2).slice(0, 11);
+  if (digits.startsWith('95')) return digits.slice(2).slice(0, 11);
+  if (digits.startsWith('09')) return digits.slice(1).slice(0, 11);
+  return digits.slice(0, 11);
+};
+
 const readCustomerBillingFeeCache = (): Record<
   string,
   { collectionService?: 'yes' | 'no' }
@@ -202,12 +211,46 @@ export default function CollectorsPage({
   const [collectorStreet, setCollectorStreet] = useState('');
   const [collectorBuilding, setCollectorBuilding] = useState('');
   const [collectorPostalCode, setCollectorPostalCode] = useState('');
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [newCollector, setNewCollector] = useState({
     name: '',
     phone: '',
     email: '',
     area: ''
   });
+
+  const clearFieldError = (field: string) => {
+    setErrors((prev) => {
+      if (!prev[field]) return prev;
+      const { [field]: _removed, ...rest } = prev;
+      return rest;
+    });
+  };
+
+  const validateCollectorForm = () => {
+    const nextErrors: Record<string, string> = {};
+    if (!newCollector.name.trim()) {
+      nextErrors.name = 'Enter collector full name.';
+    }
+    const phoneDigits = newCollector.phone.replace(/\D/g, '');
+    if (!phoneDigits) {
+      nextErrors.phone = 'Enter phone number.';
+    } else if (!/^9\d{6,10}$/.test(phoneDigits)) {
+      nextErrors.phone = 'Enter valid Myanmar phone after +95 (start with 9).';
+    }
+    if (!nrcState || !nrcTownship || !nrcType || !nrcNumber) {
+      nextErrors.nrc = 'Complete NRC fields.';
+    } else if (nrcNumber.length !== 6) {
+      nextErrors.nrc = 'NRC number must be 6 digits.';
+    }
+    if (newCollector.email.trim()) {
+      const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newCollector.email.trim());
+      if (!emailOk) {
+        nextErrors.email = 'Enter a valid email address.';
+      }
+    }
+    return nextErrors;
+  };
 
   const logAdminActivity = (
     action: string,
@@ -420,7 +463,39 @@ export default function CollectorsPage({
 
   const parseNrc = (value?: string | null) => {
     if (!value) return { state: '', township: '', type: '', number: '' };
-    const match = value.match(/^(.+?)\/(.+?)\((.+?)\)(.+)$/);
+    const raw = String(value).trim();
+    const canonicalMatch = raw.match(/^([^/]+?)\s*\/\s*([^(]+?)\s*\(\s*([^)]+?)\s*\)\s*([A-Za-z0-9]+)$/);
+    if (canonicalMatch) {
+      return {
+        state: canonicalMatch[1]?.trim() ?? '',
+        township: canonicalMatch[2]?.trim() ?? '',
+        type: canonicalMatch[3]?.trim() ?? '',
+        number: canonicalMatch[4]?.trim() ?? ''
+      };
+    }
+
+    const compact = raw.replace(/\s+/g, '');
+    const compactCanonicalMatch = compact.match(/^([^/]+?)\/([^(]+?)\(([^)]+?)\)([A-Za-z0-9]+)$/);
+    if (compactCanonicalMatch) {
+      return {
+        state: compactCanonicalMatch[1] ?? '',
+        township: compactCanonicalMatch[2] ?? '',
+        type: compactCanonicalMatch[3] ?? '',
+        number: compactCanonicalMatch[4] ?? ''
+      };
+    }
+
+    const legacyMatch = compact.match(/^([^/]+?)\/(.+?)([A-Za-z])(\d{6})$/);
+    if (legacyMatch) {
+      return {
+        state: legacyMatch[1] ?? '',
+        township: legacyMatch[2] ?? '',
+        type: legacyMatch[3] ?? '',
+        number: legacyMatch[4] ?? ''
+      };
+    }
+
+    const match = raw.match(/^(.+?)\/(.+?)\((.+?)\)(.+)$/);
     if (!match) return { state: '', township: '', type: '', number: '' };
     return {
       state: match[1] ?? '',
@@ -476,8 +551,23 @@ export default function CollectorsPage({
             email: item?.user?.email ?? '',
             area: item?.area ?? item?.township ?? '',
             status: item?.status ?? item?.user?.status ?? 'enable',
-            nrc: item?.nrc ?? '',
-            address: item?.address ?? ''
+            nrc:
+              item?.nrc ??
+              item?.collectorProfile?.nrc ??
+              item?.profile?.nrc ??
+              item?.user?.collectorProfile?.nrc ??
+              '',
+            address: item?.address ?? '',
+            addressDetails: {
+              region: item?.region ?? '',
+              district: item?.district ?? '',
+              township: item?.township ?? '',
+              city: item?.city ?? '',
+              ward: item?.ward ?? '',
+              street: item?.street ?? '',
+              building: item?.building ?? '',
+              postalCode: item?.postalCode ?? ''
+            }
           };
         }) as Collector[];
 
@@ -606,6 +696,16 @@ export default function CollectorsPage({
 
   const handleAddCollector = async () => {
     if (isAddingCollector) return;
+    const validationErrors = validateCollectorForm();
+    setErrors(validationErrors);
+    if (Object.keys(validationErrors).length > 0) {
+      toast({
+        title: 'Required fields missing',
+        description: Object.values(validationErrors)[0] ?? 'Please fill required fields.',
+        variant: 'destructive'
+      });
+      return;
+    }
     setIsAddingCollector(true);
 
     const nrcValue = formatNrc(nrcState, nrcTownship, nrcType, nrcNumber);
@@ -654,7 +754,11 @@ export default function CollectorsPage({
 
       if (!response.ok) {
         const message = data?.message ?? 'Failed to create collector';
-        console.error(message, data);
+        toast({
+          title: 'Create collector failed',
+          description: String(message),
+          variant: 'destructive'
+        });
         setIsAddingCollector(false);
         return;
       }
@@ -689,7 +793,11 @@ export default function CollectorsPage({
         );
       }
     } catch (error) {
-      console.error('Failed to create collector', error);
+      toast({
+        title: 'Network error',
+        description: error instanceof Error ? error.message : 'Failed to create collector',
+        variant: 'destructive'
+      });
       setIsAddingCollector(false);
       return;
     }
@@ -699,7 +807,17 @@ export default function CollectorsPage({
       area: collectorTownship || collectorDistrict || newCollector.area,
       status: collectorStatus,
       nrc: nrcValue,
-      address: addressValue
+      address: addressValue,
+      addressDetails: {
+        region: collectorRegion,
+        district: collectorDistrict,
+        township: collectorTownship,
+        city: collectorCity,
+        ward: collectorWard,
+        street: collectorStreet,
+        building: collectorBuilding,
+        postalCode: collectorPostalCode
+      }
     });
     logAdminActivity(
       'collector_created',
@@ -731,6 +849,7 @@ export default function CollectorsPage({
     setCollectorStreet('');
     setCollectorBuilding('');
     setCollectorPostalCode('');
+    setErrors({});
     setAssignedCustomerIds([]);
     setCustomerQuery('');
     toast({
@@ -751,10 +870,11 @@ export default function CollectorsPage({
     setEditingCollector(collector);
     setNewCollector({
       name: collector.name,
-      phone: collector.phone,
+      phone: toMyanmarPhoneLocal(collector.phone),
       email: collector.email,
       area: collector.area
     });
+    setErrors({});
     setCollectorStatus(collector.status ?? 'enable');
     setNrcState(parsedNrc.state);
     setNrcTownship(parsedNrc.township);
@@ -770,11 +890,34 @@ export default function CollectorsPage({
     );
     setCollectorBuilding(collector.addressDetails?.building ?? '');
     setCollectorPostalCode(collector.addressDetails?.postalCode ?? '');
+    const assignmentSource =
+      availableCustomers.length > 0
+        ? availableCustomers
+        : customers.map((customer) => ({
+            id: customer.id,
+            name: customer.name,
+            collectorId: customer.collectorId
+          }));
+    const preselectedCustomerIds = assignmentSource
+      .filter((customer) => isCustomerAssignedToCollector(customer, collector))
+      .map((customer) => customer.id);
+    setAssignedCustomerIds(Array.from(new Set(preselectedCustomerIds)));
+    setCustomerQuery('');
   };
 
   const handleUpdateCollector = async () => {
     if (editingCollector) {
       if (isUpdatingCollector) return;
+      const validationErrors = validateCollectorForm();
+      setErrors(validationErrors);
+      if (Object.keys(validationErrors).length > 0) {
+        toast({
+          title: 'Required fields missing',
+          description: Object.values(validationErrors)[0] ?? 'Please fill required fields.',
+          variant: 'destructive'
+        });
+        return;
+      }
       setIsUpdatingCollector(true);
 
       const nrcValue = formatNrc(nrcState, nrcTownship, nrcType, nrcNumber);
@@ -818,7 +961,11 @@ export default function CollectorsPage({
         if (!response.ok) {
           const data = await response.json().catch(() => null);
           const message = data?.message ?? 'Failed to update collector';
-          console.error(message, data);
+          toast({
+            title: 'Update collector failed',
+            description: String(message),
+            variant: 'destructive'
+          });
           setIsUpdatingCollector(false);
           return;
         }
@@ -845,8 +992,39 @@ export default function CollectorsPage({
             });
           }
         }
+
+        const assignmentValue = getCollectorAssignmentValue(editingCollector);
+        const currentAssigned = availableCustomers
+          .filter((customer) => isCustomerAssignedToCollector(customer, editingCollector))
+          .map((customer) => customer.id);
+        const targetAssigned = Array.from(new Set(assignedCustomerIds.filter(Boolean)));
+        const toAssign = targetAssigned.filter((id) => !currentAssigned.includes(id));
+        const toUnassign = currentAssigned.filter((id) => !targetAssigned.includes(id));
+
+        if (assignmentValue && (toAssign.length > 0 || toUnassign.length > 0)) {
+          await Promise.all([
+            ...toAssign.map((id) => updateCustomerCollector(id, assignmentValue)),
+            ...toUnassign.map((id) => updateCustomerCollector(id, null))
+          ]);
+
+          setAvailableCustomers((prev) =>
+            prev.map((customer) => {
+              if (toAssign.includes(customer.id)) {
+                return { ...customer, collectorId: assignmentValue };
+              }
+              if (toUnassign.includes(customer.id)) {
+                return { ...customer, collectorId: '' };
+              }
+              return customer;
+            })
+          );
+        }
       } catch (error) {
-        console.error('Failed to update collector', error);
+        toast({
+          title: 'Network error',
+          description: error instanceof Error ? error.message : 'Failed to update collector',
+          variant: 'destructive'
+        });
         setIsUpdatingCollector(false);
         return;
       }
@@ -856,7 +1034,17 @@ export default function CollectorsPage({
         area: collectorTownship || collectorDistrict || newCollector.area,
         status: collectorStatus,
         nrc: nrcValue,
-        address: addressValue
+        address: addressValue,
+        addressDetails: {
+          region: collectorRegion,
+          district: collectorDistrict,
+          township: collectorTownship,
+          city: collectorCity,
+          ward: collectorWard,
+          street: collectorStreet,
+          building: collectorBuilding,
+          postalCode: collectorPostalCode
+        }
       });
       updateRemoteCollector(editingCollector.id, {
         name: newCollector.name,
@@ -865,7 +1053,17 @@ export default function CollectorsPage({
         area: collectorTownship || collectorDistrict || newCollector.area,
         status: collectorStatus,
         nrc: nrcValue,
-        address: addressValue
+        address: addressValue,
+        addressDetails: {
+          region: collectorRegion,
+          district: collectorDistrict,
+          township: collectorTownship,
+          city: collectorCity,
+          ward: collectorWard,
+          street: collectorStreet,
+          building: collectorBuilding,
+          postalCode: collectorPostalCode
+        }
       });
       logAdminActivity(
         'collector_updated',
@@ -875,7 +1073,8 @@ export default function CollectorsPage({
         newCollector.name,
         {
           status: collectorStatus,
-          area: collectorTownship || collectorDistrict || newCollector.area
+          area: collectorTownship || collectorDistrict || newCollector.area,
+          assignedCustomerCount: assignedCustomerIds.length
         }
       );
       setEditingCollector(null);
@@ -898,6 +1097,7 @@ export default function CollectorsPage({
       setCollectorStreet('');
       setCollectorBuilding('');
       setCollectorPostalCode('');
+      setErrors({});
       setAssignedCustomerIds([]);
       setCustomerQuery('');
 
@@ -1039,9 +1239,13 @@ export default function CollectorsPage({
           <Input
             id="collector-name"
             value={newCollector.name}
-            onChange={(e) => setNewCollector({ ...newCollector, name: e.target.value })}
+            onChange={(e) => {
+              setNewCollector({ ...newCollector, name: e.target.value });
+              if (e.target.value.trim()) clearFieldError('name');
+            }}
             placeholder="Enter collector's full name"
           />
+          {errors.name && <p className="text-xs text-rose-600">{errors.name}</p>}
         </div>
         <div className="space-y-2">
           <Label htmlFor="collector-status" className="text-sm font-medium text-slate-700">
@@ -1068,20 +1272,35 @@ export default function CollectorsPage({
             id="collector-email"
             type="email"
             value={newCollector.email}
-            onChange={(e) => setNewCollector({ ...newCollector, email: e.target.value })}
+            onChange={(e) => {
+              setNewCollector({ ...newCollector, email: e.target.value });
+              clearFieldError('email');
+            }}
             placeholder="collector@billflow.com"
           />
+          {errors.email && <p className="text-xs text-rose-600">{errors.email}</p>}
         </div>
         <div className="space-y-2">
           <Label htmlFor="collector-phone" className="text-sm font-medium text-slate-700">
             Phone Number <span className="text-rose-600">*</span>
           </Label>
-          <Input
-            id="collector-phone"
-            value={newCollector.phone}
-            onChange={(e) => setNewCollector({ ...newCollector, phone: e.target.value })}
-            placeholder="09 123 456 789"
-          />
+          <div className="flex gap-2">
+            <div className="flex items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-600">
+              +95
+            </div>
+            <Input
+              id="collector-phone"
+              value={newCollector.phone}
+              onChange={(e) => {
+                const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 11);
+                setNewCollector({ ...newCollector, phone: digitsOnly });
+                clearFieldError('phone');
+              }}
+              placeholder="9 123 456 789"
+              inputMode="numeric"
+            />
+          </div>
+          {errors.phone && <p className="text-xs text-rose-600">{errors.phone}</p>}
         </div>
         <div className="space-y-2 md:col-span-2">
           <Label className="text-sm font-medium text-slate-700">
@@ -1094,6 +1313,7 @@ export default function CollectorsPage({
               onValueChange={(value) => {
                 setNrcState(value);
                 setNrcTownship('');
+                clearFieldError('nrc');
               }}
               options={nrcStateOptions}
               placeholder="State"
@@ -1101,14 +1321,20 @@ export default function CollectorsPage({
             <SearchableSelect
               id="collector-nrc-township"
               value={nrcTownship}
-              onValueChange={setNrcTownship}
+              onValueChange={(value) => {
+                setNrcTownship(value);
+                clearFieldError('nrc');
+              }}
               options={nrcTownshipOptions}
               placeholder="Township"
             />
             <SearchableSelect
               id="collector-nrc-type"
               value={nrcType}
-              onValueChange={setNrcType}
+              onValueChange={(value) => {
+                setNrcType(value);
+                clearFieldError('nrc');
+              }}
               options={nrcTypeOptions}
               placeholder="Type"
             />
@@ -1118,11 +1344,13 @@ export default function CollectorsPage({
               onChange={(e) => {
                 const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 6);
                 setNrcNumber(digitsOnly);
+                clearFieldError('nrc');
               }}
               placeholder="123456"
               inputMode="numeric"
             />
           </div>
+          {errors.nrc && <p className="text-xs text-rose-600">{errors.nrc}</p>}
         </div>
       </div>
       <div className="border-t border-slate-200 px-6 py-6">
@@ -1453,9 +1681,15 @@ export default function CollectorsPage({
                             <TableCell>
                               <div>
                                 <div className="font-medium">{collector.name}</div>
-                                <div className="text-sm text-gray-500">
-                                  ID: {(collector as Collector & { collectorCode?: string }).collectorCode || collector.id}
-                                </div>
+                                <button
+                                  type="button"
+                                  className="text-sm text-blue-600 hover:underline"
+                                  onClick={() => openViewDialog(collector)}
+                                >
+                                  ID:{' '}
+                                  {(collector as Collector & { collectorCode?: string }).collectorCode ||
+                                    collector.id}
+                                </button>
                               </div>
                             </TableCell>
                             <TableCell>
@@ -1589,9 +1823,14 @@ export default function CollectorsPage({
                         <CardContent className="space-y-3 pt-4">
                           <div className="flex items-start justify-between gap-3">
                             <div>
-                              <p className="text-sm text-slate-500">
-                                {(collector as Collector & { collectorCode?: string }).collectorCode || collector.id}
-                              </p>
+                              <button
+                                type="button"
+                                className="text-sm text-blue-600 hover:underline"
+                                onClick={() => openViewDialog(collector)}
+                              >
+                                {(collector as Collector & { collectorCode?: string }).collectorCode ||
+                                  collector.id}
+                              </button>
                               <p className="text-base font-semibold text-slate-900">{collector.name}</p>
                             </div>
                             <Button size="sm" variant="outline" onClick={() => handleEditCollector(collector)}>
@@ -1766,36 +2005,93 @@ export default function CollectorsPage({
                 }
               }}
             >
-              <DialogContent className="max-w-lg">
-                <DialogHeader>
-                  <DialogTitle>
-                    Assigned Customers{viewCollector ? ` • ${viewCollector.name}` : ''}
-                  </DialogTitle>
-                </DialogHeader>
-                <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  {customersLoading ? (
-                    <p className="text-xs text-slate-500">Loading customers...</p>
-                  ) : viewAssignedCustomers.length === 0 ? (
-                    <p className="text-xs text-slate-500">No customers assigned.</p>
-                  ) : (
-                    viewAssignedCustomers.map((customer) => (
-                      <div
-                        key={customer.id}
-                        className="flex items-center justify-between py-2 text-sm text-slate-700"
-                      >
-                        <span>{customer.name}</span>
-                        {customer.collectorId && (
-                          <span className="text-xs text-slate-400">{customer.collectorId}</span>
+              <DialogContent className="inset-0 left-0 top-0 h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 overflow-y-auto rounded-none border-0 p-4 sm:rounded-none sm:p-6">
+                <div className="mx-auto w-full max-w-5xl space-y-4">
+                  <DialogHeader>
+                    <DialogTitle>
+                      Collector Details{viewCollector ? ` • ${viewCollector.name}` : ''}
+                    </DialogTitle>
+                  </DialogHeader>
+                  {viewCollector && (
+                    <div className="space-y-4">
+                    <div className="grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-4">
+                      <div>
+                        <p className="text-xs text-slate-500">Collector Code</p>
+                        <p className="font-semibold text-slate-900">
+                          {(viewCollector as Collector & { collectorCode?: string }).collectorCode ||
+                            viewCollector.id}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500">Status</p>
+                        <p className="font-semibold text-slate-900 capitalize">{viewCollector.status || 'enable'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500">Area</p>
+                        <p className="font-semibold text-slate-900">{viewCollector.area || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500">Assigned Customers</p>
+                        <p className="font-semibold text-slate-900">{viewAssignedCustomers.length}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="rounded-lg border border-slate-200 p-4">
+                        <p className="mb-3 text-sm font-semibold text-slate-900">Contact</p>
+                        <div className="space-y-2 text-sm text-slate-700">
+                          <p><span className="text-slate-500">Name:</span> {viewCollector.name || '—'}</p>
+                          <p><span className="text-slate-500">Phone:</span> {viewCollector.phone || '—'}</p>
+                          <p><span className="text-slate-500">Email:</span> {viewCollector.email || '—'}</p>
+                          <p><span className="text-slate-500">NRC:</span> {viewCollector.nrc || '—'}</p>
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 p-4">
+                        <p className="mb-3 text-sm font-semibold text-slate-900">Address</p>
+                        <div className="space-y-2 text-sm text-slate-700">
+                          <p><span className="text-slate-500">Full:</span> {viewCollector.address || '—'}</p>
+                          <p><span className="text-slate-500">Region:</span> {viewCollector.addressDetails?.region || '—'}</p>
+                          <p><span className="text-slate-500">District:</span> {viewCollector.addressDetails?.district || '—'}</p>
+                          <p><span className="text-slate-500">Township:</span> {viewCollector.addressDetails?.township || '—'}</p>
+                          <p><span className="text-slate-500">City:</span> {viewCollector.addressDetails?.city || '—'}</p>
+                          <p><span className="text-slate-500">Ward:</span> {viewCollector.addressDetails?.ward || '—'}</p>
+                          <p><span className="text-slate-500">Street:</span> {viewCollector.addressDetails?.street || '—'}</p>
+                          <p><span className="text-slate-500">Building:</span> {viewCollector.addressDetails?.building || '—'}</p>
+                          <p><span className="text-slate-500">Postal Code:</span> {viewCollector.addressDetails?.postalCode || '—'}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-slate-200 p-4">
+                      <p className="mb-3 text-sm font-semibold text-slate-900">Assigned Customers</p>
+                      <div className="max-h-52 overflow-y-auto rounded-md border border-slate-100 bg-slate-50 p-3">
+                        {customersLoading ? (
+                          <p className="text-xs text-slate-500">Loading customers...</p>
+                        ) : viewAssignedCustomers.length === 0 ? (
+                          <p className="text-xs text-slate-500">No customers assigned.</p>
+                        ) : (
+                          viewAssignedCustomers.map((customer) => (
+                            <div
+                              key={customer.id}
+                              className="flex items-center justify-between py-2 text-sm text-slate-700"
+                            >
+                              <span>{customer.name}</span>
+                              {customer.collectorId && (
+                                <span className="text-xs text-slate-400">{customer.collectorId}</span>
+                              )}
+                            </div>
+                          ))
                         )}
                       </div>
-                    ))
+                    </div>
+                    </div>
                   )}
+                  <DialogFooter>
+                    <Button type="button" variant="outline" onClick={() => setViewDialogOpen(false)}>
+                      Close
+                    </Button>
+                  </DialogFooter>
                 </div>
-                <DialogFooter>
-                  <Button type="button" variant="outline" onClick={() => setViewDialogOpen(false)}>
-                    Close
-                  </Button>
-                </DialogFooter>
               </DialogContent>
             </Dialog>
 

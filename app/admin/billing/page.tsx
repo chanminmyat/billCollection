@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -81,6 +82,7 @@ const INVOICE_RULE_NONE_VALUE = '__none__';
 type InvoiceStatus = 'paid' | 'unpaid' | 'overdue' | 'cancelled';
 type AdjustmentType = 'plus' | 'minus';
 type AdjustmentValueType = 'fixed' | 'percent';
+type FixedFirstInvoiceChargeMode = 'full_month' | 'prorated';
 
 type InvoiceAdjustment = {
   id: string;
@@ -285,6 +287,17 @@ const toNumber = (value: string | number | null | undefined) => {
 
 const formatMoney = (value: string | number | null | undefined, currency = 'MMK') =>
   `${toNumber(value).toLocaleString()} ${currency}`;
+
+const inferFixedFirstChargeModeFromInvoice = (
+  invoice: Pick<InvoiceRecord, 'monthlyFee' | 'subscription'>,
+): FixedFirstInvoiceChargeMode => {
+  const epsilon = 0.0001;
+  const planMonthlyFee = toNumber(invoice.subscription?.plan?.monthlyFee);
+  const invoiceMonthlyFee = toNumber(invoice.monthlyFee);
+  const unitMonthlyFee = planMonthlyFee > 0 ? planMonthlyFee : invoiceMonthlyFee;
+  if (unitMonthlyFee <= epsilon || invoiceMonthlyFee <= epsilon) return 'full_month';
+  return invoiceMonthlyFee + epsilon < unitMonthlyFee ? 'prorated' : 'full_month';
+};
 
 const formatInvoiceNo = (invoiceNo?: string | null, fallbackId?: string | null) => {
   const rawInvoiceNo = (invoiceNo ?? '').trim();
@@ -602,6 +615,13 @@ const addDays = (date: Date, days: number) => {
 const daysInMonth = (year: number, monthIndex: number) =>
   new Date(year, monthIndex + 1, 0).getDate();
 
+const daysBetweenInclusive = (start: Date, end: Date) => {
+  const startUtc = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
+  const endUtc = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
+  const diff = Math.floor((endUtc - startUtc) / (1000 * 60 * 60 * 24)) + 1;
+  return diff > 0 ? diff : 1;
+};
+
 const nextOccurrenceByDay = (day: number, afterDate: Date) => {
   let year = afterDate.getFullYear();
   let month = afterDate.getMonth();
@@ -761,6 +781,8 @@ export default function BillingPage() {
   const [invoiceDetailMode, setInvoiceDetailMode] = useState<'view' | 'edit'>('view');
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceRecord | null>(null);
   const [adjustmentRows, setAdjustmentRows] = useState<AdjustmentFormRow[]>([]);
+  const [editedInvoiceFixedFirstChargeMode, setEditedInvoiceFixedFirstChargeMode] =
+    useState<FixedFirstInvoiceChargeMode>('full_month');
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([]);
   const [paymentAccountsLoading, setPaymentAccountsLoading] = useState(false);
@@ -784,6 +806,10 @@ export default function BillingPage() {
 
   const [customerRuleId, setCustomerRuleId] = useState('');
   const [invoiceRuleId, setInvoiceRuleId] = useState('');
+  const [customerRuleFixedFirstChargeMode, setCustomerRuleFixedFirstChargeMode] =
+    useState<FixedFirstInvoiceChargeMode>('full_month');
+  const [invoiceRuleFixedFirstChargeMode, setInvoiceRuleFixedFirstChargeMode] =
+    useState<FixedFirstInvoiceChargeMode>('full_month');
   const [ruleCustomerSearch, setRuleCustomerSearch] = useState('');
   const [ruleInvoiceSearch, setRuleInvoiceSearch] = useState('');
   const [ruleInvoiceStatusFilter, setRuleInvoiceStatusFilter] = useState<'all' | InvoiceStatus>('all');
@@ -2357,6 +2383,16 @@ export default function BillingPage() {
       });
   }, [invoices, ruleInvoiceSearch, ruleInvoiceStatusFilter]);
 
+  const selectedCustomerRuleForConfig = useMemo(
+    () => billingRules.find((rule) => rule.id === customerRuleId) ?? null,
+    [billingRules, customerRuleId],
+  );
+
+  const selectedInvoiceRuleForConfig = useMemo(
+    () => billingRules.find((rule) => rule.id === invoiceRuleId) ?? null,
+    [billingRules, invoiceRuleId],
+  );
+
   const areAllFilteredCustomersSelected =
     filteredRuleCustomers.length > 0 &&
     filteredRuleCustomers.every((customer) => selectedRuleCustomerIds.includes(customer.id));
@@ -2476,7 +2512,14 @@ export default function BillingPage() {
         'billing_rule',
         customerRuleId,
         selectedRuleName,
-        { customerCount: appliedCount, effectiveFrom: payload.effectiveFrom || null }
+        {
+          customerCount: appliedCount,
+          effectiveFrom: payload.effectiveFrom || null,
+          fixedFirstInvoiceChargeMode:
+            selectedCustomerRuleForConfig?.billingType === 'fixed'
+              ? customerRuleFixedFirstChargeMode
+              : null,
+        }
       );
 
       toast({
@@ -2575,7 +2618,14 @@ export default function BillingPage() {
         'billing_rule',
         invoiceRuleId,
         selectedRuleName,
-        { invoiceCount: appliedCount, recalculate: recalculateAssignedInvoices }
+        {
+          invoiceCount: appliedCount,
+          recalculate: recalculateAssignedInvoices,
+          fixedFirstInvoiceChargeMode:
+            selectedInvoiceRuleForConfig?.billingType === 'fixed'
+              ? invoiceRuleFixedFirstChargeMode
+              : null,
+        }
       );
 
       toast({
@@ -2619,6 +2669,7 @@ export default function BillingPage() {
     setAdjustmentRows(rows);
     setPaymentMethod(invoice.paymentMethod || 'Cash');
     setEditedInvoiceRuleId(invoiceRuleDetails.id || INVOICE_RULE_NONE_VALUE);
+    setEditedInvoiceFixedFirstChargeMode(inferFixedFirstChargeModeFromInvoice(invoice));
     setDetailOpen(true);
   };
 
@@ -2700,13 +2751,55 @@ export default function BillingPage() {
     const planMonthlyFee = toNumber(selectedInvoice.subscription?.plan?.monthlyFee);
     const invoiceMonthlyFee = toNumber(selectedInvoice.monthlyFee);
     const unitMonthlyFee = planMonthlyFee > 0 ? planMonthlyFee : invoiceMonthlyFee;
+    const isFixedRule = editedInvoiceRuleForPreview?.billingType === 'fixed';
+    const resolvedFixedBillingDay =
+      parsePositiveInt(editedInvoiceRuleForPreview?.fixedBillingDay) ?? fixedBillingWindow.startDay;
+    const anchorDate =
+      parseDateSafe(selectedInvoice.billingPeriodFrom) ??
+      parseDateSafe(selectedInvoice.invoiceDate) ??
+      new Date();
+    const proratedServiceAmount = (() => {
+      if (!isFixedRule || editedInvoiceFixedFirstChargeMode !== 'prorated') {
+        return unitMonthlyFee * cycleMonths;
+      }
+      const normalizedAnchor = startOfDay(anchorDate);
+      let nextCycleStart = new Date(
+        normalizedAnchor.getFullYear(),
+        normalizedAnchor.getMonth(),
+        Math.min(
+          resolvedFixedBillingDay,
+          daysInMonth(normalizedAnchor.getFullYear(), normalizedAnchor.getMonth()),
+        ),
+      );
+      if (nextCycleStart <= normalizedAnchor) {
+        const stepped = addMonthsSafe(
+          new Date(normalizedAnchor.getFullYear(), normalizedAnchor.getMonth(), 1),
+          1,
+        );
+        nextCycleStart = new Date(
+          stepped.getFullYear(),
+          stepped.getMonth(),
+          Math.min(resolvedFixedBillingDay, daysInMonth(stepped.getFullYear(), stepped.getMonth())),
+        );
+      }
+      const firstPeriodEnd = addDays(nextCycleStart, -1);
+      const proratedDays = daysBetweenInclusive(normalizedAnchor, firstPeriodEnd);
+      const monthDayCount = daysInMonth(normalizedAnchor.getFullYear(), normalizedAnchor.getMonth());
+      return (unitMonthlyFee * proratedDays) / monthDayCount;
+    })();
 
     return {
       cycleMonths,
       unitMonthlyFee,
-      serviceAmount: unitMonthlyFee * cycleMonths,
+      serviceAmount: proratedServiceAmount,
     };
-  }, [selectedInvoice, editedInvoiceCycleMonths]);
+  }, [
+    selectedInvoice,
+    editedInvoiceCycleMonths,
+    editedInvoiceRuleForPreview,
+    editedInvoiceFixedFirstChargeMode,
+    fixedBillingWindow.startDay,
+  ]);
 
   const adjustmentPreview = useMemo(() => {
     if (!selectedInvoice) {
@@ -2876,6 +2969,8 @@ export default function BillingPage() {
                 ? 6
                 : resolvedCustomMonths ?? undefined,
             dueAfterDays: resolvedDueAfterDays ?? undefined,
+            fixedFirstInvoiceChargeMode:
+              billingMode === 'fixed' ? editedInvoiceFixedFirstChargeMode : undefined,
           }),
         },
       );
@@ -4933,6 +5028,34 @@ export default function BillingPage() {
                   </div>
                 </div>
 
+                {selectedCustomerRuleForConfig?.billingType === 'fixed' && (
+                  <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                    <Label className="text-sm font-medium text-slate-700">
+                      First Invoice Charge Method (Fixed Rule)
+                    </Label>
+                    <RadioGroup
+                      value={customerRuleFixedFirstChargeMode}
+                      onValueChange={(value) =>
+                        setCustomerRuleFixedFirstChargeMode(value as FixedFirstInvoiceChargeMode)
+                      }
+                      className="space-y-2"
+                    >
+                      <div className="flex items-start gap-2">
+                        <RadioGroupItem id="rule-config-customer-full-month" value="full_month" />
+                        <Label htmlFor="rule-config-customer-full-month" className="font-normal text-sm">
+                          Full month charge
+                        </Label>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <RadioGroupItem id="rule-config-customer-prorated" value="prorated" />
+                        <Label htmlFor="rule-config-customer-prorated" className="font-normal text-sm">
+                          Start from date charge
+                        </Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
+                )}
+
                 <div className="grid gap-3 md:grid-cols-3">
                   <div className="relative md:col-span-2">
                     <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
@@ -4943,17 +5066,17 @@ export default function BillingPage() {
                       onChange={(event) => setRuleCustomerSearch(event.target.value)}
                     />
                   </div>
-                  <Button
-                    onClick={assignRuleToCustomers}
-                    disabled={
-                      isAssigningRuleToCustomers ||
-                      !customerRuleId ||
-                      selectedRuleCustomerIds.length === 0
-                    }
-                  >
-                    {isAssigningRuleToCustomers ? 'Assigning...' : 'Assign Rule To Selected Customers'}
-                  </Button>
-                </div>
+                <Button
+                  onClick={assignRuleToCustomers}
+                  disabled={
+                    isAssigningRuleToCustomers ||
+                    !customerRuleId ||
+                    selectedRuleCustomerIds.length === 0
+                  }
+                >
+                  {isAssigningRuleToCustomers ? 'Assigning...' : 'Assign To Selected Customers'}
+                </Button>
+              </div>
 
                 <div className="rounded-md border">
                   <div className="flex items-center justify-between border-b bg-slate-50 px-3 py-2 text-sm">
@@ -4977,6 +5100,7 @@ export default function BillingPage() {
                           <TableHead className="w-12">#</TableHead>
                           <TableHead>Customer</TableHead>
                           <TableHead>Contact</TableHead>
+                          <TableHead>Assigned Rule</TableHead>
                           <TableHead>Status</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -5002,6 +5126,16 @@ export default function BillingPage() {
                               </div>
                             </TableCell>
                             <TableCell>
+                              <div className="text-sm text-slate-900">
+                                {customer.billingRuleName || 'Unassigned'}
+                              </div>
+                              <div className="text-xs text-slate-500">
+                                {customer.billingRuleId ||
+                                  localRuleAssignments.customers[customer.id] ||
+                                  '—'}
+                              </div>
+                            </TableCell>
+                            <TableCell>
                               <Badge variant="secondary" className="capitalize">
                                 {customer.status || 'unknown'}
                               </Badge>
@@ -5010,7 +5144,7 @@ export default function BillingPage() {
                         ))}
                         {filteredRuleCustomers.length === 0 && (
                           <TableRow>
-                            <TableCell colSpan={4} className="text-center text-sm text-slate-500">
+                            <TableCell colSpan={5} className="text-center text-sm text-slate-500">
                               No customers found.
                             </TableCell>
                           </TableRow>
@@ -5074,6 +5208,34 @@ export default function BillingPage() {
                   </div>
                 </div>
 
+                {selectedInvoiceRuleForConfig?.billingType === 'fixed' && (
+                  <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                    <Label className="text-sm font-medium text-slate-700">
+                      First Invoice Charge Method (Fixed Rule)
+                    </Label>
+                    <RadioGroup
+                      value={invoiceRuleFixedFirstChargeMode}
+                      onValueChange={(value) =>
+                        setInvoiceRuleFixedFirstChargeMode(value as FixedFirstInvoiceChargeMode)
+                      }
+                      className="space-y-2"
+                    >
+                      <div className="flex items-start gap-2">
+                        <RadioGroupItem id="rule-config-invoice-full-month" value="full_month" />
+                        <Label htmlFor="rule-config-invoice-full-month" className="font-normal text-sm">
+                          Full month charge
+                        </Label>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <RadioGroupItem id="rule-config-invoice-prorated" value="prorated" />
+                        <Label htmlFor="rule-config-invoice-prorated" className="font-normal text-sm">
+                          Start from date charge
+                        </Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
+                )}
+
                 <div className="grid gap-3 md:grid-cols-3">
                   <div className="relative md:col-span-2">
                     <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
@@ -5092,7 +5254,7 @@ export default function BillingPage() {
                       selectedRuleInvoiceIds.length === 0
                     }
                   >
-                    {isAssigningRuleToInvoices ? 'Assigning...' : 'Assign Rule To Selected Invoices'}
+                    {isAssigningRuleToInvoices ? 'Assigning...' : 'Assign To Selected Invoices'}
                   </Button>
                 </div>
 
@@ -5355,6 +5517,7 @@ export default function BillingPage() {
               setPaymentMethod('Cash');
               setSelectedGlobalAdjustmentIds([]);
               setEditedInvoiceRuleId(INVOICE_RULE_NONE_VALUE);
+              setEditedInvoiceFixedFirstChargeMode('full_month');
             }
           }}
         >
@@ -5456,6 +5619,41 @@ export default function BillingPage() {
                               Current rule: {selectedInvoiceRuleDetails.name} ({selectedInvoiceRuleDetails.id || '—'})
                             </p>
                           </div>
+                          {editedInvoiceRuleForPreview?.billingType === 'fixed' && (
+                            <div className="space-y-2 md:col-span-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                              <Label className="text-sm font-medium text-slate-700">
+                                First Invoice Charge Method (Fixed Rule)
+                              </Label>
+                              <RadioGroup
+                                value={editedInvoiceFixedFirstChargeMode}
+                                onValueChange={(value) =>
+                                  setEditedInvoiceFixedFirstChargeMode(
+                                    value as FixedFirstInvoiceChargeMode,
+                                  )
+                                }
+                                className="space-y-2"
+                              >
+                                <div className="flex items-start gap-2">
+                                  <RadioGroupItem id="edit-fixed-first-charge-full-month" value="full_month" />
+                                  <Label
+                                    htmlFor="edit-fixed-first-charge-full-month"
+                                    className="font-normal text-sm"
+                                  >
+                                    Full month charge
+                                  </Label>
+                                </div>
+                                <div className="flex items-start gap-2">
+                                  <RadioGroupItem id="edit-fixed-first-charge-prorated" value="prorated" />
+                                  <Label
+                                    htmlFor="edit-fixed-first-charge-prorated"
+                                    className="font-normal text-sm"
+                                  >
+                                    Start from date charge
+                                  </Label>
+                                </div>
+                              </RadioGroup>
+                            </div>
+                          )}
                         </div>
                       </div>
 

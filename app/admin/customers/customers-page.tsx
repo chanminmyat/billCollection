@@ -71,6 +71,7 @@ type BillingRule = {
 
 type AdjustmentType = 'plus' | 'minus';
 type AdjustmentValueType = 'fixed' | 'percent';
+type FixedFirstInvoiceChargeMode = 'full_month' | 'prorated';
 
 type InvoiceAdjustmentInput = {
   description: string;
@@ -202,6 +203,8 @@ type CustomerCreateDraft = {
   billingCycle: string;
   customBillingMonths: string;
   billingRuleId: string;
+  firstInvoiceMode: FirstInvoiceMode;
+  fixedFirstInvoiceChargeMode: FixedFirstInvoiceChargeMode;
   installationFee: string;
   additionalFees: string;
   collectionService: 'yes' | 'no';
@@ -228,6 +231,53 @@ type CustomerBillingFeeCache = {
   collectionService?: 'yes' | 'no';
   collectionFee?: number;
   updatedAt: string;
+};
+
+type CustomerViewDetail = {
+  id: string;
+  code: string;
+  name: string;
+  customerType: string;
+  status: string;
+  personalNrc: string;
+  companyName: string;
+  businessRegNo: string;
+  taxId: string;
+  contactPerson: string;
+  contactNrc: string;
+  phone: string;
+  secondaryPhone: string;
+  email: string;
+  installationAddress: string;
+  installationMapLink: string;
+  billingAddress: string;
+  billingMapLink: string;
+  packagePlan: string;
+  serviceId: string;
+  serviceType: string;
+  bandwidthPlan: string;
+  serviceStartDate: string;
+  contractStartDate: string;
+  contractEndDate: string;
+  installationDate: string;
+  ipType: string;
+  staticIpAddress: string;
+  routerId: string;
+  macAddress: string;
+  onuSerial: string;
+  vlanPort: string;
+  networkZone: string;
+  billingRuleName: string;
+  billingCycle: string;
+  monthlySubscriptionFee: string;
+  installationFee: string;
+  additionalFees: string;
+  collectionService: string;
+  collectionFee: string;
+  discountApplied: string;
+  discountAmount: string;
+  discountPeriod: string;
+  collectorCode: string;
 };
 
 type BillingFeeCacheLookupInput = {
@@ -531,6 +581,8 @@ export default function CustomersPage({
     customerPackage: string;
     billingRuleId: string;
     billingRuleName: string;
+    firstInvoiceMode: FirstInvoiceMode;
+    fixedFirstInvoiceChargeMode: FixedFirstInvoiceChargeMode;
   } | null>(null);
   const [manualInvoiceAdjustmentRows, setManualInvoiceAdjustmentRows] = useState<InvoiceAdjustmentInput[]>([]);
   const [globalAdjustments, setGlobalAdjustments] = useState<GlobalAdjustmentOption[]>([]);
@@ -539,6 +591,8 @@ export default function CustomersPage({
   const [selectedGlobalAdjustmentIds, setSelectedGlobalAdjustmentIds] = useState<string[]>([]);
   const [generatedInvoicePreview, setGeneratedInvoicePreview] = useState<GeneratedInvoice | null>(null);
   const [generatedInvoiceDialogOpen, setGeneratedInvoiceDialogOpen] = useState(false);
+  const [customerViewDialogOpen, setCustomerViewDialogOpen] = useState(false);
+  const [viewCustomerDetail, setViewCustomerDetail] = useState<CustomerViewDetail | null>(null);
   const [latestInvoiceByCustomerId, setLatestInvoiceByCustomerId] = useState<Record<string, GeneratedInvoice>>({});
   const [isUpdatingStatus, setIsUpdatingStatus] = useState<Record<string, boolean>>({});
   const [isAssigningCollector, setIsAssigningCollector] = useState<Record<string, boolean>>({});
@@ -551,6 +605,8 @@ export default function CustomersPage({
   const [billingRulesError, setBillingRulesError] = useState('');
   const [selectedPlanCode, setSelectedPlanCode] = useState('');
   const [manualInvoiceSelectedRuleId, setManualInvoiceSelectedRuleId] = useState('');
+  const [manualInvoiceFixedFirstChargeMode, setManualInvoiceFixedFirstChargeMode] =
+    useState<FixedFirstInvoiceChargeMode>('full_month');
   const [customerType, setCustomerType] = useState<'individual' | 'business'>('individual');
   const [userStatus, setUserStatus] = useState<'enable' | 'disable' | 'takeoff'>('enable');
   const [nrcState, setNrcState] = useState('');
@@ -612,6 +668,9 @@ export default function CustomersPage({
   );
   const [customBillingMonths, setCustomBillingMonths] = useState('');
   const [customerCreateBillingRuleId, setCustomerCreateBillingRuleId] = useState('');
+  const [customerFirstInvoiceMode, setCustomerFirstInvoiceMode] = useState<FirstInvoiceMode>('fixed');
+  const [customerFixedFirstInvoiceChargeMode, setCustomerFixedFirstInvoiceChargeMode] =
+    useState<FixedFirstInvoiceChargeMode>('full_month');
   const [installationFee, setInstallationFee] = useState('0');
   const [additionalFees, setAdditionalFees] = useState('0');
   const [collectionService, setCollectionService] = useState<'yes' | 'no'>('yes');
@@ -932,6 +991,10 @@ export default function CustomersPage({
     () => activeBillingRules.find((rule) => rule.id === manualInvoiceSelectedRuleId) ?? null,
     [activeBillingRules, manualInvoiceSelectedRuleId]
   );
+  const selectedCustomerCreateRule = useMemo(
+    () => activeBillingRules.find((rule) => rule.id === customerCreateBillingRuleId) ?? null,
+    [activeBillingRules, customerCreateBillingRuleId]
+  );
   const serviceTypeOptions = ['Fiber', 'DSL', 'Wireless'];
   const ipTypeOptions = ['Static', 'Dynamic'];
   const activeGlobalAdjustments = useMemo(
@@ -1043,6 +1106,48 @@ export default function CustomersPage({
     selectedPlan?.monthlyFee !== undefined && selectedPlan?.monthlyFee !== null
       ? String(selectedPlan.monthlyFee)
       : '';
+  const customerMonthlyAmount = toNumber(monthlyFee);
+  const customerCreateContractAnchorDate = useMemo(
+    () =>
+      parseIsoDateOnly(contractStartDate) ??
+      parseIsoDateOnly(serviceStartDate) ??
+      parseIsoDateOnly(installationDate) ??
+      null,
+    [contractStartDate, serviceStartDate, installationDate]
+  );
+  const customerCreateFixedStartDay = useMemo(() => {
+    const parsed = Number.parseInt(String(selectedCustomerCreateRule?.fixedBillingDay ?? ''), 10);
+    if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 31) return parsed;
+    return fixedBillingWindow.startDay;
+  }, [selectedCustomerCreateRule?.fixedBillingDay, fixedBillingWindow.startDay]);
+  const customerCreateFirstInvoiceAmount = useMemo(() => {
+    if (
+      selectedCustomerCreateRule?.billingType !== 'fixed' ||
+      customerFirstInvoiceMode !== 'fixed' ||
+      !customerCreateContractAnchorDate
+    ) {
+      return customerMonthlyAmount;
+    }
+    if (customerFixedFirstInvoiceChargeMode === 'full_month') {
+      return customerMonthlyAmount;
+    }
+    const nextCycleStart = getNextFixedCycleStartDate(
+      customerCreateContractAnchorDate,
+      customerCreateFixedStartDay
+    );
+    const firstPeriodEnd = new Date(nextCycleStart);
+    firstPeriodEnd.setDate(firstPeriodEnd.getDate() - 1);
+    const proratedDays = daysBetweenInclusive(customerCreateContractAnchorDate, firstPeriodEnd);
+    const monthDays = daysInMonth(customerCreateContractAnchorDate);
+    return (customerMonthlyAmount * proratedDays) / monthDays;
+  }, [
+    selectedCustomerCreateRule?.billingType,
+    customerFirstInvoiceMode,
+    customerCreateContractAnchorDate,
+    customerFixedFirstInvoiceChargeMode,
+    customerMonthlyAmount,
+    customerCreateFixedStartDay
+  ]);
 
   useEffect(() => {
     if (selectedPlan) {
@@ -1057,6 +1162,13 @@ export default function CustomersPage({
       setCustomBillingMonths('');
     }
   }, [billingCycle]);
+
+  useEffect(() => {
+    if (!selectedCustomerCreateRule) return;
+    setCustomerFirstInvoiceMode(
+      selectedCustomerCreateRule.billingType === 'anniversary' ? 'anniversary' : 'fixed'
+    );
+  }, [selectedCustomerCreateRule]);
 
   useEffect(() => {
     if (collectionService !== 'no') return;
@@ -1130,6 +1242,12 @@ export default function CustomersPage({
             customerPackage: String(parsed.customerPackage ?? '').trim(),
             billingRuleId: String(parsed.billingRuleId ?? '').trim(),
             billingRuleName: String(parsed.billingRuleName ?? '').trim(),
+            firstInvoiceMode:
+              String(parsed.firstInvoiceMode ?? '').trim() === 'anniversary' ? 'anniversary' : 'fixed',
+            fixedFirstInvoiceChargeMode:
+              String(parsed.fixedFirstInvoiceChargeMode ?? '').trim() === 'prorated'
+                ? 'prorated'
+                : 'full_month',
           });
           setPostCreateInvoicePromptOpen(true);
           return;
@@ -1150,6 +1268,8 @@ export default function CustomersPage({
       customerPackage: '',
       billingRuleId: '',
       billingRuleName: '',
+      firstInvoiceMode: 'fixed',
+      fixedFirstInvoiceChargeMode: 'full_month',
     });
     setPostCreateInvoicePromptOpen(true);
   }, [inlineForm]);
@@ -1263,6 +1383,8 @@ export default function CustomersPage({
       setBillingCycle(draft.billingCycle ?? 'Monthly');
       setCustomBillingMonths(draft.customBillingMonths ?? '');
       setCustomerCreateBillingRuleId(draft.billingRuleId ?? '');
+      setCustomerFirstInvoiceMode(draft.firstInvoiceMode ?? 'fixed');
+      setCustomerFixedFirstInvoiceChargeMode(draft.fixedFirstInvoiceChargeMode ?? 'full_month');
       setInstallationFee(draft.installationFee ?? '0');
       setAdditionalFees(draft.additionalFees ?? '0');
       setCollectionService(draft.collectionService === 'no' ? 'no' : 'yes');
@@ -1291,7 +1413,8 @@ export default function CustomersPage({
           companyName.trim() ||
           nrcNumber.trim() ||
           contactEmail.trim() ||
-          installationRegion.trim() ||
+          (installationRegion.trim() &&
+            installationRegion.trim() !== 'Yangon Region') ||
           installationDistrict.trim() ||
           installationTownship.trim() ||
           installationWard.trim() ||
@@ -1370,6 +1493,8 @@ export default function CustomersPage({
         billingCycle,
         customBillingMonths,
         billingRuleId: customerCreateBillingRuleId,
+        firstInvoiceMode: customerFirstInvoiceMode,
+        fixedFirstInvoiceChargeMode: customerFixedFirstInvoiceChargeMode,
         installationFee,
         additionalFees,
         collectionService,
@@ -1447,6 +1572,8 @@ export default function CustomersPage({
     billingCycle,
     customBillingMonths,
     customerCreateBillingRuleId,
+    customerFirstInvoiceMode,
+    customerFixedFirstInvoiceChargeMode,
     installationFee,
     additionalFees,
     collectionService,
@@ -1897,8 +2024,9 @@ export default function CustomersPage({
         primaryPhone.trim() ||
         companyName.trim() ||
         nrcNumber.trim() ||
-        contactEmail.trim() ||
-        installationRegion.trim() ||
+          contactEmail.trim() ||
+        (installationRegion.trim() &&
+          installationRegion.trim() !== 'Yangon Region') ||
         installationDistrict.trim() ||
         installationTownship.trim() ||
         installationWard.trim() ||
@@ -1971,6 +2099,8 @@ export default function CustomersPage({
         billingCycle,
         customBillingMonths,
         billingRuleId: customerCreateBillingRuleId,
+        firstInvoiceMode: customerFirstInvoiceMode,
+        fixedFirstInvoiceChargeMode: customerFixedFirstInvoiceChargeMode,
         installationFee,
         additionalFees,
         collectionService,
@@ -2574,7 +2704,9 @@ export default function CustomersPage({
     const normalizedContractEndDate = parseDdMmYyyyToIso(contractEndDateInput);
     const normalizedInstallationDate = parseDdMmYyyyToIso(installationDateInput);
 
-    if (serviceStartDateInput.trim() && !normalizedServiceStartDate) {
+    if (!serviceStartDateInput.trim()) {
+      nextErrors.serviceStartDate = 'Enter service start date.';
+    } else if (!normalizedServiceStartDate) {
       nextErrors.serviceStartDate = 'Use dd/mm/yyyy format.';
     }
     if (contractStartDateInput.trim() && !normalizedContractStartDate) {
@@ -2625,7 +2757,7 @@ export default function CustomersPage({
       const parsed = Number(value);
       return Number.isNaN(parsed) ? 0 : parsed;
     };
-    const billingDayForPayload = resolveBillingDayByMode('fixed');
+    const billingDayForPayload = resolveBillingDayByMode(customerFirstInvoiceMode);
     const baseAdditionalFees = toNumber(additionalFees);
     const collectionFeeValue = collectionService === 'yes' ? toNumber(collectionFee) : 0;
 
@@ -2720,7 +2852,10 @@ export default function CustomersPage({
           networkZone
         },
         billingInformation: {
-          firstInvoiceMode: undefined,
+          firstInvoiceMode: customerFirstInvoiceMode,
+          ...(customerFirstInvoiceMode === 'fixed'
+            ? { fixedFirstInvoiceChargeMode: customerFixedFirstInvoiceChargeMode }
+            : {}),
           fixedStartDay: fixedBillingWindow.startDay,
           fixedDueDay: fixedBillingWindow.dueDay,
           billingCycle,
@@ -2898,7 +3033,9 @@ export default function CustomersPage({
               '',
             billingRuleId: customerCreateBillingRuleId || '',
             billingRuleName:
-              activeBillingRules.find((rule) => rule.id === customerCreateBillingRuleId)?.name ?? ''
+              activeBillingRules.find((rule) => rule.id === customerCreateBillingRuleId)?.name ?? '',
+            firstInvoiceMode: customerFirstInvoiceMode,
+            fixedFirstInvoiceChargeMode: customerFixedFirstInvoiceChargeMode
           })
         );
       }
@@ -2984,6 +3121,8 @@ export default function CustomersPage({
     setBillingCycle('Monthly');
     setCustomBillingMonths('');
     setCustomerCreateBillingRuleId('');
+    setCustomerFirstInvoiceMode('fixed');
+    setCustomerFixedFirstInvoiceChargeMode('full_month');
     setInstallationFee('0');
     setAdditionalFees('0');
     setCollectionService('yes');
@@ -3087,14 +3226,17 @@ export default function CustomersPage({
       customerSummary?.rule?.id ??
       metaRuleId
     ).trim();
-    const fallbackRuleId =
-      assignedRuleId && activeBillingRules.some((rule) => rule.id === assignedRuleId)
-        ? assignedRuleId
-        : '';
+    const fallbackRuleId = assignedRuleId;
+    const fallbackFixedChargeMode =
+      postCreateInvoiceCustomerMeta?.customerId === customerId &&
+      postCreateInvoiceCustomerMeta.firstInvoiceMode === 'fixed'
+        ? postCreateInvoiceCustomerMeta.fixedFirstInvoiceChargeMode
+        : 'full_month';
     setManualInvoiceCustomerId(customerId);
     setManualInvoiceAdjustmentRows([]);
     setSelectedGlobalAdjustmentIds([]);
     setManualInvoiceSelectedRuleId(fallbackRuleId);
+    setManualInvoiceFixedFirstChargeMode(fallbackFixedChargeMode);
     setManualInvoicePromptOpen(true);
   };
 
@@ -3194,7 +3336,11 @@ export default function CustomersPage({
   const handleGenerateInvoice = async (
     customerId: string,
     adjustmentRows: InvoiceAdjustmentInput[] = [],
-    options?: { ruleId?: string; rule?: BillingRule | null }
+    options?: {
+      ruleId?: string;
+      rule?: BillingRule | null;
+      fixedFirstInvoiceChargeMode?: FixedFirstInvoiceChargeMode;
+    }
   ) => {
     if (isGeneratingInvoice[customerId]) return;
 
@@ -3328,6 +3474,10 @@ export default function CustomersPage({
         })();
         generateInvoicePayload.fixedStartDay = resolvedFixedStartDay;
         generateInvoicePayload.fixedDueDay = fixedBillingWindow.dueDay;
+        if (effectiveInvoiceMode === 'fixed') {
+          generateInvoicePayload.fixedFirstInvoiceChargeMode =
+            options?.fixedFirstInvoiceChargeMode ?? 'full_month';
+        }
       }
       const response = await fetch(
         `${API_BASE_URL}/billing/customers/${resolvedCustomerId}/invoices/generate`,
@@ -3745,6 +3895,168 @@ export default function CustomersPage({
     });
   };
 
+  const openCustomerViewDialog = (customer: Customer) => {
+    const customerSummary = customerSummaryById[customer.id] ?? {};
+    const customerProfile = customerProfileById[customer.id] ?? {};
+    const merged = { ...customerSummary, ...customerProfile };
+    const profileAddressInfo =
+      customerProfile?.addressInformation ?? customerSummary?.addressInformation ?? {};
+    const profileServices = customerProfile?.services ?? customerSummary?.services ?? {};
+    const profileBilling =
+      customerProfile?.billingInformation ?? customerSummary?.billingInformation ?? {};
+    const summarySubscription = customerSummary?.subscription ?? {};
+    const profileNetwork =
+      customerProfile?.networkTechnical ?? customerSummary?.networkTechnical ?? {};
+
+    const customerCode = String(
+      (customer as Customer & { code?: string })?.code ??
+        customerSummary?.customerCode ??
+        merged?.customerCode ??
+        ''
+    ).trim() || '—';
+    const customerName = String(
+      customer.name ||
+        merged?.personalName ||
+        merged?.companyName ||
+        customerProfile?.personalInformation?.name ||
+        customerProfile?.businessInformation?.companyName ||
+        'Unknown'
+    );
+    const customerTypeLabel =
+      String(merged?.customerType ?? customerTypeById[customer.id] ?? 'individual').toLowerCase() ===
+      'business'
+        ? 'Business'
+        : 'Individual';
+    const customerStatus = String(
+      merged?.status ?? customer.status ?? 'unknown'
+    ).toLowerCase();
+    const statusLabel =
+      customerStatus === 'enable' || customerStatus === 'active'
+        ? 'Enable'
+        : customerStatus === 'disable' || customerStatus === 'inactive'
+          ? 'Disable'
+          : customerStatus === 'takeoff'
+            ? 'Take off'
+            : customerStatus || 'Unknown';
+
+    setViewCustomerDetail({
+      id: customer.id,
+      code: customerCode,
+      name: customerName,
+      customerType: customerTypeLabel,
+      status: statusLabel,
+      personalNrc:
+        customerProfile?.personalInformation?.nrc ??
+        customerProfile?.personalNrc ??
+        customerSummary?.personalNrc ??
+        '—',
+      companyName:
+        customerProfile?.businessInformation?.companyName ??
+        merged?.companyName ??
+        '—',
+      businessRegNo:
+        customerProfile?.businessInformation?.businessRegistrationNumber ??
+        merged?.businessRegistrationNumber ??
+        '—',
+      taxId:
+        customerProfile?.businessInformation?.taxIdentificationNumber ??
+        merged?.taxIdentificationNumber ??
+        '—',
+      contactPerson:
+        customerProfile?.businessInformation?.authorizedContactPerson ??
+        merged?.authorizedContactPerson ??
+        customerSummary?.contactPerson?.name ??
+        '—',
+      contactNrc:
+        customerProfile?.businessInformation?.contactNrc ??
+        customerProfile?.contactNrc ??
+        customerSummary?.contactPerson?.nrc ??
+        '—',
+      phone:
+        customerProfile?.contactInformation?.primaryPhone ??
+        merged?.primaryPhone ??
+        customer.phone ??
+        '—',
+      secondaryPhone:
+        customerProfile?.contactInformation?.secondaryPhone ??
+        merged?.secondaryPhone ??
+        '—',
+      email:
+        customerProfile?.contactInformation?.email ??
+        merged?.contactEmail ??
+        customerProfile?.user?.email ??
+        '—',
+      installationAddress:
+        profileAddressInfo?.installation ??
+        merged?.installationAddress ??
+        customer.address ??
+        '—',
+      installationMapLink:
+        profileAddressInfo?.installationMapLink ??
+        merged?.installationMapLink ??
+        '—',
+      billingAddress:
+        profileAddressInfo?.billing ??
+        merged?.billingAddress ??
+        'Same as installation',
+      billingMapLink:
+        profileAddressInfo?.billingMapLink ??
+        merged?.billingMapLink ??
+        '—',
+      packagePlan:
+        profileServices?.packageName ??
+        profileServices?.serviceId ??
+        summarySubscription?.plan?.planName ??
+        summarySubscription?.plan?.planCode ??
+        customer.package ??
+        '—',
+      serviceId:
+        profileServices?.serviceId ??
+        summarySubscription?.plan?.planCode ??
+        '—',
+      serviceType:
+        profileServices?.serviceType ??
+        summarySubscription?.serviceType ??
+        '—',
+      bandwidthPlan:
+        profileServices?.bandwidthPlan ??
+        summarySubscription?.plan?.bandwidthPlan ??
+        '—',
+      serviceStartDate: formatDisplayDate(profileServices?.serviceStartDate, '—'),
+      contractStartDate: formatDisplayDate(profileServices?.contractStartDate, '—'),
+      contractEndDate: formatDisplayDate(profileServices?.contractEndDate, '—'),
+      installationDate: formatDisplayDate(profileServices?.installationDate, '—'),
+      ipType: profileServices?.ipType ?? summarySubscription?.ipType ?? '—',
+      staticIpAddress: profileServices?.staticIpAddress ?? summarySubscription?.staticIpAddress ?? '—',
+      routerId: profileNetwork?.routerId ?? '—',
+      macAddress: profileNetwork?.macAddress ?? '—',
+      onuSerial: profileNetwork?.onuSerial ?? '—',
+      vlanPort: profileNetwork?.vlanPort ?? '—',
+      networkZone: profileNetwork?.networkZone ?? '—',
+      billingRuleName:
+        String(merged?.billingRuleName ?? merged?.ruleName ?? '').trim() || 'Unassigned',
+      billingCycle:
+        String(profileBilling?.billingCycle ?? merged?.billingCycle ?? 'Monthly'),
+      monthlySubscriptionFee: formatMoney(
+        profileBilling?.monthlySubscriptionFee ?? summarySubscription?.plan?.monthlyFee ?? customer.monthlyFee
+      ),
+      installationFee: formatMoney(profileBilling?.installationFee ?? merged?.defaultInstallationFee ?? 0),
+      additionalFees: formatMoney(profileBilling?.additionalFees ?? merged?.defaultAdditionalFees ?? 0),
+      collectionService:
+        normalizeCollectionServiceValue(
+          profileBilling?.collectionService ?? merged?.collectionService ?? merged?.collectionServiceEnabled
+        ) === 'yes'
+          ? 'Yes'
+          : 'No',
+      collectionFee: formatMoney(profileBilling?.collectionFee ?? merged?.collectionFee ?? 0),
+      discountApplied: profileBilling?.discountApplied === 'yes' ? 'Yes' : 'No',
+      discountAmount: formatMoney(profileBilling?.discountAmount ?? 0),
+      discountPeriod: String(profileBilling?.discountPeriod ?? '—'),
+      collectorCode: String(merged?.collectorCode ?? customer.collectorId ?? '—')
+    });
+    setCustomerViewDialogOpen(true);
+  };
+
   const handleUpdateCustomer = async () => {
     if (!editingCustomer || isUpdatingCustomer) return;
 
@@ -4094,6 +4406,9 @@ export default function CustomersPage({
       setNetworkZone('');
       setBillingCycle('Monthly');
       setCustomBillingMonths('');
+      setCustomerCreateBillingRuleId('');
+      setCustomerFirstInvoiceMode('fixed');
+      setCustomerFixedFirstInvoiceChargeMode('full_month');
       setInstallationFee('0');
       setAdditionalFees('0');
       setCollectionService('yes');
@@ -4845,7 +5160,7 @@ export default function CustomersPage({
           </div>
           <div className="space-y-2">
             <Label htmlFor="serviceStartDate" className="text-sm font-medium text-slate-700">
-              Service Start Date
+              Service Start Date <span className="text-rose-600">*</span>
             </Label>
             <div className="flex gap-2">
               <Input
@@ -5247,7 +5562,7 @@ export default function CustomersPage({
             </div>
           </div>
           {!editingCustomer && (
-            <div className="space-y-2">
+            <div className="space-y-2 md:col-span-2">
               <Label className="text-sm font-medium text-slate-700">Default Billing Rule</Label>
               <Select
                 value={customerCreateBillingRuleId}
@@ -5276,13 +5591,47 @@ export default function CustomersPage({
               {billingRulesError && <p className="text-xs text-rose-600">{billingRulesError}</p>}
             </div>
           )}
+          {!editingCustomer &&
+            selectedCustomerCreateRule?.billingType === 'fixed' &&
+            customerFirstInvoiceMode === 'fixed' && (
+              <div className="space-y-2 md:col-span-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                <Label className="text-sm font-medium text-slate-700">
+                  First Invoice Charge Method (Fixed Rule)
+                </Label>
+                <RadioGroup
+                  value={customerFixedFirstInvoiceChargeMode}
+                  onValueChange={(value) =>
+                    setCustomerFixedFirstInvoiceChargeMode(value as FixedFirstInvoiceChargeMode)
+                  }
+                  className="space-y-2"
+                >
+                  <div className="flex items-start gap-2">
+                    <RadioGroupItem id="customer-fixed-first-charge-full-month" value="full_month" />
+                    <Label htmlFor="customer-fixed-first-charge-full-month" className="font-normal text-sm">
+                      Full month charge
+                    </Label>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <RadioGroupItem id="customer-fixed-first-charge-prorated" value="prorated" />
+                    <Label htmlFor="customer-fixed-first-charge-prorated" className="font-normal text-sm">
+                      Start from date charge
+                    </Label>
+                  </div>
+                </RadioGroup>
+              </div>
+            )}
           <div className="space-y-2">
             <Label className="text-sm font-medium text-slate-700">
               Monthly Subscription Fee
             </Label>
             <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-              {monthlyFee || '—'}
+              {formatMoney(customerCreateFirstInvoiceAmount, 'MMK')}
             </div>
+            {!editingCustomer && selectedCustomerCreateRule?.billingType === 'fixed' && (
+              <p className="text-xs text-slate-500">
+                First invoice estimated amount updates by selected charge method.
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="installationFee" className="text-sm font-medium text-slate-700">
@@ -5748,7 +6097,23 @@ export default function CustomersPage({
                         return (
                           <TableRow key={customer.id}>
                             <TableCell>
-                              {customerRow.code || '—'}
+                              {isDraftRow ? (
+                                <button
+                                  type="button"
+                                  className="text-blue-600 hover:underline"
+                                  onClick={() => handleContinueDraft(customerRow.draftId)}
+                                >
+                                  {customerRow.code || '—'}
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="text-blue-600 hover:underline"
+                                  onClick={() => openCustomerViewDialog(customer)}
+                                >
+                                  {customerRow.code || '—'}
+                                </button>
+                              )}
                             </TableCell>
                             <TableCell>
                               <div className="space-y-1">
@@ -5910,9 +6275,23 @@ export default function CustomersPage({
                       <CardContent className="space-y-3 pt-4">
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <p className="text-sm text-slate-500">
-                              {customerRow.code || '—'}
-                            </p>
+                            {isDraftRow ? (
+                              <button
+                                type="button"
+                                className="text-sm text-blue-600 hover:underline"
+                                onClick={() => handleContinueDraft(customerRow.draftId)}
+                              >
+                                {customerRow.code || '—'}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="text-sm text-blue-600 hover:underline"
+                                onClick={() => openCustomerViewDialog(customer)}
+                              >
+                                {customerRow.code || '—'}
+                              </button>
+                            )}
                             <p className="text-base font-semibold text-slate-900">{customer.name}</p>
                             {isDraftRow && (
                               <Badge variant="secondary" className="mt-1 text-[10px] uppercase tracking-wide">
@@ -6041,44 +6420,166 @@ export default function CustomersPage({
         )}
 
         {!inlineForm && (
-          <Dialog
-            open={postCreateInvoicePromptOpen}
-            onOpenChange={(open) => {
-              if (!open) {
-                closePostCreateInvoicePrompt();
-              } else {
-                setPostCreateInvoicePromptOpen(true);
-              }
-            }}
-          >
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Create First Invoice</DialogTitle>
-                <DialogDescription>
-                  {(postCreatePromptCustomer?.name ||
-                    postCreatePromptCustomer?.code ||
-                    postCreateInvoiceCustomerMeta?.customerName ||
-                    postCreateInvoiceCustomerMeta?.customerCode)
-                    ? `Customer ${
-                        postCreatePromptCustomer?.code ||
-                        postCreateInvoiceCustomerMeta?.customerCode ||
-                        postCreatePromptCustomer?.name ||
-                        postCreateInvoiceCustomerMeta?.customerName ||
-                        '—'
-                      } was created successfully. Do you want to create invoice now or later?`
-                    : 'Customer was created successfully. Do you want to create invoice now or later?'}
-                </DialogDescription>
-              </DialogHeader>
-              <DialogFooter className="gap-2 sm:justify-end">
-                <Button variant="outline" onClick={closePostCreateInvoicePrompt}>
-                  Later
-                </Button>
-                <Button onClick={handleCreateInvoiceAfterCustomerCreate}>
-                  Create now
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+          <>
+            <Dialog
+              open={customerViewDialogOpen}
+              onOpenChange={(open) => {
+                setCustomerViewDialogOpen(open);
+                if (!open) {
+                  setViewCustomerDetail(null);
+                }
+              }}
+            >
+              <DialogContent className="inset-0 left-0 top-0 h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 overflow-y-auto rounded-none border-0 p-4 sm:rounded-none sm:p-6">
+                <div className="mx-auto w-full max-w-5xl space-y-4">
+                  <DialogHeader>
+                    <DialogTitle>Customer Details</DialogTitle>
+                    <DialogDescription>
+                      Read-only profile view for selected customer.
+                    </DialogDescription>
+                  </DialogHeader>
+                  {viewCustomerDetail && (
+                    <div className="space-y-4">
+                    <div className="grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-3">
+                      <div>
+                        <p className="text-xs text-slate-500">Customer Code</p>
+                        <p className="font-semibold text-slate-900">{viewCustomerDetail.code}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500">Status</p>
+                        <p className="font-semibold text-slate-900">{viewCustomerDetail.status}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500">Billing Rule</p>
+                        <p className="font-semibold text-slate-900">{viewCustomerDetail.billingRuleName}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="rounded-lg border border-slate-200 p-4">
+                        <p className="mb-3 text-sm font-semibold text-slate-900">Identity</p>
+                        <div className="space-y-2 text-sm text-slate-700">
+                          <p><span className="text-slate-500">Name:</span> {viewCustomerDetail.name}</p>
+                          <p><span className="text-slate-500">Customer Type:</span> {viewCustomerDetail.customerType}</p>
+                          <p><span className="text-slate-500">Personal NRC:</span> {viewCustomerDetail.personalNrc}</p>
+                          <p><span className="text-slate-500">Company Name:</span> {viewCustomerDetail.companyName}</p>
+                          <p><span className="text-slate-500">Business Reg No:</span> {viewCustomerDetail.businessRegNo}</p>
+                          <p><span className="text-slate-500">Tax ID:</span> {viewCustomerDetail.taxId}</p>
+                          <p><span className="text-slate-500">Contact Person:</span> {viewCustomerDetail.contactPerson}</p>
+                          <p><span className="text-slate-500">Contact NRC:</span> {viewCustomerDetail.contactNrc}</p>
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 p-4">
+                        <p className="mb-3 text-sm font-semibold text-slate-900">Contact</p>
+                        <div className="space-y-2 text-sm text-slate-700">
+                          <p><span className="text-slate-500">Primary Phone:</span> {viewCustomerDetail.phone}</p>
+                          <p><span className="text-slate-500">Secondary Phone:</span> {viewCustomerDetail.secondaryPhone}</p>
+                          <p><span className="text-slate-500">Email:</span> {viewCustomerDetail.email}</p>
+                          <p><span className="text-slate-500">Collector Code:</span> {viewCustomerDetail.collectorCode}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="rounded-lg border border-slate-200 p-4">
+                        <p className="mb-2 text-sm font-semibold text-slate-900">Installation Address</p>
+                        <p className="text-sm text-slate-700">{viewCustomerDetail.installationAddress}</p>
+                        <p className="mt-2 text-xs text-slate-500">Map: {viewCustomerDetail.installationMapLink}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 p-4">
+                        <p className="mb-2 text-sm font-semibold text-slate-900">Billing Address</p>
+                        <p className="text-sm text-slate-700">{viewCustomerDetail.billingAddress}</p>
+                        <p className="mt-2 text-xs text-slate-500">Map: {viewCustomerDetail.billingMapLink}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="rounded-lg border border-slate-200 p-4">
+                        <p className="mb-3 text-sm font-semibold text-slate-900">Service</p>
+                        <div className="space-y-2 text-sm text-slate-700">
+                          <p><span className="text-slate-500">Service ID:</span> {viewCustomerDetail.serviceId}</p>
+                          <p><span className="text-slate-500">Package:</span> {viewCustomerDetail.packagePlan}</p>
+                          <p><span className="text-slate-500">Service Type:</span> {viewCustomerDetail.serviceType}</p>
+                          <p><span className="text-slate-500">Bandwidth Plan:</span> {viewCustomerDetail.bandwidthPlan}</p>
+                          <p><span className="text-slate-500">Service Start Date:</span> {viewCustomerDetail.serviceStartDate}</p>
+                          <p><span className="text-slate-500">Contract Start Date:</span> {viewCustomerDetail.contractStartDate}</p>
+                          <p><span className="text-slate-500">Contract End Date:</span> {viewCustomerDetail.contractEndDate}</p>
+                          <p><span className="text-slate-500">Installation Date:</span> {viewCustomerDetail.installationDate}</p>
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 p-4">
+                        <p className="mb-3 text-sm font-semibold text-slate-900">Network & Billing</p>
+                        <div className="space-y-2 text-sm text-slate-700">
+                          <p><span className="text-slate-500">IP Type:</span> {viewCustomerDetail.ipType}</p>
+                          <p><span className="text-slate-500">Static IP:</span> {viewCustomerDetail.staticIpAddress}</p>
+                          <p><span className="text-slate-500">Router ID:</span> {viewCustomerDetail.routerId}</p>
+                          <p><span className="text-slate-500">MAC Address:</span> {viewCustomerDetail.macAddress}</p>
+                          <p><span className="text-slate-500">ONU Serial:</span> {viewCustomerDetail.onuSerial}</p>
+                          <p><span className="text-slate-500">VLAN/Port:</span> {viewCustomerDetail.vlanPort}</p>
+                          <p><span className="text-slate-500">Network Zone:</span> {viewCustomerDetail.networkZone}</p>
+                          <p><span className="text-slate-500">Billing Cycle:</span> {viewCustomerDetail.billingCycle}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-slate-200 p-4">
+                      <p className="mb-3 text-sm font-semibold text-slate-900">Billing Amounts</p>
+                      <div className="grid gap-2 text-sm text-slate-700 md:grid-cols-3">
+                        <p><span className="text-slate-500">Monthly Fee:</span> {viewCustomerDetail.monthlySubscriptionFee}</p>
+                        <p><span className="text-slate-500">Installation Fee:</span> {viewCustomerDetail.installationFee}</p>
+                        <p><span className="text-slate-500">Additional Fees:</span> {viewCustomerDetail.additionalFees}</p>
+                        <p><span className="text-slate-500">Collection Service:</span> {viewCustomerDetail.collectionService}</p>
+                        <p><span className="text-slate-500">Collection Fee:</span> {viewCustomerDetail.collectionFee}</p>
+                        <p><span className="text-slate-500">Discount Applied:</span> {viewCustomerDetail.discountApplied}</p>
+                        <p><span className="text-slate-500">Discount Amount:</span> {viewCustomerDetail.discountAmount}</p>
+                        <p><span className="text-slate-500">Discount Period:</span> {viewCustomerDetail.discountPeriod}</p>
+                      </div>
+                    </div>
+                    </div>
+                  )}
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog
+              open={postCreateInvoicePromptOpen}
+              onOpenChange={(open) => {
+                if (!open) {
+                  closePostCreateInvoicePrompt();
+                } else {
+                  setPostCreateInvoicePromptOpen(true);
+                }
+              }}
+            >
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Create First Invoice</DialogTitle>
+                  <DialogDescription>
+                    {(postCreatePromptCustomer?.name ||
+                      postCreatePromptCustomer?.code ||
+                      postCreateInvoiceCustomerMeta?.customerName ||
+                      postCreateInvoiceCustomerMeta?.customerCode)
+                      ? `Customer ${
+                          postCreatePromptCustomer?.code ||
+                          postCreateInvoiceCustomerMeta?.customerCode ||
+                          postCreatePromptCustomer?.name ||
+                          postCreateInvoiceCustomerMeta?.customerName ||
+                          '—'
+                        } was created successfully. Do you want to create invoice now or later?`
+                      : 'Customer was created successfully. Do you want to create invoice now or later?'}
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter className="gap-2 sm:justify-end">
+                  <Button variant="outline" onClick={closePostCreateInvoicePrompt}>
+                    Later
+                  </Button>
+                  <Button onClick={handleCreateInvoiceAfterCustomerCreate}>
+                    Create now
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </>
         )}
 
         <Dialog
@@ -6091,6 +6592,7 @@ export default function CustomersPage({
                 setManualInvoiceAdjustmentRows([]);
                 setSelectedGlobalAdjustmentIds([]);
                 setManualInvoiceSelectedRuleId('');
+                setManualInvoiceFixedFirstChargeMode('full_month');
               }
             }
           }}
@@ -6240,7 +6742,9 @@ export default function CustomersPage({
               const isFixedRule = selectedManualInvoiceRule?.billingType === 'fixed';
               const cycleAmount =
                 isFixedRule && contractAnchorDate
-                  ? (() => {
+                  ? manualInvoiceFixedFirstChargeMode === 'full_month'
+                    ? monthlyAmount
+                    : (() => {
                       const nextCycleStart = getNextFixedCycleStartDate(
                         contractAnchorDate,
                         resolvedFixedStartDay
@@ -6355,6 +6859,47 @@ export default function CustomersPage({
                               <p className="text-xs text-rose-600">{billingRulesError}</p>
                             )}
                           </div>
+                          {selectedManualInvoiceRule?.billingType === 'fixed' && (
+                            <div className="space-y-2 md:col-span-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                              <Label className="text-sm font-medium text-slate-700">
+                                First Invoice Charge Method (Fixed Rule)
+                              </Label>
+                              <RadioGroup
+                                value={manualInvoiceFixedFirstChargeMode}
+                                onValueChange={(value) =>
+                                  setManualInvoiceFixedFirstChargeMode(
+                                    value as FixedFirstInvoiceChargeMode
+                                  )
+                                }
+                                className="space-y-2"
+                              >
+                                <div className="flex items-start gap-2">
+                                  <RadioGroupItem
+                                    id="manual-fixed-first-charge-full-month"
+                                    value="full_month"
+                                  />
+                                  <Label
+                                    htmlFor="manual-fixed-first-charge-full-month"
+                                    className="font-normal text-sm"
+                                  >
+                                    Full month charge
+                                  </Label>
+                                </div>
+                                <div className="flex items-start gap-2">
+                                  <RadioGroupItem
+                                    id="manual-fixed-first-charge-prorated"
+                                    value="prorated"
+                                  />
+                                  <Label
+                                    htmlFor="manual-fixed-first-charge-prorated"
+                                    className="font-normal text-sm"
+                                  >
+                                    Start from date charge
+                                  </Label>
+                                </div>
+                              </RadioGroup>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -6665,6 +7210,7 @@ export default function CustomersPage({
                         setManualInvoiceAdjustmentRows([]);
                         setSelectedGlobalAdjustmentIds([]);
                         setManualInvoiceSelectedRuleId('');
+                        setManualInvoiceFixedFirstChargeMode('full_month');
                       }}
                       disabled={manualInvoiceCustomerId ? isGeneratingInvoice[manualInvoiceCustomerId] : false}
                     >
@@ -6689,7 +7235,8 @@ export default function CustomersPage({
                           manualInvoiceAdjustmentRows,
                           {
                             ruleId: manualInvoiceSelectedRuleId || undefined,
-                            rule: selectedManualInvoiceRule
+                            rule: selectedManualInvoiceRule,
+                            fixedFirstInvoiceChargeMode: manualInvoiceFixedFirstChargeMode
                           }
                         );
                         setManualInvoicePromptOpen(false);
@@ -6697,6 +7244,7 @@ export default function CustomersPage({
                         setManualInvoiceAdjustmentRows([]);
                         setSelectedGlobalAdjustmentIds([]);
                         setManualInvoiceSelectedRuleId('');
+                        setManualInvoiceFixedFirstChargeMode('full_month');
                       }}
                       disabled={manualInvoiceCustomerId ? isGeneratingInvoice[manualInvoiceCustomerId] : true}
                     >

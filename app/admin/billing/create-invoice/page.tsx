@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -34,6 +35,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4
 
 type AdjustmentType = 'plus' | 'minus';
 type AdjustmentValueType = 'fixed' | 'percent';
+type FixedFirstInvoiceChargeMode = 'full_month' | 'prorated';
 
 type CustomerOption = {
   id: string;
@@ -174,6 +176,8 @@ export default function CreateInvoicePage() {
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [invoiceCreateMode, setInvoiceCreateMode] = useState<'one_time' | 'rule_based'>('one_time');
   const [selectedRuleId, setSelectedRuleId] = useState('');
+  const [fixedFirstInvoiceChargeMode, setFixedFirstInvoiceChargeMode] =
+    useState<FixedFirstInvoiceChargeMode>('full_month');
   const [includeSubscriptionFeeInOneTime, setIncludeSubscriptionFeeInOneTime] = useState(true);
   const [oneTimeSubscriptionFee, setOneTimeSubscriptionFee] = useState('');
   const [manualMonthlyFee, setManualMonthlyFee] = useState('');
@@ -570,6 +574,8 @@ export default function CreateInvoicePage() {
       billingRuleName: rule.name ?? undefined,
       billingCycle: derivedBillingCycle,
       firstInvoiceMode: rule.billingType === 'anniversary' ? 'anniversary' : 'fixed',
+      fixedFirstInvoiceChargeMode:
+        rule.billingType === 'fixed' ? fixedFirstInvoiceChargeMode : undefined,
       billingMode: rule.billingMode ?? undefined,
       customMonths: (() => {
         if (
@@ -954,6 +960,34 @@ export default function CreateInvoicePage() {
                 </p>
               )}
             </div>
+
+            {invoiceCreateMode === 'rule_based' && selectedRule?.billingType === 'fixed' && (
+              <div className="space-y-2 md:col-span-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                <Label className="text-sm font-medium text-slate-700">
+                  First Invoice Charge Method (Fixed Rule)
+                </Label>
+                <RadioGroup
+                  value={fixedFirstInvoiceChargeMode}
+                  onValueChange={(value) =>
+                    setFixedFirstInvoiceChargeMode(value as FixedFirstInvoiceChargeMode)
+                  }
+                  className="space-y-2"
+                >
+                  <div className="flex items-start gap-2">
+                    <RadioGroupItem id="fixed-first-charge-full-month" value="full_month" />
+                    <Label htmlFor="fixed-first-charge-full-month" className="font-normal text-sm">
+                      Full Month Charge: charge full monthly fee for first invoice.
+                    </Label>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <RadioGroupItem id="fixed-first-charge-prorated" value="prorated" />
+                    <Label htmlFor="fixed-first-charge-prorated" className="font-normal text-sm">
+                      Prorated Charge: charge from start date to first cycle end date.
+                    </Label>
+                  </div>
+                </RadioGroup>
+              </div>
+            )}
 
             {(selectedCustomer || selectedRule) && (
               <div className="md:col-span-2 rounded-md border bg-slate-50 p-3 text-sm text-slate-700 space-y-2">
