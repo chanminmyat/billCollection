@@ -462,6 +462,51 @@ const inferCustomMonthsFromRuleName = (ruleName?: string | null) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };
 
+const resolveLatestSubscriptionRecord = (summary: any) => {
+  const direct = summary?.subscription;
+  if (direct && typeof direct === 'object') return direct;
+
+  const list = Array.isArray(summary?.subscriptions) ? summary.subscriptions : [];
+  if (list.length === 0) return {};
+
+  return [...list].sort((a: any, b: any) => {
+    const aTime = new Date(a?.createdAt ?? 0).getTime();
+    const bTime = new Date(b?.createdAt ?? 0).getTime();
+    return bTime - aTime;
+  })[0] ?? {};
+};
+
+const pickDateValue = (...values: Array<unknown>) => {
+  for (const value of values) {
+    const text = String(value ?? '').trim();
+    if (text) return text;
+  }
+  return '';
+};
+
+const resolveServiceDateValue = (
+  profileServices: any,
+  summaryServices: any,
+  summarySubscription: any,
+  merged: any,
+  camelKey: 'serviceStartDate' | 'contractStartDate' | 'contractEndDate' | 'installationDate',
+  snakeKey:
+    | 'service_start_date'
+    | 'contract_start_date'
+    | 'contract_end_date'
+    | 'installation_date'
+) =>
+  pickDateValue(
+    profileServices?.[camelKey],
+    profileServices?.[snakeKey],
+    summaryServices?.[camelKey],
+    summaryServices?.[snakeKey],
+    summarySubscription?.[camelKey],
+    summarySubscription?.[snakeKey],
+    merged?.[camelKey],
+    merged?.[snakeKey]
+  );
+
 function SearchableSelect({
   value,
   onValueChange,
@@ -1883,10 +1928,24 @@ export default function CustomersPage({
     [customersSource, postCreateInvoiceCustomerId]
   );
 
+  const canChangeCustomerStatus = (customer: CustomerListRow) => {
+    const invoiceCompleted = Boolean(customerSummaryById[customer.id]?.firstInvoiceCompleted);
+    const currentStatus = String(customer.status ?? '').trim().toLowerCase();
+    return invoiceCompleted || currentStatus === 'active' || currentStatus === 'enable';
+  };
+
   const handleStatusChange = async (id: string, status: 'enable' | 'disable' | 'takeoff') => {
     if (isUpdatingStatus[id]) return;
+    const customerRow = customersSource.find((item) => item.id === id) as CustomerListRow | undefined;
+    if (!customerRow || !canChangeCustomerStatus(customerRow)) {
+      toast({
+        title: 'Status is locked',
+        description: 'Customer status can be changed only after first invoice is completed.',
+        variant: 'destructive'
+      });
+      return;
+    }
     setIsUpdatingStatus((prev) => ({ ...prev, [id]: true }));
-    updateRemoteCustomerStatus(id, status);
 
     try {
       const response = await fetch(`${API_BASE_URL}/customers/${id}`, {
@@ -1901,7 +1960,13 @@ export default function CustomersPage({
         const data = await response.json().catch(() => null);
         const message = data?.message ?? 'Failed to update status';
         console.error(message, data);
+        toast({
+          title: 'Update status failed',
+          description: String(message),
+          variant: 'destructive'
+        });
       } else {
+        updateRemoteCustomerStatus(id, status);
         const customerName = customersSource.find((item) => item.id === id)?.name;
         logAdminActivity(
           'customer_status_changed',
@@ -3632,7 +3697,7 @@ export default function CustomersPage({
       customerProfile?.billingInformation ?? customerSummary?.billingInformation ?? {};
     const profileNetwork =
       customerProfile?.networkTechnical ?? customerSummary?.networkTechnical ?? {};
-    const summarySubscription = customerSummary?.subscription ?? {};
+    const summarySubscription = resolveLatestSubscriptionRecord(customerSummary);
     const summaryPlan = summarySubscription?.plan ?? {};
 
     const resolvedCustomerType: 'individual' | 'business' =
@@ -3817,17 +3882,45 @@ export default function CustomersPage({
     setSelectedPlanCode(resolvedPlanCode);
     setBandwidthPlan(resolvedBandwidth);
     setServiceStartDate(
-      profileServices?.serviceStartDate ??
-        summarySubscription?.serviceStartDate ??
-        ''
+      resolveServiceDateValue(
+        profileServices,
+        customerSummary?.services,
+        summarySubscription,
+        merged,
+        'serviceStartDate',
+        'service_start_date'
+      )
     );
-    setContractStartDate(profileServices?.contractStartDate ?? '');
+    setContractStartDate(
+      resolveServiceDateValue(
+        profileServices,
+        customerSummary?.services,
+        summarySubscription,
+        merged,
+        'contractStartDate',
+        'contract_start_date'
+      )
+    );
     setContractEndDate(
-      profileServices?.contractEndDate ??
-        summarySubscription?.contractEndDate ??
-        ''
+      resolveServiceDateValue(
+        profileServices,
+        customerSummary?.services,
+        summarySubscription,
+        merged,
+        'contractEndDate',
+        'contract_end_date'
+      )
     );
-    setInstallationDate(profileServices?.installationDate ?? '');
+    setInstallationDate(
+      resolveServiceDateValue(
+        profileServices,
+        customerSummary?.services,
+        summarySubscription,
+        merged,
+        'installationDate',
+        'installation_date'
+      )
+    );
     setIpType(
       profileServices?.ipType ??
         summarySubscription?.ipType ??
@@ -3904,7 +3997,7 @@ export default function CustomersPage({
     const profileServices = customerProfile?.services ?? customerSummary?.services ?? {};
     const profileBilling =
       customerProfile?.billingInformation ?? customerSummary?.billingInformation ?? {};
-    const summarySubscription = customerSummary?.subscription ?? {};
+    const summarySubscription = resolveLatestSubscriptionRecord(customerSummary);
     const profileNetwork =
       customerProfile?.networkTechnical ?? customerSummary?.networkTechnical ?? {};
 
@@ -4022,10 +4115,50 @@ export default function CustomersPage({
         profileServices?.bandwidthPlan ??
         summarySubscription?.plan?.bandwidthPlan ??
         '—',
-      serviceStartDate: formatDisplayDate(profileServices?.serviceStartDate, '—'),
-      contractStartDate: formatDisplayDate(profileServices?.contractStartDate, '—'),
-      contractEndDate: formatDisplayDate(profileServices?.contractEndDate, '—'),
-      installationDate: formatDisplayDate(profileServices?.installationDate, '—'),
+      serviceStartDate: formatDisplayDate(
+        resolveServiceDateValue(
+          profileServices,
+          customerSummary?.services,
+          summarySubscription,
+          merged,
+          'serviceStartDate',
+          'service_start_date'
+        ),
+        '—'
+      ),
+      contractStartDate: formatDisplayDate(
+        resolveServiceDateValue(
+          profileServices,
+          customerSummary?.services,
+          summarySubscription,
+          merged,
+          'contractStartDate',
+          'contract_start_date'
+        ),
+        '—'
+      ),
+      contractEndDate: formatDisplayDate(
+        resolveServiceDateValue(
+          profileServices,
+          customerSummary?.services,
+          summarySubscription,
+          merged,
+          'contractEndDate',
+          'contract_end_date'
+        ),
+        '—'
+      ),
+      installationDate: formatDisplayDate(
+        resolveServiceDateValue(
+          profileServices,
+          customerSummary?.services,
+          summarySubscription,
+          merged,
+          'installationDate',
+          'installation_date'
+        ),
+        '—'
+      ),
       ipType: profileServices?.ipType ?? summarySubscription?.ipType ?? '—',
       staticIpAddress: profileServices?.staticIpAddress ?? summarySubscription?.staticIpAddress ?? '—',
       routerId: profileNetwork?.routerId ?? '—',
@@ -4059,6 +4192,11 @@ export default function CustomersPage({
 
   const handleUpdateCustomer = async () => {
     if (!editingCustomer || isUpdatingCustomer) return;
+
+    const normalizedServiceStartDate = parseDdMmYyyyToIso(serviceStartDateInput);
+    const normalizedContractStartDate = parseDdMmYyyyToIso(contractStartDateInput);
+    const normalizedContractEndDate = parseDdMmYyyyToIso(contractEndDateInput);
+    const normalizedInstallationDate = parseDdMmYyyyToIso(installationDateInput);
 
     const formatNrc = (state: string, township: string, type: string, number: string) => {
       if (!state || !township || !type || !number) return '';
@@ -4151,10 +4289,10 @@ export default function CustomersPage({
       serviceType: serviceType.trim() || undefined,
       packageName: packageName.trim() || undefined,
       bandwidthPlan: bandwidthPlan.trim() || undefined,
-      serviceStartDate: serviceStartDate || undefined,
-      contractStartDate: contractStartDate || undefined,
-      contractEndDate: contractEndDate || undefined,
-      installationDate: installationDate || undefined,
+      serviceStartDate: normalizedServiceStartDate || serviceStartDate || undefined,
+      contractStartDate: normalizedContractStartDate || contractStartDate || undefined,
+      contractEndDate: normalizedContractEndDate || contractEndDate || undefined,
+      installationDate: normalizedInstallationDate || installationDate || undefined,
       ipType: ipType || undefined,
       staticIpAddress: staticIpAddress.trim() || undefined
     };
@@ -6162,7 +6300,7 @@ export default function CustomersPage({
                                     onValueChange={(value) =>
                                       handleStatusChange(customer.id, value as 'enable' | 'disable' | 'takeoff')
                                     }
-                                    disabled={isUpdatingStatus[customer.id]}
+                                    disabled={isUpdatingStatus[customer.id] || !canChangeCustomerStatus(customerRow)}
                                   >
                                     <SelectTrigger className={`h-8 w-32 ${statusClass}`}>
                                       <SelectValue />
@@ -7467,17 +7605,6 @@ export default function CustomersPage({
                             );
                           })()}
                         </div>
-                      </div>
-
-                      <div className="mt-8 space-y-1 text-sm">
-                        <p className="font-semibold">Payment Information</p>
-                        <p>Payment Method: {invoice.paymentMethod || '—'}</p>
-                        <p>Payment Status: {invoice.status || 'unpaid'}</p>
-                        <p>
-                          Payment Date:{' '}
-                          {formatDisplayDate(invoice.paidAt, '__________')}
-                        </p>
-                        <p>Receipt No: {invoice.receiptNo || '__________'}</p>
                       </div>
 
                       <div className="mt-8 space-y-1 text-sm">

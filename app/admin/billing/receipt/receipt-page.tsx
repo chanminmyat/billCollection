@@ -40,6 +40,7 @@ type ReceiptInvoice = {
   monthlyFee?: string | number | null;
   installationFee?: string | number | null;
   additionalFees?: string | number | null;
+  collectionFee?: string | number | null;
   subtotalAmount?: string | number | null;
   plusAmount?: string | number | null;
   minusAmount?: string | number | null;
@@ -212,6 +213,35 @@ const formatPaymentMethodLabel = (account: PaymentAccount) => {
     : `${provider} - ${accountName}`;
 };
 
+const parseCollectionPaymentSummary = (note?: string | null) => {
+  const raw = String(note ?? '').trim();
+  if (!raw) return null;
+
+  const parts = raw
+    .split('|')
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const paymentMethodPart = parts.find((part) => part.toLowerCase().startsWith('payment method:'));
+  const paymentAccountPart = parts.find((part) => part.toLowerCase().startsWith('payment account:'));
+
+  return {
+    paymentMethod: paymentMethodPart ? paymentMethodPart.replace(/^payment method:\s*/i, '').trim() : '',
+    paymentAccount: paymentAccountPart ? paymentAccountPart.replace(/^payment account:\s*/i, '').trim() : '',
+  };
+};
+
+const getLatestCollectionPaymentSummary = (invoice: Pick<ReceiptInvoice, 'collectionEvents'>) => {
+  const events = Array.isArray(invoice.collectionEvents) ? invoice.collectionEvents : [];
+  for (const event of events.slice().reverse()) {
+    const summary = parseCollectionPaymentSummary(event?.note ?? null);
+    if (summary?.paymentMethod || summary?.paymentAccount) {
+      return summary;
+    }
+  }
+  return null;
+};
+
 export default function ReceiptPage({ mode }: ReceiptPageProps) {
   const { user, isLoading } = useAuth();
   const { toast } = useToast();
@@ -235,6 +265,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
   const [isDownloadingReceipt, setIsDownloadingReceipt] = useState(false);
   const [isPaymentDetailsOpen, setIsPaymentDetailsOpen] = useState(false);
   const [isCancellingReceiptById, setIsCancellingReceiptById] = useState<Record<string, boolean>>({});
+  const [pendingCancelReceipt, setPendingCancelReceipt] = useState<ReceiptInvoice | null>(null);
   const listInvoiceFilterId = searchParams.get('invoiceId')?.trim() ?? '';
 
   const fetchInvoiceCandidates = useCallback(async () => {
@@ -269,6 +300,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
         monthlyFee: item?.monthlyFee ?? null,
         installationFee: item?.installationFee ?? null,
         additionalFees: item?.additionalFees ?? null,
+        collectionFee: item?.collectionFee ?? null,
         subtotalAmount: item?.subtotalAmount ?? null,
         plusAmount: item?.plusAmount ?? null,
         minusAmount: item?.minusAmount ?? null,
@@ -315,6 +347,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
           monthlyFee: item?.monthlyFee ?? null,
           installationFee: item?.installationFee ?? null,
           additionalFees: item?.additionalFees ?? null,
+          collectionFee: item?.collectionFee ?? null,
           subtotalAmount: item?.subtotalAmount ?? null,
           plusAmount: item?.plusAmount ?? null,
           minusAmount: item?.minusAmount ?? null,
@@ -384,6 +417,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
       monthlyFee: payload?.monthlyFee ?? null,
       installationFee: payload?.installationFee ?? null,
       additionalFees: payload?.additionalFees ?? null,
+      collectionFee: payload?.collectionFee ?? null,
       subtotalAmount: payload?.subtotalAmount ?? null,
       plusAmount: payload?.plusAmount ?? null,
       minusAmount: payload?.minusAmount ?? null,
@@ -803,6 +837,13 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
     }
   };
 
+  const requestCancelReceipt = (receipt: ReceiptInvoice) => {
+    if (isCancellingReceiptById[receipt.id]) return;
+    if (receipt.isHistoryRow) return;
+    if (getReceiptStatusLabel(receipt) === 'cancelled receipt') return;
+    setPendingCancelReceipt(receipt);
+  };
+
   const copyPaymentText = async (value: string, label: string) => {
     const normalized = value.trim();
     if (!normalized) return;
@@ -859,6 +900,9 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
       const currency = detail.currency || 'MMK';
       const receiptNo = detail.receiptNo || '__________';
       const invoiceNo = formatInvoiceNo(detail.invoiceNo, detail.id);
+      const collectionPaymentSummary = getLatestCollectionPaymentSummary(detail);
+      const resolvedPaymentMethod = detail.paymentMethod || collectionPaymentSummary?.paymentMethod || '—';
+      const resolvedPaymentAccount = collectionPaymentSummary?.paymentAccount || '—';
 
       let rowNo = 1;
       const rows: string[] = [];
@@ -892,6 +936,17 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
             <td class="right">1</td>
             <td class="right">${escapeHtml(formatMoney(detail.additionalFees, currency))}</td>
             <td class="right">${escapeHtml(formatMoney(detail.additionalFees, currency))}</td>
+          </tr>
+        `);
+      }
+      if (toNumber(detail.collectionFee) > 0) {
+        rows.push(`
+          <tr>
+            <td>${rowNo++}</td>
+            <td>Collection Fee</td>
+            <td class="right">1</td>
+            <td class="right">${escapeHtml(formatMoney(detail.collectionFee, currency))}</td>
+            <td class="right">${escapeHtml(formatMoney(detail.collectionFee, currency))}</td>
           </tr>
         `);
       }
@@ -1000,7 +1055,8 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
 
               <div class="section">
                 <div class="title">Payment Information</div>
-                <div>Payment Method: ${escapeHtml(detail.paymentMethod || '—')}</div>
+                <div>Payment Method: ${escapeHtml(resolvedPaymentMethod)}</div>
+                <div>Payment Account: ${escapeHtml(resolvedPaymentAccount)}</div>
                 <div>Payment Status: ${escapeHtml(formatStatus(detail.status))}</div>
                 <div>Collection Status: ${escapeHtml(formatCollectionStatus(detail.collectionStatus))}</div>
                 <div>Payment Date: ${escapeHtml(formatDisplayDate(detail.paidAt))}</div>
@@ -1209,6 +1265,24 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                             </TableCell>
                           </TableRow>
                         )}
+                        {toNumber(selectedInvoice.collectionFee) > 0 && (
+                          <TableRow>
+                            <TableCell>
+                              {1 +
+                                (toNumber(selectedInvoice.monthlyFee) > 0 ? 1 : 0) +
+                                (toNumber(selectedInvoice.installationFee) > 0 ? 1 : 0) +
+                                (toNumber(selectedInvoice.additionalFees) > 0 ? 1 : 0)}
+                            </TableCell>
+                            <TableCell>Collection Fee</TableCell>
+                            <TableCell className="text-right">1</TableCell>
+                            <TableCell className="text-right">
+                              {formatMoney(selectedInvoice.collectionFee, selectedInvoice.currency || 'MMK')}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {formatMoney(selectedInvoice.collectionFee, selectedInvoice.currency || 'MMK')}
+                            </TableCell>
+                          </TableRow>
+                        )}
                         {selectedInvoice.adjustments?.map((adjustment, index) => (
                           <TableRow key={`${adjustment.id || adjustment.description || 'adj'}-${index}`}>
                             <TableCell>
@@ -1216,6 +1290,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                                 (toNumber(selectedInvoice.monthlyFee) > 0 ? 1 : 0) +
                                 (toNumber(selectedInvoice.installationFee) > 0 ? 1 : 0) +
                                 (toNumber(selectedInvoice.additionalFees) > 0 ? 1 : 0) +
+                                (toNumber(selectedInvoice.collectionFee) > 0 ? 1 : 0) +
                                 index}
                             </TableCell>
                             <TableCell>{adjustment.description || 'Adjustment'}</TableCell>
@@ -1437,7 +1512,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                               size="sm"
                               variant="outline"
                               className="border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
-                              onClick={() => void cancelReceipt(receipt)}
+                              onClick={() => requestCancelReceipt(receipt)}
                               disabled={
                                 Boolean(isCancellingReceiptById[receipt.id]) ||
                                 Boolean(receipt.isHistoryRow) ||
@@ -1661,6 +1736,20 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                             <TableCell className="text-right">{formatMoney(selectedReceipt.additionalFees, selectedReceipt.currency || 'MMK')}</TableCell>
                           </TableRow>
                         )}
+                        {toNumber(selectedReceipt.collectionFee) > 0 && (
+                          <TableRow>
+                            <TableCell>
+                              {1 +
+                                (toNumber(selectedReceipt.monthlyFee) > 0 ? 1 : 0) +
+                                (toNumber(selectedReceipt.installationFee) > 0 ? 1 : 0) +
+                                (toNumber(selectedReceipt.additionalFees) > 0 ? 1 : 0)}
+                            </TableCell>
+                            <TableCell>Collection Fee</TableCell>
+                            <TableCell className="text-right">1</TableCell>
+                            <TableCell className="text-right">{formatMoney(selectedReceipt.collectionFee, selectedReceipt.currency || 'MMK')}</TableCell>
+                            <TableCell className="text-right">{formatMoney(selectedReceipt.collectionFee, selectedReceipt.currency || 'MMK')}</TableCell>
+                          </TableRow>
+                        )}
                         {selectedReceipt.adjustments?.map((adjustment, index) => (
                           <TableRow key={`${adjustment.id || adjustment.description || 'adj'}-${index}`}>
                             <TableCell>
@@ -1668,6 +1757,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                                 (toNumber(selectedReceipt.monthlyFee) > 0 ? 1 : 0) +
                                 (toNumber(selectedReceipt.installationFee) > 0 ? 1 : 0) +
                                 (toNumber(selectedReceipt.additionalFees) > 0 ? 1 : 0) +
+                                (toNumber(selectedReceipt.collectionFee) > 0 ? 1 : 0) +
                                 index}
                             </TableCell>
                             <TableCell>{adjustment.description || 'Adjustment'}</TableCell>
@@ -1696,11 +1786,24 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                 </div>
 
                 <div className="space-y-1 text-sm">
-                  <p className="mb-2 text-sm font-semibold">Payment Information</p>
-                  <p>
-                    Payment Method:{' '}
-                    <span className="font-medium">{selectedReceipt.paymentMethod || '—'}</span>
-                  </p>
+                  {(() => {
+                    const paymentSummary = getLatestCollectionPaymentSummary(selectedReceipt);
+                    return (
+                      <>
+                        <p className="mb-2 text-sm font-semibold">Payment Information</p>
+                        <p>
+                          Payment Method:{' '}
+                          <span className="font-medium">
+                            {selectedReceipt.paymentMethod || paymentSummary?.paymentMethod || '—'}
+                          </span>
+                        </p>
+                        <p>
+                          Payment Account:{' '}
+                          <span className="font-medium">{paymentSummary?.paymentAccount || '—'}</span>
+                        </p>
+                      </>
+                    );
+                  })()}
                   <p>
                     Payment Status:{' '}
                     <span className="font-medium">{getReceiptStatusLabel(selectedReceipt)}</span>
@@ -1724,7 +1827,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                       type="button"
                       variant="outline"
                       className="border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
-                      onClick={() => void cancelReceipt(selectedReceipt)}
+                      onClick={() => requestCancelReceipt(selectedReceipt)}
                       disabled={
                         Boolean(isCancellingReceiptById[selectedReceipt.id]) ||
                         Boolean(selectedReceipt.isHistoryRow) ||
@@ -1737,6 +1840,36 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                 </div>
               </div>
             )}
+          </DialogContent>
+        </Dialog>
+        <Dialog
+          open={Boolean(pendingCancelReceipt)}
+          onOpenChange={(open) => {
+            if (!open) setPendingCancelReceipt(null);
+          }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Cancel Receipt Confirmation</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-slate-600">Are you sure you want to cancel this receipt?</p>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setPendingCancelReceipt(null)}>
+                No
+              </Button>
+              <Button
+                type="button"
+                className="bg-rose-600 text-white hover:bg-rose-700"
+                onClick={async () => {
+                  if (!pendingCancelReceipt) return;
+                  const target = pendingCancelReceipt;
+                  setPendingCancelReceipt(null);
+                  await cancelReceipt(target);
+                }}
+              >
+                Yes, Cancel
+              </Button>
+            </div>
           </DialogContent>
         </Dialog>
       </div>

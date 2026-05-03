@@ -473,40 +473,37 @@ const getPhoneDialLink = (phone?: string | null): string | null => {
 
 const getLocalizedInvoiceStatusLabel = (
   status: string | null | undefined,
-  isBurmeseLanguage: boolean,
+  copy: Record<string, string>,
 ) => {
   const normalized = String(status ?? '').trim().toLowerCase();
-  if (!isBurmeseLanguage) return normalized || 'unpaid';
-  if (normalized === 'paid') return 'ပေးချေပြီး';
-  if (normalized === 'overdue') return 'သတ်မှတ်ရက်ကျော်';
-  if (normalized === 'cancelled' || normalized === 'canceled') return 'ပယ်ဖျက်ပြီး';
-  return 'မပေးချေရသေး';
+  if (normalized === 'paid') return copy.statusPaid || 'Paid';
+  if (normalized === 'overdue') return copy.statusOverdue || 'Overdue';
+  if (normalized === 'cancelled' || normalized === 'canceled') return copy.statusCancelled || 'Cancelled';
+  return copy.statusUnpaid || 'Unpaid';
 };
 
 const getLocalizedCollectorStatusLabel = (
   status: string | null | undefined,
-  isBurmeseLanguage: boolean,
+  copy: Record<string, string>,
 ) => {
   const normalized = String(status ?? '').trim().toLowerCase();
-  if (!isBurmeseLanguage) return normalized || 'unknown';
-  if (normalized === 'enable') return 'ဖွင့်ထား';
-  if (normalized === 'disable') return 'ပိတ်ထား';
-  if (normalized === 'takeoff') return 'ဖယ်ရှားထား';
-  return 'မသိ';
+  if (normalized === 'enable') return copy.collectorStatusEnable || 'Enable';
+  if (normalized === 'disable') return copy.collectorStatusDisable || 'Disable';
+  if (normalized === 'takeoff') return copy.collectorStatusTakeoff || 'Takeoff';
+  return copy.collectorStatusUnknown || 'Unknown';
 };
 
 const getLocalizedCollectionStatusLabel = (
   status: CollectionWorkflowStatus,
-  isBurmeseLanguage: boolean,
+  copy: Record<string, string>,
 ) => {
-  if (!isBurmeseLanguage) return getCollectionWorkflowStatusLabel(status);
-  if (status === 'en_route') return 'သွားနေသည်';
-  if (status === 'arrived') return 'ရောက်ရှိပြီး';
-  if (status === 'rescheduled') return 'ရက်ချိန်းပြန်ချိန်';
-  if (status === 'office_transfer') return 'ရုံးတွင်ပေးချေမည်';
-  if (status === 'collected_pending_admin') return 'ကောက်ခံပြီး';
-  if (status === 'completed') return 'ပြီးစီး';
-  return 'မစတင်ရသေး';
+  if (status === 'en_route') return copy.collectionStatusEnRoute || 'On the way';
+  if (status === 'arrived') return copy.collectionStatusArrived || 'Arrived';
+  if (status === 'rescheduled') return copy.collectionStatusRescheduled || 'Rescheduled';
+  if (status === 'office_transfer') return copy.collectionStatusOfficeTransfer || 'Office Transfer';
+  if (status === 'collected_pending_admin') return copy.collectionStatusCollectedPendingAdmin || 'Collected';
+  if (status === 'completed') return copy.collectionStatusCompleted || 'Completed';
+  return copy.collectionStatusNotStarted || getCollectionWorkflowStatusLabel(status);
 };
 
 export default function CollectorDashboard() {
@@ -520,65 +517,47 @@ export default function CollectorDashboard() {
   }));
   const isBurmeseLanguage = user?.role === 'collector' && uiLanguage === 'mm';
   const copy = isBurmeseLanguage ? dashboardCopy.mm : dashboardCopy.en;
-  const assignedBillsLabel = isBurmeseLanguage ? 'တာဝန်ပေးထားသော ဘီလ်များ' : 'Assigned Bills';
-  const collectedBillsLabel = isBurmeseLanguage ? 'ကောက်ခံပြီး ဘီလ်များ' : 'Collected Bills';
-  const collectTodayLabel = isBurmeseLanguage ? 'ယနေ့ ကောက်ခံရန်' : 'To Collect Today';
-  const markCollectTodayLabel = isBurmeseLanguage ? 'ယနေ့ ကောက်ခံရန် သတ်မှတ်မည်' : 'Mark Collect Today';
-  const selectedBillsLabel = isBurmeseLanguage ? 'ရွေးထားသော ဘီလ်' : 'Selected Bills';
-  const clearQueueLabel = isBurmeseLanguage ? 'ယနေ့စာရင်း ရှင်းမည်' : 'Clear Today Queue';
-  const removeFromQueueLabel = isBurmeseLanguage ? 'ယနေ့စာရင်းမှ ဖြုတ်မည်' : 'Remove from Today';
-  const collectTodayEmptyMessage = isBurmeseLanguage
-    ? 'ယနေ့ ကောက်ခံရန် သတ်မှတ်ထားသော ဘီလ် မရှိသေးပါ။'
-    : 'No bills marked for collection today.';
-  const reorderQueueHintLabel = isBurmeseLanguage
-    ? 'အစီအစဉ်ပြောင်းလိုပါက ဘီလ်ကတ်ကို ဆွဲ၍ နေရာချပါ'
-    : 'Drag and drop bills to re-order today queue';
-  const queuedTagLabel = isBurmeseLanguage ? 'ယနေ့စာရင်းထဲ' : 'Queued Today';
-  const noCollectedBillsMessage = isBurmeseLanguage
-    ? 'ကောက်ခံပြီး ဘီလ် မရှိပါ။'
-    : 'No collected bills found.';
-  const selectMenuMessage = isBurmeseLanguage
-    ? 'ဘေးမီနူးမှ အပိုင်းတစ်ခုကို ရွေးချယ်၍ ကြည့်ရှုပါ။'
-    : 'Select a section from the sidebar to view details.';
-  const initiatedStatusLabel = isBurmeseLanguage ? 'စတင်ပြီး' : 'Initiated';
-  const calledStatusLabel = isBurmeseLanguage ? 'ဖုန်းဆက်ပြီး' : 'Call Completed';
-  const startCollectionNowLabel = isBurmeseLanguage ? 'ကောက်ခံမှု စတင်မည်' : 'Start Collection';
-  const callCompletedButtonLabel = isBurmeseLanguage ? 'ဖုန်းဆက်ပြီး' : 'Call Completed';
-  const collectFromCustomerLabel = isBurmeseLanguage ? 'ဖောက်သည်ထံမှ ကောက်မည်' : 'Collect from Customer';
-  const payToAdminLabel = isBurmeseLanguage ? 'ရုံးသို့ ပေးချေမည်' : 'Pay to Admin';
-  const paymentMethodLabel = isBurmeseLanguage ? 'ပေးချေနည်း' : 'Payment Method';
-  const paymentAccountLabel = isBurmeseLanguage ? 'ပေးချေ အကောင့်' : 'Payment Account';
-  const choosePaymentMethodLabel = isBurmeseLanguage ? 'ပေးချေနည်း ရွေးပါ' : 'Choose payment method';
-  const choosePaymentAccountLabel = isBurmeseLanguage ? 'အကောင့် ရွေးပါ' : 'Choose payment account';
-  const cashLabel = isBurmeseLanguage ? 'ငွေသား' : 'Cash';
-  const walletLabel = isBurmeseLanguage ? 'Wallet' : 'Wallet';
-  const accountLabel = isBurmeseLanguage ? 'Bank Account' : 'Bank Account';
-  const initiatedEventLabel = isBurmeseLanguage
-    ? 'ကောက်ခံမှု လုပ်ငန်းစဉ် စတင်ခဲ့သည်။'
-    : 'Collection workflow initiated.';
-  const callCompletedEventLabel = isBurmeseLanguage
-    ? 'ဖောက်သည်နှင့် ဆက်သွယ်မှု ပြီးစီးသည်။'
-    : 'Customer call completed.';
-  const choosePaymentMethodFirstLabel = isBurmeseLanguage
-    ? 'ပေးချေနည်းကို အရင်ရွေးပါ။'
-    : 'Please choose payment method first.';
-  const choosePaymentAccountFirstLabel = isBurmeseLanguage
-    ? 'ရွေးထားသောပေးချေနည်းအတွက် အကောင့်ကို ရွေးပါ။'
-    : 'Please choose payment account for selected payment method.';
-  const noPaymentAccountsLabel = isBurmeseLanguage
-    ? 'သက်ဆိုင်ရာ ပေးချေ အကောင့် မရှိသေးပါ။'
-    : 'No active payment accounts for selected method.';
-  const showPaymentDetailsLabel = isBurmeseLanguage ? 'ပေးချေမှု အသေးစိတ်ပြ' : 'Show Payment Details';
-  const paymentDetailsDialogTitle = isBurmeseLanguage ? 'ဖောက်သည် ပေးချေမှု အသေးစိတ်' : 'Customer Payment Details';
-  const paymentTypeLabel = isBurmeseLanguage ? 'အမျိုးအစား' : 'Type';
-  const paymentProviderLabel = isBurmeseLanguage ? 'ဝန်ဆောင်မှု/ဘဏ်' : 'Provider / Bank';
-  const accountNameLabel = isBurmeseLanguage ? 'အကောင့်ပိုင်ရှင်အမည်' : 'Account Name';
-  const accountNumberLabel = isBurmeseLanguage ? 'အကောင့်နံပါတ်' : 'Account Number';
-  const qrCodeLabel = isBurmeseLanguage ? 'QR Code' : 'QR Code';
-  const copiedLabel = isBurmeseLanguage ? 'ကူးယူပြီး' : 'Copied';
-  const copyFailedLabel = isBurmeseLanguage ? 'ကူးယူမရပါ' : 'Copy failed';
-  const notAvailableLabel = isBurmeseLanguage ? 'မရှိသေး' : 'N/A';
-  const closeLabel = isBurmeseLanguage ? 'ပိတ်မည်' : 'Close';
+  const assignedBillsLabel = copy.assignedBillsLabel || 'Assigned Bills';
+  const collectedBillsLabel = copy.collectedBillsLabel || 'Collected Bills';
+  const collectTodayLabel = copy.collectTodayLabel || 'To Collect Today';
+  const markCollectTodayLabel = copy.markCollectTodayLabel || 'Mark Collect Today';
+  const selectedBillsLabel = copy.selectedBillsLabel || 'Selected Bills';
+  const clearQueueLabel = copy.clearQueueLabel || 'Clear Today Queue';
+  const removeFromQueueLabel = copy.removeFromQueueLabel || 'Remove from Today';
+  const collectTodayEmptyMessage = copy.collectTodayEmptyMessage || 'No bills marked for collection today.';
+  const reorderQueueHintLabel = copy.reorderQueueHintLabel || 'Drag and drop bills to re-order today queue';
+  const queuedTagLabel = copy.queuedTagLabel || 'Queued Today';
+  const noCollectedBillsMessage = copy.noCollectedBillsMessage || 'No collected bills found.';
+  const selectMenuMessage = copy.selectMenuMessage || 'Select a section from the sidebar to view details.';
+  const initiatedStatusLabel = copy.initiatedStatusLabel || 'Initiated';
+  const calledStatusLabel = copy.calledStatusLabel || 'Call Completed';
+  const startCollectionNowLabel = copy.startCollectionNowLabel || 'Start Collection';
+  const callCompletedButtonLabel = copy.callCompletedButtonLabel || 'Call Completed';
+  const collectFromCustomerLabel = copy.collectFromCustomerLabel || 'Collect from Customer';
+  const payToAdminLabel = copy.payToAdminLabel || 'Pay to Admin';
+  const paymentMethodLabel = copy.paymentMethodLabel || 'Payment Method';
+  const paymentAccountLabel = copy.paymentAccountLabel || 'Payment Account';
+  const choosePaymentMethodLabel = copy.choosePaymentMethodLabel || 'Choose payment method';
+  const choosePaymentAccountLabel = copy.choosePaymentAccountLabel || 'Choose payment account';
+  const cashLabel = copy.cashLabel || 'Cash';
+  const walletLabel = copy.walletLabel || 'Wallet';
+  const accountLabel = copy.accountLabel || 'Bank Account';
+  const initiatedEventLabel = copy.initiatedEventLabel || 'Collection workflow initiated.';
+  const callCompletedEventLabel = copy.callCompletedEventLabel || 'Customer call completed.';
+  const choosePaymentMethodFirstLabel = copy.choosePaymentMethodFirstLabel || 'Please choose payment method first.';
+  const choosePaymentAccountFirstLabel = copy.choosePaymentAccountFirstLabel || 'Please choose payment account for selected payment method.';
+  const noPaymentAccountsLabel = copy.noPaymentAccountsLabel || 'No active payment accounts for selected method.';
+  const showPaymentDetailsLabel = copy.showPaymentDetailsLabel || 'Show Payment Details';
+  const paymentDetailsDialogTitle = copy.paymentDetailsDialogTitle || 'Customer Payment Details';
+  const paymentTypeLabel = copy.paymentTypeLabel || 'Type';
+  const paymentProviderLabel = copy.paymentProviderLabel || 'Provider / Bank';
+  const accountNameLabel = copy.accountNameLabel || 'Account Name';
+  const accountNumberLabel = copy.accountNumberLabel || 'Account Number';
+  const qrCodeLabel = copy.qrCodeLabel || 'QR Code';
+  const copiedLabel = copy.copiedLabel || 'Copied';
+  const copyFailedLabel = copy.copyFailedLabel || 'Copy failed';
+  const notAvailableLabel = copy.notAvailableLabel || 'N/A';
+  const closeLabel = copy.closeLabel || 'Close';
 
   const [searchTerm, setSearchTerm] = useState('');
   const [activeView, setActiveView] = useState<CollectorDashboardView>('dashboard');
@@ -1970,13 +1949,13 @@ export default function CollectorDashboard() {
                           </div>
                           <div className="flex items-center gap-2">
                             <Badge variant={bill.status === 'overdue' ? 'destructive' : 'secondary'}>
-                              {getLocalizedInvoiceStatusLabel(bill.status, isBurmeseLanguage)}
+                              {getLocalizedInvoiceStatusLabel(bill.status, copy)}
                             </Badge>
                             <Badge
                               variant="secondary"
                               className={getCollectionWorkflowStatusClassName(collectionStatus)}
                             >
-                              {getLocalizedCollectionStatusLabel(collectionStatus, isBurmeseLanguage)}
+                              {getLocalizedCollectionStatusLabel(collectionStatus, copy)}
                             </Badge>
                           </div>
                         </div>
@@ -2070,7 +2049,7 @@ export default function CollectorDashboard() {
                             <p className="text-sm text-gray-500">{packageName}</p>
                           </div>
                           <Badge variant={customer.status === 'enable' ? 'default' : 'secondary'}>
-                            {getLocalizedCollectorStatusLabel(customer.status, isBurmeseLanguage)}
+                            {getLocalizedCollectorStatusLabel(customer.status, copy)}
                           </Badge>
                         </div>
 
@@ -2147,13 +2126,13 @@ export default function CollectorDashboard() {
                           </div>
                           <div className="flex flex-col items-end gap-2">
                             <Badge variant={bill.status === 'paid' ? 'default' : 'secondary'}>
-                              {getLocalizedInvoiceStatusLabel(bill.status, isBurmeseLanguage)}
+                              {getLocalizedInvoiceStatusLabel(bill.status, copy)}
                             </Badge>
                             <Badge
                               variant="secondary"
                               className={getCollectionWorkflowStatusClassName(collectionStatus)}
                             >
-                              {getLocalizedCollectionStatusLabel(collectionStatus, isBurmeseLanguage)}
+                              {getLocalizedCollectionStatusLabel(collectionStatus, copy)}
                             </Badge>
                           </div>
                         </div>
@@ -2350,7 +2329,7 @@ export default function CollectorDashboard() {
                       ? initiatedStatusLabel
                       : selectedCollectionStatus === 'en_route' && isCallCompleted && !isCollectJourneyStarted
                         ? calledStatusLabel
-                        : getLocalizedCollectionStatusLabel(selectedCollectionStatus, isBurmeseLanguage)}
+                        : getLocalizedCollectionStatusLabel(selectedCollectionStatus, copy)}
                   </Badge>
                 </div>
 
@@ -2468,14 +2447,14 @@ export default function CollectorDashboard() {
                               <SelectContent>
                                 {availablePaymentAccounts.length === 0 ? (
                                   <SelectItem value="__no_accounts__" disabled>
-                                    {isLoadingPaymentAccounts ? 'Loading...' : noPaymentAccountsLabel}
+                                    {isLoadingPaymentAccounts ? copy.loadingLabel || 'Loading...' : noPaymentAccountsLabel}
                                   </SelectItem>
                                 ) : (
                                   availablePaymentAccounts.map((account) => (
                                     <SelectItem key={account.id} value={account.id}>
                                       {account.kind === 'wallet'
-                                        ? `${account.walletType || 'Wallet'} - ${account.accountName} (${account.accountNumber})`
-                                        : `${account.bankType || 'Bank'} - ${account.accountName} (${account.accountNumber})`}
+                                        ? `${account.walletType || walletLabel} - ${account.accountName} (${account.accountNumber})`
+                                        : `${account.bankType || (copy.bankLabel || 'Bank')} - ${account.accountName} (${account.accountNumber})`}
                                     </SelectItem>
                                   ))
                                 )}
@@ -2724,7 +2703,7 @@ export default function CollectorDashboard() {
                   <div>
                     <Label className="text-sm font-medium text-gray-500">{copy.status}</Label>
                     <Badge variant={selectedBillDetails.status === 'overdue' ? 'destructive' : 'secondary'}>
-                      {getLocalizedInvoiceStatusLabel(selectedBillDetails.status, isBurmeseLanguage)}
+                      {getLocalizedInvoiceStatusLabel(selectedBillDetails.status, copy)}
                     </Badge>
                   </div>
                 </div>

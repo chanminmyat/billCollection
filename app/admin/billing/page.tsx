@@ -123,6 +123,7 @@ type InvoiceRecord = {
   monthlyFee?: string;
   installationFee?: string;
   additionalFees?: string;
+  collectionFee?: string;
   discountAmount?: string;
   subtotalAmount?: string;
   plusAmount?: string;
@@ -2815,7 +2816,8 @@ export default function BillingPage() {
     const baseSubtotal =
       selectedInvoicePricingPreview.serviceAmount +
       toNumber(selectedInvoice.installationFee) +
-      toNumber(selectedInvoice.additionalFees);
+      toNumber(selectedInvoice.additionalFees) +
+      toNumber(selectedInvoice.collectionFee);
 
     const dynamic = adjustmentRows.reduce(
       (acc, row) => {
@@ -3262,9 +3264,11 @@ export default function BillingPage() {
     }
   };
 
-  const markInvoicePaid = async () => {
-    if (!selectedInvoice) return;
-    const invoiceStatus = normalizeInvoiceStatusLabel(selectedInvoice.status);
+  const markInvoicePaid = async (targetInvoice?: InvoiceRecord) => {
+    const invoice = targetInvoice ?? selectedInvoice;
+    if (!invoice) return;
+
+    const invoiceStatus = normalizeInvoiceStatusLabel(invoice.status);
     if (invoiceStatus === 'paid' || invoiceStatus === 'cancelled') {
       toast({
         title: 'Invoice is locked',
@@ -3276,19 +3280,32 @@ export default function BillingPage() {
 
     setIsMarkingPaid(true);
     try {
-      const shouldUseManualPaymentFields = selectedCollectionStatus === 'office_transfer';
-      const response = await fetch(`${API_BASE_URL}/billing/invoices/${selectedInvoice.id}/receipt`, {
+      const collectionStatus = getCollectionStatusForInvoice(invoice);
+      const shouldUseManualPaymentFields = collectionStatus === 'office_transfer';
+
+      const timeline = Array.isArray(invoice.collectionEvents)
+        ? invoice.collectionEvents
+        : collectionMap[invoice.id]?.events ?? [];
+      const latestCollectionEvent = timeline
+        .slice()
+        .reverse()
+        .find((event) => event.type === 'collector_collected' || event.type === 'admin_confirmed');
+      const parsedSummary = parseCollectedPaymentSummary(latestCollectionEvent?.note ?? null);
+      const fallbackCollectionPaymentMethod = parsedSummary?.paymentMethod?.trim() || '';
+      const resolvedPaymentMethod = shouldUseManualPaymentFields
+        ? paymentMethod.trim() || fallbackCollectionPaymentMethod
+        : (invoice.paymentMethod || '').trim() || fallbackCollectionPaymentMethod;
+
+      const requestBody = resolvedPaymentMethod
+        ? { paymentMethod: resolvedPaymentMethod }
+        : {};
+
+      const response = await fetch(`${API_BASE_URL}/billing/invoices/${invoice.id}/receipt`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(
-          shouldUseManualPaymentFields
-            ? {
-                paymentMethod: paymentMethod.trim() || undefined,
-              }
-            : {},
-        ),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -3299,20 +3316,24 @@ export default function BillingPage() {
       const updatedRaw = (await response.json().catch(() => null)) as Partial<InvoiceRecord> | null;
       const normalizedPaidStatus = normalizeInvoiceStatusLabel(updatedRaw?.status ?? 'paid') as InvoiceStatus;
       const updated: InvoiceRecord = {
-        ...selectedInvoice,
+        ...invoice,
         ...(updatedRaw ?? {}),
         status: normalizedPaidStatus,
       };
-      setSelectedInvoice(updated);
+
+      if (selectedInvoice?.id === invoice.id) {
+        setSelectedInvoice(updated);
+      }
+
       setInvoices((prev) =>
-        prev.map((invoice) =>
-          invoice.id === selectedInvoice.id
+        prev.map((item) =>
+          item.id === invoice.id
             ? {
-                ...invoice,
+                ...item,
                 ...(updatedRaw ?? {}),
                 status: normalizedPaidStatus,
               }
-            : invoice,
+            : item,
         ),
       );
 
@@ -3323,7 +3344,7 @@ export default function BillingPage() {
         updated.id,
         updated.invoiceNo || updated.id,
         {
-          paymentMethod: shouldUseManualPaymentFields ? paymentMethod.trim() || null : null,
+          paymentMethod: resolvedPaymentMethod || null,
         }
       );
 
@@ -3905,6 +3926,12 @@ export default function BillingPage() {
         if (createdInvoiceId && row.ruleId) {
           assignRuleToInvoicesLocally(row.ruleId, [createdInvoiceId]);
         }
+        if (createdInvoiceId) {
+          setForceReleasedInvoiceIds((prev) => ({
+            ...prev,
+            [createdInvoiceId]: true,
+          }));
+        }
 
         logAdminActivity(
           'invoice_released',
@@ -4058,6 +4085,17 @@ export default function BillingPage() {
         </tr>
       `);
     }
+    if (toNumber(selectedInvoice.collectionFee) > 0) {
+      itemRows.push(`
+        <tr>
+          <td>${rowNumber++}</td>
+          <td>Collection Fee</td>
+          <td class="right">1</td>
+          <td class="right">${escapeHtml(formatMoney(selectedInvoice.collectionFee, currency))}</td>
+          <td class="right">${escapeHtml(formatMoney(selectedInvoice.collectionFee, currency))}</td>
+        </tr>
+      `);
+    }
 
     for (const adjustment of selectedInvoice.adjustments || []) {
       itemRows.push(`
@@ -4095,7 +4133,6 @@ export default function BillingPage() {
           </tr>
         `;
 
-    const paidDate = formatDisplayDate(selectedInvoice.paidAt, '__________');
     const invoiceNoDisplay = formatInvoiceNo(selectedInvoice.invoiceNo, selectedInvoice.id);
     const invoiceRuleName = selectedInvoiceRuleDetails.name || 'Unassigned';
     const invoiceRuleId = selectedInvoiceRuleDetails.id || '—';
@@ -4177,14 +4214,6 @@ export default function BillingPage() {
                   </tr>
                 </tbody>
               </table>
-            </div>
-
-            <div class="section">
-              <div class="title">Payment Information</div>
-              <div>Payment Method: ${escapeHtml(selectedInvoice.paymentMethod || '—')}</div>
-              <div>Payment Status: ${escapeHtml(normalizeInvoiceStatusLabel(selectedInvoice.status))}</div>
-              <div>Payment Date: ${escapeHtml(paidDate)}</div>
-              <div>Receipt No: ${escapeHtml(selectedInvoice.receiptNo || '__________')}</div>
             </div>
 
             <div class="section">
@@ -4530,7 +4559,7 @@ export default function BillingPage() {
                                   <Button
                                     size="sm"
                                     variant="secondary"
-                                    onClick={() => openInvoiceDetail(invoice, 'edit')}
+                                    onClick={() => void markInvoicePaid(invoice)}
                                   >
                                     <CheckCircle2 className="mr-2 h-4 w-4" />
                                     Confirm
@@ -4631,7 +4660,7 @@ export default function BillingPage() {
                               <Button
                                 className="w-full"
                                 variant="secondary"
-                                onClick={() => openInvoiceDetail(invoice, 'edit')}
+                                onClick={() => void markInvoicePaid(invoice)}
                               >
                                 <CheckCircle2 className="mr-2 h-4 w-4" />
                                 Confirm
@@ -5716,6 +5745,19 @@ export default function BillingPage() {
                                   </TableCell>
                                 </TableRow>
                               )}
+                              {toNumber(selectedInvoice.collectionFee) > 0 && (
+                                <TableRow>
+                                  <TableCell>4</TableCell>
+                                  <TableCell>Collection Fee</TableCell>
+                                  <TableCell className="text-right">1</TableCell>
+                                  <TableCell className="text-right">
+                                    {formatMoney(selectedInvoice.collectionFee, selectedInvoice.currency)}
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    {formatMoney(selectedInvoice.collectionFee, selectedInvoice.currency)}
+                                  </TableCell>
+                                </TableRow>
+                              )}
                               {adjustmentRows.map((row, index) => {
                                 const amount =
                                   row.valueType === 'percent'
@@ -5723,7 +5765,7 @@ export default function BillingPage() {
                                     : toNumber(row.value);
                                 return (
                                   <TableRow key={`${row.description}-${index}`}>
-                                    <TableCell>{index + 4}</TableCell>
+                                    <TableCell>{index + 4 + (toNumber(selectedInvoice.collectionFee) > 0 ? 1 : 0)}</TableCell>
                                     <TableCell>{row.description || 'Adjustment'}</TableCell>
                                     <TableCell className="text-right">1</TableCell>
                                     <TableCell className="text-right">
@@ -6008,6 +6050,7 @@ export default function BillingPage() {
                       const monthlyFeeAmount = toNumber(selectedInvoice.monthlyFee);
                       const installationFeeAmount = toNumber(selectedInvoice.installationFee);
                       const additionalFeeAmount = toNumber(selectedInvoice.additionalFees);
+                      const collectionFeeAmount = toNumber(selectedInvoice.collectionFee);
                       const allAdjustments = selectedInvoice.adjustments || [];
                       const isSystemMonthlyOffset = (adjustment: InvoiceAdjustment) => {
                         const description = String(adjustment.description || '').trim().toLowerCase();
@@ -6040,6 +6083,14 @@ export default function BillingPage() {
                           qty: 1,
                           unitPrice: additionalFeeAmount,
                           amount: additionalFeeAmount
+                        });
+                      }
+                      if (collectionFeeAmount > 0) {
+                        visibleChargeRows.push({
+                          description: 'Collection Fee',
+                          qty: 1,
+                          unitPrice: collectionFeeAmount,
+                          amount: collectionFeeAmount
                         });
                       }
                       const displaySubtotal = visibleChargeRows.reduce((sum, row) => sum + row.amount, 0);

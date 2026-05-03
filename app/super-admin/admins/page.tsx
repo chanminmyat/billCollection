@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Eye, EyeOff, Search, ShieldCheck, UserPlus } from 'lucide-react';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Eye, EyeOff, Pencil, Search, ShieldCheck, UserPlus } from 'lucide-react';
 
 type AdminStatus = 'active' | 'inactive';
 
@@ -35,6 +36,14 @@ export default function SuperAdminAdminsPage() {
   const [status, setStatus] = useState<AdminStatus>('active');
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isEditSubmitting, setIsEditSubmitting] = useState(false);
+  const [editingAdminId, setEditingAdminId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editUsername, setEditUsername] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editStatus, setEditStatus] = useState<AdminStatus>('active');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -117,6 +126,91 @@ export default function SuperAdminAdminsPage() {
       setError(submitError instanceof Error ? submitError.message : 'Failed to create admin account');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const openEditDialog = (admin: AdminUser) => {
+    setEditingAdminId(admin.id);
+    setEditName(admin.name);
+    setEditEmail(admin.email);
+    setEditUsername(admin.username ?? '');
+    setEditPhone(admin.phone ?? '');
+    setEditStatus(admin.status);
+    setIsEditOpen(true);
+    setError(null);
+    setSuccess(null);
+  };
+
+  const handleEditAdmin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editingAdminId) return;
+
+    setIsEditSubmitting(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/users/${editingAdminId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          account: {
+            name: editName,
+            email: editEmail,
+            username: editUsername.trim() || undefined,
+            phone: editPhone.trim() || undefined,
+            status: editStatus,
+          },
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = data?.message ?? 'Failed to update admin account';
+        throw new Error(Array.isArray(message) ? message.join(', ') : String(message));
+      }
+
+      setSuccess(`Admin ${data?.name ?? editName} updated.`);
+      setIsEditOpen(false);
+      setEditingAdminId(null);
+      await fetchAdmins();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Failed to update admin account');
+    } finally {
+      setIsEditSubmitting(false);
+    }
+  };
+
+  const handleToggleStatus = async (admin: AdminUser) => {
+    const nextStatus: AdminStatus = admin.status === 'active' ? 'inactive' : 'active';
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/users/${admin.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          account: {
+            status: nextStatus,
+          },
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = data?.message ?? 'Failed to update admin status';
+        throw new Error(Array.isArray(message) ? message.join(', ') : String(message));
+      }
+
+      setSuccess(`Status updated for ${admin.name}: ${nextStatus}`);
+      await fetchAdmins();
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : 'Failed to update admin status');
     }
   };
 
@@ -206,16 +300,17 @@ export default function SuperAdminAdminsPage() {
                 <TableHead>Username</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Security</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={6}>Loading admins...</TableCell>
+                  <TableCell colSpan={7}>Loading admins...</TableCell>
                 </TableRow>
               ) : filteredAdmins.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6}>No admin users found.</TableCell>
+                  <TableCell colSpan={7}>No admin users found.</TableCell>
                 </TableRow>
               ) : (
                 filteredAdmins.map((admin) => (
@@ -230,6 +325,22 @@ export default function SuperAdminAdminsPage() {
                     <TableCell>
                       <ShieldCheck className="h-4 w-4 text-slate-500" />
                     </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Button type="button" variant="outline" size="sm" onClick={() => openEditDialog(admin)}>
+                          <Pencil className="mr-1 h-3.5 w-3.5" />
+                          Edit
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleToggleStatus(admin)}
+                        >
+                          Set {admin.status === 'active' ? 'Inactive' : 'Active'}
+                        </Button>
+                      </div>
+                    </TableCell>
                   </TableRow>
                 ))
               )}
@@ -237,6 +348,33 @@ export default function SuperAdminAdminsPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Admin</DialogTitle>
+          </DialogHeader>
+          <form className="space-y-3" onSubmit={handleEditAdmin}>
+            <Input value={editName} onChange={(event) => setEditName(event.target.value)} placeholder="Full name" required />
+            <Input type="email" value={editEmail} onChange={(event) => setEditEmail(event.target.value)} placeholder="Email" required />
+            <Input value={editUsername} onChange={(event) => setEditUsername(event.target.value)} placeholder="Username (optional)" />
+            <Input value={editPhone} onChange={(event) => setEditPhone(event.target.value)} placeholder="Phone (optional)" />
+            <select
+              className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm"
+              value={editStatus}
+              onChange={(event) => setEditStatus(event.target.value as AdminStatus)}
+            >
+              <option value="active">active</option>
+              <option value="inactive">inactive</option>
+            </select>
+            <DialogFooter>
+              <Button type="submit" className="bg-slate-900 text-white hover:bg-slate-800" disabled={isEditSubmitting}>
+                {isEditSubmitting ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

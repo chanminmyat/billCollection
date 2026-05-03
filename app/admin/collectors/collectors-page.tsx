@@ -505,6 +505,87 @@ export default function CollectorsPage({
     };
   };
 
+  const resolveNrcOptionValue = (value: string, options: SelectOption[]) => {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    if (!normalized) return '';
+    const matched = options.find((option) => option.value.trim().toLowerCase() === normalized);
+    return matched?.value ?? '';
+  };
+
+  const parseAddressParts = (value?: string | null) => {
+    const raw = String(value ?? '').trim();
+    if (!raw) {
+      return {
+        building: '',
+        street: '',
+        ward: '',
+        city: '',
+        township: '',
+        district: '',
+        region: '',
+        postalCode: ''
+      };
+    }
+
+    const parts = raw
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    const postalCode = parts.length > 0 && /^\d{4,6}$/.test(parts[parts.length - 1])
+      ? parts.pop() ?? ''
+      : '';
+
+    return {
+      building: parts[0] ?? '',
+      street: parts[1] ?? '',
+      ward: parts[2] ?? '',
+      city: parts[3] ?? '',
+      township: parts[4] ?? '',
+      district: parts[5] ?? '',
+      region: parts[6] ?? '',
+      postalCode
+    };
+  };
+
+  const firstNonEmpty = (...values: Array<string | null | undefined>) => {
+    for (const value of values) {
+      const normalized = String(value ?? '').trim();
+      if (normalized) return normalized;
+    }
+    return '';
+  };
+
+  const inferRegionDistrictTownshipFromAddress = (addressRaw?: string | null) => {
+    const text = String(addressRaw ?? '').toLowerCase();
+    if (!text) {
+      return { region: '', district: '', township: '' };
+    }
+
+    const regionEntries = Object.entries(
+      townshipData as Record<string, Record<string, string[]>>
+    );
+
+    for (const [regionName, districtMap] of regionEntries) {
+      const districtEntries = Object.entries(districtMap ?? {});
+      for (const [districtName, townshipList] of districtEntries) {
+        for (const townshipName of townshipList ?? []) {
+          const township = String(townshipName ?? '').trim();
+          if (!township) continue;
+          if (text.includes(township.toLowerCase())) {
+            return {
+              region: regionName,
+              district: districtName,
+              township
+            };
+          }
+        }
+      }
+    }
+
+    return { region: '', district: '', township: '' };
+  };
+
   useEffect(() => {
     if (inlineForm) return;
     let isMounted = true;
@@ -549,7 +630,14 @@ export default function CollectorsPage({
             name: item?.user?.name ?? 'Unknown',
             phone: item?.user?.phone ?? '',
             email: item?.user?.email ?? '',
-            area: item?.area ?? item?.township ?? '',
+            area:
+              item?.area ??
+              item?.township ??
+              item?.collectorProfile?.area ??
+              item?.collectorProfile?.township ??
+              item?.profile?.area ??
+              item?.profile?.township ??
+              '',
             status: item?.status ?? item?.user?.status ?? 'enable',
             nrc:
               item?.nrc ??
@@ -557,16 +645,61 @@ export default function CollectorsPage({
               item?.profile?.nrc ??
               item?.user?.collectorProfile?.nrc ??
               '',
-            address: item?.address ?? '',
+            address:
+              item?.address ??
+              item?.collectorProfile?.address ??
+              item?.profile?.address ??
+              item?.user?.collectorProfile?.address ??
+              '',
             addressDetails: {
-              region: item?.region ?? '',
-              district: item?.district ?? '',
-              township: item?.township ?? '',
-              city: item?.city ?? '',
-              ward: item?.ward ?? '',
-              street: item?.street ?? '',
-              building: item?.building ?? '',
-              postalCode: item?.postalCode ?? ''
+              region:
+                item?.region ??
+                item?.collectorProfile?.region ??
+                item?.profile?.region ??
+                item?.user?.collectorProfile?.region ??
+                '',
+              district:
+                item?.district ??
+                item?.collectorProfile?.district ??
+                item?.profile?.district ??
+                item?.user?.collectorProfile?.district ??
+                '',
+              township:
+                item?.township ??
+                item?.collectorProfile?.township ??
+                item?.profile?.township ??
+                item?.user?.collectorProfile?.township ??
+                '',
+              city:
+                item?.city ??
+                item?.collectorProfile?.city ??
+                item?.profile?.city ??
+                item?.user?.collectorProfile?.city ??
+                '',
+              ward:
+                item?.ward ??
+                item?.collectorProfile?.ward ??
+                item?.profile?.ward ??
+                item?.user?.collectorProfile?.ward ??
+                '',
+              street:
+                item?.street ??
+                item?.collectorProfile?.street ??
+                item?.profile?.street ??
+                item?.user?.collectorProfile?.street ??
+                '',
+              building:
+                item?.building ??
+                item?.collectorProfile?.building ??
+                item?.profile?.building ??
+                item?.user?.collectorProfile?.building ??
+                '',
+              postalCode:
+                item?.postalCode ??
+                item?.collectorProfile?.postalCode ??
+                item?.profile?.postalCode ??
+                item?.user?.collectorProfile?.postalCode ??
+                ''
             }
           };
         }) as Collector[];
@@ -867,6 +1000,49 @@ export default function CollectorsPage({
 
   const handleEditCollector = (collector: Collector) => {
     const parsedNrc = parseNrc(collector.nrc);
+    const parsedAddress = parseAddressParts(collector.address);
+    const inferredByAddress = inferRegionDistrictTownshipFromAddress(collector.address);
+    const resolvedRegion = firstNonEmpty(
+      collector.addressDetails?.region,
+      parsedAddress.region,
+      inferredByAddress.region
+    );
+    const resolvedDistrict = firstNonEmpty(
+      collector.addressDetails?.district,
+      parsedAddress.district,
+      inferredByAddress.district
+    );
+    const districtOptions = resolvedRegion
+      ? Object.keys(
+          townshipData[resolvedRegion as keyof typeof townshipData] ??
+            ({} as Record<string, string[]>)
+        ).sort()
+      : [];
+    const resolvedTownshipOptions =
+      resolvedRegion && resolvedDistrict
+        ? ((
+            townshipData[resolvedRegion as keyof typeof townshipData] as Record<string, string[]>
+          )?.[resolvedDistrict] ?? [])
+        : [];
+    const fallbackTownshipCandidate = firstNonEmpty(
+      collector.addressDetails?.township,
+      parsedAddress.township,
+      collector.area,
+      inferredByAddress.township
+    );
+    const resolvedNrcState = resolveNrcOptionValue(parsedNrc.state, nrcStateOptions);
+    const resolvedNrcType = resolveNrcOptionValue(parsedNrc.type, nrcTypeOptions);
+    const resolvedNrcTownship = resolveNrcOptionValue(
+      parsedNrc.township,
+      nrcData.nrcTownships
+        .filter((township) => township.stateCode === resolvedNrcState)
+        .slice()
+        .sort((a, b) => a.name.en.localeCompare(b.name.en))
+        .map((option) => ({
+          value: option.short.en,
+          label: `${option.short.en} - ${option.name.en}`
+        }))
+    );
     setEditingCollector(collector);
     setNewCollector({
       name: collector.name,
@@ -876,20 +1052,35 @@ export default function CollectorsPage({
     });
     setErrors({});
     setCollectorStatus(collector.status ?? 'enable');
-    setNrcState(parsedNrc.state);
-    setNrcTownship(parsedNrc.township);
-    setNrcType(parsedNrc.type);
+    setNrcState(resolvedNrcState);
+    setNrcTownship(resolvedNrcTownship);
+    setNrcType(resolvedNrcType);
     setNrcNumber(parsedNrc.number);
-    setCollectorRegion(collector.addressDetails?.region ?? '');
-    setCollectorDistrict(collector.addressDetails?.district ?? '');
-    setCollectorTownship(collector.addressDetails?.township ?? '');
-    setCollectorCity(collector.addressDetails?.city ?? '');
-    setCollectorWard(collector.addressDetails?.ward ?? '');
-    setCollectorStreet(
-      collector.addressDetails?.street ?? (collector.address ? collector.address : '')
+    setCollectorRegion(
+      resolvedRegion && collectorRegionSelectOptions.some((option) => option.value === resolvedRegion)
+        ? resolvedRegion
+        : ''
     );
-    setCollectorBuilding(collector.addressDetails?.building ?? '');
-    setCollectorPostalCode(collector.addressDetails?.postalCode ?? '');
+    setCollectorDistrict(
+      resolvedDistrict && districtOptions.includes(resolvedDistrict) ? resolvedDistrict : ''
+    );
+    setCollectorTownship(
+      fallbackTownshipCandidate &&
+        resolvedTownshipOptions.includes(fallbackTownshipCandidate)
+        ? fallbackTownshipCandidate
+        : ''
+    );
+    setCollectorCity(firstNonEmpty(collector.addressDetails?.city, parsedAddress.city));
+    setCollectorWard(firstNonEmpty(collector.addressDetails?.ward, parsedAddress.ward));
+    setCollectorStreet(
+      firstNonEmpty(
+        collector.addressDetails?.street,
+        parsedAddress.street,
+        collector.address ? collector.address : ''
+      )
+    );
+    setCollectorBuilding(firstNonEmpty(collector.addressDetails?.building, parsedAddress.building));
+    setCollectorPostalCode(firstNonEmpty(collector.addressDetails?.postalCode, parsedAddress.postalCode));
     const assignmentSource =
       availableCustomers.length > 0
         ? availableCustomers

@@ -23,6 +23,12 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import { formatDisplayDate } from '@/lib/date-format';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { readUiLanguage, UI_LANGUAGE_STORAGE_KEY, UI_LANGUAGE_UPDATED_EVENT, UiLanguage, writeUiLanguage } from '@/lib/ui-language';
+import {
+  COLLECTOR_DASHBOARD_COPY_UPDATED_AT_STORAGE_KEY,
+  COLLECTOR_DASHBOARD_COPY_UPDATED_EVENT,
+  DEFAULT_COLLECTOR_DASHBOARD_COPY,
+  normalizeCollectorDashboardCopy,
+} from '@/lib/collector-dashboard-copy';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -49,6 +55,10 @@ export default function Layout({ children }: LayoutProps) {
     'customers' | 'collectors' | 'billing' | 'paymentConfig' | null
   >(null);
   const [collectorViewHash, setCollectorViewHash] = useState<string>('dashboard');
+  const [collectorDashboardCopy, setCollectorDashboardCopy] = useState(() => ({
+    en: { ...DEFAULT_COLLECTOR_DASHBOARD_COPY.en },
+    mm: { ...DEFAULT_COLLECTOR_DASHBOARD_COPY.mm },
+  }));
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -56,6 +66,7 @@ export default function Layout({ children }: LayoutProps) {
   const isCollectorBurmese = role === 'collector' && uiLanguage === 'mm';
 
   const collectorLabel = (english: string, burmese: string) => (isCollectorBurmese ? burmese : english);
+  const collectorCopy = isCollectorBurmese ? collectorDashboardCopy.mm : collectorDashboardCopy.en;
 
   const getNavItems = () => {
     switch (role) {
@@ -102,10 +113,10 @@ export default function Layout({ children }: LayoutProps) {
         ];
       case 'collector':
         return [
-          { icon: LayoutDashboard, label: collectorLabel('Dashboard', 'ဒက်ရှ်ဘုတ်'), href: '/collector#dashboard' },
-          { icon: Users, label: collectorLabel('Assigned Customers', 'တာဝန်ပေးထားသော ဖောက်သည်များ'), href: '/collector#assigned_customers' },
-          { icon: FileText, label: collectorLabel('Assigned Bills', 'တာဝန်ပေးထားသော ဘီလ်များ'), href: '/collector#assigned_bills' },
-          { icon: UserCheck, label: collectorLabel('Collected Bills', 'ကောက်ခံပြီး ဘီလ်များ'), href: '/collector#collected_bills' },
+          { icon: LayoutDashboard, label: collectorCopy.dashboardTitle || collectorLabel('Dashboard', 'ဒက်ရှ်ဘုတ်'), href: '/collector#dashboard' },
+          { icon: Users, label: collectorCopy.assignedCustomers || collectorLabel('Assigned Customers', 'တာဝန်ပေးထားသော ဖောက်သည်များ'), href: '/collector#assigned_customers' },
+          { icon: FileText, label: collectorCopy.assignedBillsLabel || collectorLabel('Assigned Bills', 'တာဝန်ပေးထားသော ဘီလ်များ'), href: '/collector#assigned_bills' },
+          { icon: UserCheck, label: collectorCopy.collectedBillsLabel || collectorLabel('Collected Bills', 'ကောက်ခံပြီး ဘီလ်များ'), href: '/collector#collected_bills' },
         ];
       case 'customer':
         return [
@@ -181,6 +192,45 @@ export default function Layout({ children }: LayoutProps) {
       window.removeEventListener(UI_LANGUAGE_UPDATED_EVENT, syncLanguage as EventListener);
     };
   }, [role, user?.collectorProfile?.language]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || role !== 'collector') return;
+
+    let active = true;
+    const loadCollectorCopy = async () => {
+      try {
+        const response = await fetch('/api/reference-data/collector-dashboard-copy', {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        const data = await response.json().catch(() => null);
+        if (!active) return;
+        if (!response.ok) return;
+        setCollectorDashboardCopy(normalizeCollectorDashboardCopy(data?.copy));
+      } catch {
+        // keep defaults
+      }
+    };
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === COLLECTOR_DASHBOARD_COPY_UPDATED_AT_STORAGE_KEY) {
+        void loadCollectorCopy();
+      }
+    };
+
+    const onUpdated = () => {
+      void loadCollectorCopy();
+    };
+
+    void loadCollectorCopy();
+    window.addEventListener('storage', onStorage);
+    window.addEventListener(COLLECTOR_DASHBOARD_COPY_UPDATED_EVENT, onUpdated as EventListener);
+    return () => {
+      active = false;
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener(COLLECTOR_DASHBOARD_COPY_UPDATED_EVENT, onUpdated as EventListener);
+    };
+  }, [role]);
 
   const handleChangeLanguage = (language: UiLanguage) => {
     setUiLanguage(language);
@@ -272,7 +322,7 @@ export default function Layout({ children }: LayoutProps) {
                   {isCollectorBurmese ? 'ကောက်ခံသူ' : user.role}
                 </p>
                 <span className="mt-1 inline-flex items-center text-xs font-medium text-blue-600">
-                  {collectorLabel('Edit profile', 'ပရိုဖိုင် ပြင်ရန်')}
+                  {collectorCopy.editProfileLabel || collectorLabel('Edit profile', 'ပရိုဖိုင် ပြင်ရန်')}
                 </span>
               </div>
             )}
@@ -464,7 +514,7 @@ export default function Layout({ children }: LayoutProps) {
             }`}
           >
             <LogOut className="h-5 w-5 mr-3" />
-            {sidebarOpen && collectorLabel('Logout', 'ထွက်မည်')}
+            {sidebarOpen && (collectorCopy.logoutLabel || collectorLabel('Logout', 'ထွက်မည်'))}
           </Button>
         </div>
       </div>
@@ -515,7 +565,7 @@ export default function Layout({ children }: LayoutProps) {
                 className="text-gray-600 hover:text-gray-900"
               >
                 <LogOut className="h-4 w-4 mr-2" />
-                {collectorLabel('Logout', 'ထွက်မည်')}
+                {collectorCopy.logoutLabel || collectorLabel('Logout', 'ထွက်မည်')}
               </Button>
             </div>
           </div>

@@ -36,14 +36,6 @@ type PaymentAccount = {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 
-const readFileAsDataUrl = (file: File): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ''));
-    reader.onerror = () => reject(new Error('Failed to read file'));
-    reader.readAsDataURL(file);
-  });
-
 const extractErrorMessage = (payload: unknown, fallback: string): string => {
   if (!payload || typeof payload !== 'object') return fallback;
   const data = payload as { message?: string | string[]; error?: string };
@@ -73,7 +65,8 @@ export default function PaymentConfigPage({ mode }: PaymentConfigPageProps) {
   const [bankType, setBankType] = useState('');
   const [accountName, setAccountName] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
-  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
+  const [qrCodeFile, setQrCodeFile] = useState<File | null>(null);
+  const [qrCodePreviewUrl, setQrCodePreviewUrl] = useState<string | null>(null);
   const [qrCodeFileName, setQrCodeFileName] = useState('');
 
   const refreshAccounts = useCallback(async () => {
@@ -121,6 +114,14 @@ export default function PaymentConfigPage({ mode }: PaymentConfigPageProps) {
     refreshAccounts();
   }, [refreshAccounts]);
 
+  useEffect(() => {
+    return () => {
+      if (qrCodePreviewUrl) {
+        URL.revokeObjectURL(qrCodePreviewUrl);
+      }
+    };
+  }, [qrCodePreviewUrl]);
+
   const filteredAccounts = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     if (!keyword) return accounts;
@@ -140,24 +141,29 @@ export default function PaymentConfigPage({ mode }: PaymentConfigPageProps) {
     setBankType('');
     setAccountName('');
     setAccountNumber('');
-    setQrCodeDataUrl(null);
+    setQrCodeFile(null);
+    setQrCodePreviewUrl(null);
     setQrCodeFileName('');
   };
 
-  const handleQrUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+  const handleQrUpload = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    try {
-      const dataUrl = await readFileAsDataUrl(file);
-      setQrCodeDataUrl(dataUrl);
-      setQrCodeFileName(file.name);
-    } catch (error) {
+    if (!file.type.startsWith('image/')) {
       toast({
-        title: 'Failed to upload QR',
-        description: error instanceof Error ? error.message : 'Please try again.',
+        title: 'Invalid file',
+        description: 'QR file must be an image.',
         variant: 'destructive',
       });
+      return;
     }
+    const previewUrl = URL.createObjectURL(file);
+    setQrCodeFile(file);
+    setQrCodePreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return previewUrl;
+    });
+    setQrCodeFileName(file.name);
   };
 
   const handleCreate = async () => {
@@ -198,7 +204,7 @@ export default function PaymentConfigPage({ mode }: PaymentConfigPageProps) {
       });
       return;
     }
-    if (kind === 'wallet' && !qrCodeDataUrl) {
+    if (kind === 'wallet' && !qrCodeFile) {
       toast({
         title: 'QR code is required',
         description: 'Please upload wallet QR code.',
@@ -209,21 +215,26 @@ export default function PaymentConfigPage({ mode }: PaymentConfigPageProps) {
 
     setIsSubmitting(true);
     try {
+      const formData = new FormData();
+      formData.append('kind', kind);
+      formData.append('accountName', nextName);
+      formData.append('accountNumber', nextNumber);
+      formData.append('isActive', 'true');
+      if (kind === 'wallet') {
+        formData.append('walletType', nextWalletType);
+        if (qrCodeFile) {
+          formData.append('qrCode', qrCodeFile);
+        }
+      } else {
+        formData.append('bankType', nextBankType);
+      }
+
       const response = await fetch(`${API_BASE_URL}/billing/payment-accounts`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
           Accept: 'application/json',
         },
-        body: JSON.stringify({
-          kind,
-          walletType: kind === 'wallet' ? nextWalletType : undefined,
-          bankType: kind === 'account' ? nextBankType : undefined,
-          accountName: nextName,
-          accountNumber: nextNumber,
-          qrCodeDataUrl: kind === 'wallet' ? qrCodeDataUrl : undefined,
-          isActive: true,
-        }),
+        body: formData,
       });
 
       const payload = await response.json().catch(() => null);
@@ -314,7 +325,8 @@ export default function PaymentConfigPage({ mode }: PaymentConfigPageProps) {
                         setBankType('');
                       } else {
                         setWalletType('');
-                        setQrCodeDataUrl(null);
+                        setQrCodeFile(null);
+                        setQrCodePreviewUrl(null);
                         setQrCodeFileName('');
                       }
                     }}
@@ -365,9 +377,9 @@ export default function PaymentConfigPage({ mode }: PaymentConfigPageProps) {
                   <Label>Upload QR Code</Label>
                   <Input type="file" accept="image/*" onChange={handleQrUpload} />
                   {qrCodeFileName ? <p className="text-xs text-slate-500">Selected: {qrCodeFileName}</p> : null}
-                  {qrCodeDataUrl ? (
+                  {qrCodePreviewUrl ? (
                     <div className="inline-flex items-center rounded-md border border-slate-200 bg-white p-3">
-                      <img src={qrCodeDataUrl} alt="QR preview" className="h-36 w-36 rounded object-contain" />
+                      <img src={qrCodePreviewUrl} alt="QR preview" className="h-36 w-36 rounded object-contain" />
                     </div>
                   ) : null}
                 </div>
