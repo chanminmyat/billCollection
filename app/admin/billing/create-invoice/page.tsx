@@ -1370,6 +1370,8 @@ export default function CreateInvoicePage() {
                             Billing Period:{' '}
                             {formatDisplayDateRange(invoice.billingPeriodFrom, invoice.billingPeriodTo)}
                           </p>
+                          <p>Period Start Date: {formatDisplayDate(invoice.billingPeriodFrom)}</p>
+                          <p>Period End Date: {formatDisplayDate(invoice.billingPeriodTo)}</p>
                           <p>Due Date: {formatDisplayDate(invoice.dueDate)}</p>
                         </div>
 

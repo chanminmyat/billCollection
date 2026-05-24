@@ -2745,6 +2745,10 @@ export default function BillingPage() {
         cycleMonths: 1,
         unitMonthlyFee: 0,
         serviceAmount: 0,
+        isProrated: false,
+        prorationStartDate: null as Date | null,
+        prorationEndDate: null as Date | null,
+        activeDays: 0,
       };
     }
 
@@ -2753,53 +2757,51 @@ export default function BillingPage() {
     const invoiceMonthlyFee = toNumber(selectedInvoice.monthlyFee);
     const unitMonthlyFee = planMonthlyFee > 0 ? planMonthlyFee : invoiceMonthlyFee;
     const isFixedRule = editedInvoiceRuleForPreview?.billingType === 'fixed';
-    const resolvedFixedBillingDay =
-      parsePositiveInt(editedInvoiceRuleForPreview?.fixedBillingDay) ?? fixedBillingWindow.startDay;
     const anchorDate =
       parseDateSafe(selectedInvoice.billingPeriodFrom) ??
       parseDateSafe(selectedInvoice.invoiceDate) ??
       new Date();
-    const proratedServiceAmount = (() => {
+    const proratedDetails = (() => {
       if (!isFixedRule || editedInvoiceFixedFirstChargeMode !== 'prorated') {
-        return unitMonthlyFee * cycleMonths;
+        return {
+          amount: unitMonthlyFee * cycleMonths,
+          isProrated: false,
+          prorationStartDate: null as Date | null,
+          prorationEndDate: null as Date | null,
+          activeDays: 0,
+        };
       }
       const normalizedAnchor = startOfDay(anchorDate);
-      let nextCycleStart = new Date(
+      const firstPeriodEnd = new Date(
         normalizedAnchor.getFullYear(),
         normalizedAnchor.getMonth(),
-        Math.min(
-          resolvedFixedBillingDay,
-          daysInMonth(normalizedAnchor.getFullYear(), normalizedAnchor.getMonth()),
-        ),
+        daysInMonth(normalizedAnchor.getFullYear(), normalizedAnchor.getMonth()),
       );
-      if (nextCycleStart <= normalizedAnchor) {
-        const stepped = addMonthsSafe(
-          new Date(normalizedAnchor.getFullYear(), normalizedAnchor.getMonth(), 1),
-          1,
-        );
-        nextCycleStart = new Date(
-          stepped.getFullYear(),
-          stepped.getMonth(),
-          Math.min(resolvedFixedBillingDay, daysInMonth(stepped.getFullYear(), stepped.getMonth())),
-        );
-      }
-      const firstPeriodEnd = addDays(nextCycleStart, -1);
       const proratedDays = daysBetweenInclusive(normalizedAnchor, firstPeriodEnd);
       const monthDayCount = daysInMonth(normalizedAnchor.getFullYear(), normalizedAnchor.getMonth());
-      return (unitMonthlyFee * proratedDays) / monthDayCount;
+      return {
+        amount: (unitMonthlyFee * proratedDays) / monthDayCount,
+        isProrated: true,
+        prorationStartDate: normalizedAnchor,
+        prorationEndDate: firstPeriodEnd,
+        activeDays: proratedDays,
+      };
     })();
 
     return {
       cycleMonths,
       unitMonthlyFee,
-      serviceAmount: proratedServiceAmount,
+      serviceAmount: proratedDetails.amount,
+      isProrated: proratedDetails.isProrated,
+      prorationStartDate: proratedDetails.prorationStartDate,
+      prorationEndDate: proratedDetails.prorationEndDate,
+      activeDays: proratedDetails.activeDays,
     };
   }, [
     selectedInvoice,
     editedInvoiceCycleMonths,
     editedInvoiceRuleForPreview,
     editedInvoiceFixedFirstChargeMode,
-    fixedBillingWindow.startDay,
   ]);
 
   const adjustmentPreview = useMemo(() => {
@@ -4179,6 +4181,8 @@ export default function BillingPage() {
                 <div>Billing Period: ${escapeHtml(
                   formatDisplayDateRange(selectedInvoice.billingPeriodFrom, selectedInvoice.billingPeriodTo)
                 )}</div>
+                <div>Period Start Date: ${escapeHtml(formatDisplayDate(selectedInvoice.billingPeriodFrom))}</div>
+                <div>Period End Date: ${escapeHtml(formatDisplayDate(selectedInvoice.billingPeriodTo))}</div>
                 <div>Due Date: ${escapeHtml(formatDisplayDate(selectedInvoice.dueDate))}</div>
                 <div>Billing Rule: ${escapeHtml(invoiceRuleName)}</div>
                 <div>Rule ID: ${escapeHtml(invoiceRuleId)}</div>
@@ -5688,6 +5692,26 @@ export default function BillingPage() {
 
                       <div className="mt-2">
                         <p className="mb-2 text-sm font-semibold">Charges Details</p>
+                        {selectedInvoicePricingPreview.isProrated && (
+                          <div className="mb-3 grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm md:grid-cols-3">
+                            <div>
+                              <p className="text-slate-500">Start Date</p>
+                              <p className="font-medium">
+                                {formatDisplayDate(selectedInvoicePricingPreview.prorationStartDate)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">End Date</p>
+                              <p className="font-medium">
+                                {formatDisplayDate(selectedInvoicePricingPreview.prorationEndDate)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">Active Days</p>
+                              <p className="font-medium">{selectedInvoicePricingPreview.activeDays}</p>
+                            </div>
+                          </div>
+                        )}
                         <div className="overflow-x-auto">
                           <Table>
                             <TableHeader>
@@ -6020,6 +6044,8 @@ export default function BillingPage() {
                             selectedInvoice.billingPeriodTo
                           )}
                         </p>
+                        <p>Period Start Date: {formatDisplayDate(selectedInvoice.billingPeriodFrom)}</p>
+                        <p>Period End Date: {formatDisplayDate(selectedInvoice.billingPeriodTo)}</p>
                         <p>Due Date: {formatDisplayDate(selectedInvoice.dueDate)}</p>
                         <p>Billing Rule: {selectedInvoiceRuleDetails.name}</p>
                         <p>Rule ID: {selectedInvoiceRuleDetails.id || '—'}</p>

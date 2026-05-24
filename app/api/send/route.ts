@@ -38,8 +38,11 @@ export async function POST(request: Request) {
       );
     }
 
-    const origin = new URL(request.url).origin;
-    const resetLink = `http://localhost:3000/reset-password?token=${encodeURIComponent(
+    const frontendBaseUrl =
+      process.env.NEXT_PUBLIC_WEB_BASE_URL ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      new URL(request.url).origin;
+    const resetLink = `${frontendBaseUrl.replace(/\/+$/, "")}/reset-password?token=${encodeURIComponent(
       token
     )}`;
 

@@ -448,11 +448,8 @@ const dateAtDay = (year: number, monthIndex: number, day: number) => {
   return new Date(firstDayOfMonth.getFullYear(), firstDayOfMonth.getMonth(), safeDay);
 };
 
-const getNextFixedCycleStartDate = (anchor: Date, fixedStartDay: number) => {
-  const current = dateAtDay(anchor.getFullYear(), anchor.getMonth(), fixedStartDay);
-  if (current > anchor) return current;
-  return dateAtDay(anchor.getFullYear(), anchor.getMonth() + 1, fixedStartDay);
-};
+const getMonthEndDate = (date: Date) =>
+  new Date(date.getFullYear(), date.getMonth(), daysInMonth(date));
 
 const inferCustomMonthsFromRuleName = (ruleName?: string | null) => {
   if (!ruleName) return null;
@@ -1160,11 +1157,6 @@ export default function CustomersPage({
       null,
     [contractStartDate, serviceStartDate, installationDate]
   );
-  const customerCreateFixedStartDay = useMemo(() => {
-    const parsed = Number.parseInt(String(selectedCustomerCreateRule?.fixedBillingDay ?? ''), 10);
-    if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 31) return parsed;
-    return fixedBillingWindow.startDay;
-  }, [selectedCustomerCreateRule?.fixedBillingDay, fixedBillingWindow.startDay]);
   const customerCreateFirstInvoiceAmount = useMemo(() => {
     if (
       selectedCustomerCreateRule?.billingType !== 'fixed' ||
@@ -1176,12 +1168,7 @@ export default function CustomersPage({
     if (customerFixedFirstInvoiceChargeMode === 'full_month') {
       return customerMonthlyAmount;
     }
-    const nextCycleStart = getNextFixedCycleStartDate(
-      customerCreateContractAnchorDate,
-      customerCreateFixedStartDay
-    );
-    const firstPeriodEnd = new Date(nextCycleStart);
-    firstPeriodEnd.setDate(firstPeriodEnd.getDate() - 1);
+    const firstPeriodEnd = getMonthEndDate(customerCreateContractAnchorDate);
     const proratedDays = daysBetweenInclusive(customerCreateContractAnchorDate, firstPeriodEnd);
     const monthDays = daysInMonth(customerCreateContractAnchorDate);
     return (customerMonthlyAmount * proratedDays) / monthDays;
@@ -1191,7 +1178,34 @@ export default function CustomersPage({
     customerCreateContractAnchorDate,
     customerFixedFirstInvoiceChargeMode,
     customerMonthlyAmount,
-    customerCreateFixedStartDay
+  ]);
+  const customerCreateProrationPreview = useMemo(() => {
+    if (
+      selectedCustomerCreateRule?.billingType !== 'fixed' ||
+      customerFirstInvoiceMode !== 'fixed' ||
+      customerFixedFirstInvoiceChargeMode !== 'prorated' ||
+      !customerCreateContractAnchorDate
+    ) {
+      return {
+        startDate: null as Date | null,
+        endDate: null as Date | null,
+        activeDays: 0,
+      };
+    }
+
+    const firstPeriodEnd = getMonthEndDate(customerCreateContractAnchorDate);
+    const activeDays = daysBetweenInclusive(customerCreateContractAnchorDate, firstPeriodEnd);
+
+    return {
+      startDate: customerCreateContractAnchorDate,
+      endDate: firstPeriodEnd,
+      activeDays,
+    };
+  }, [
+    selectedCustomerCreateRule?.billingType,
+    customerFirstInvoiceMode,
+    customerFixedFirstInvoiceChargeMode,
+    customerCreateContractAnchorDate,
   ]);
 
   useEffect(() => {
@@ -5758,6 +5772,31 @@ export default function CustomersPage({
                 </RadioGroup>
               </div>
             )}
+          {!editingCustomer &&
+            selectedCustomerCreateRule?.billingType === 'fixed' &&
+            customerFirstInvoiceMode === 'fixed' &&
+            customerFixedFirstInvoiceChargeMode === 'prorated' &&
+            customerCreateProrationPreview.startDate &&
+            customerCreateProrationPreview.endDate && (
+              <div className="grid gap-3 md:col-span-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm md:grid-cols-3">
+                <div>
+                  <p className="text-slate-500">Start Date</p>
+                  <p className="font-medium">
+                    {formatDisplayDate(customerCreateProrationPreview.startDate)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-slate-500">End Date</p>
+                  <p className="font-medium">
+                    {formatDisplayDate(customerCreateProrationPreview.endDate)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-slate-500">Active Days</p>
+                  <p className="font-medium">{customerCreateProrationPreview.activeDays}</p>
+                </div>
+              </div>
+            )}
           <div className="space-y-2">
             <Label className="text-sm font-medium text-slate-700">
               Monthly Subscription Fee
@@ -6883,12 +6922,7 @@ export default function CustomersPage({
                   ? manualInvoiceFixedFirstChargeMode === 'full_month'
                     ? monthlyAmount
                     : (() => {
-                      const nextCycleStart = getNextFixedCycleStartDate(
-                        contractAnchorDate,
-                        resolvedFixedStartDay
-                      );
-                      const firstPeriodEnd = new Date(nextCycleStart);
-                      firstPeriodEnd.setDate(firstPeriodEnd.getDate() - 1);
+                      const firstPeriodEnd = getMonthEndDate(contractAnchorDate);
                       const proratedDays = daysBetweenInclusive(contractAnchorDate, firstPeriodEnd);
                       const monthDays = daysInMonth(contractAnchorDate);
                       return (monthlyAmount * proratedDays) / monthDays;

@@ -1949,15 +1949,6 @@ export default function CollectorsPage({
                               >
                                 Assign
                               </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="mt-1 h-7 px-2 text-xs"
-                                onClick={() => openViewDialog(collector)}
-                                disabled={customersLoading}
-                              >
-                                View
-                              </Button>
                             </TableCell>
                             <TableCell>
                               <div className="font-medium">${stats.totalCollected.toFixed(2)}</div>
@@ -2088,15 +2079,6 @@ export default function CollectorsPage({
                                 disabled={customersLoading}
                               >
                                 Assign
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-8 px-3 text-xs"
-                                onClick={() => openViewDialog(collector)}
-                                disabled={customersLoading}
-                              >
-                                View
                               </Button>
                             </div>
                           </div>

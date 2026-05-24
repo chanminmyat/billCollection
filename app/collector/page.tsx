@@ -76,6 +76,7 @@ type CollectorCustomer = {
   personalName?: string | null;
   companyName?: string | null;
   primaryPhone?: string | null;
+  billingAddress?: string | null;
   installationAddress?: string | null;
   billingMapLink?: string | null;
   billingMapUrl?: string | null;
@@ -142,6 +143,7 @@ type InvoiceRecord = {
     personalName?: string | null;
     companyName?: string | null;
     primaryPhone?: string | null;
+    billingAddress?: string | null;
     installationAddress?: string | null;
     installationMapLink?: string | null;
     mapLink?: string | null;
@@ -463,11 +465,23 @@ const getAddressMapSearchLink = (address?: string | null): string | null => {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(raw)}`;
 };
 
+const getPreferredAddress = (
+  value?: { billingAddress?: string | null; installationAddress?: string | null } | null,
+) => String(value?.billingAddress ?? '').trim() || String(value?.installationAddress ?? '').trim() || '';
+
 const getPhoneDialLink = (phone?: string | null): string | null => {
   const raw = String(phone ?? '').trim();
   if (!raw) return null;
-  const normalized = raw.replace(/[^\d+]/g, '');
-  if (!normalized) return null;
+  const digitsOnly = raw.replace(/\D/g, '');
+  if (!digitsOnly) return null;
+
+  let normalized = digitsOnly;
+  if (normalized.startsWith('09')) {
+    // keep as-is
+  } else if (normalized.startsWith('9')) {
+    normalized = `0${normalized}`;
+  }
+
   return `tel:${normalized}`;
 };
 
@@ -1295,8 +1309,8 @@ export default function CollectorDashboard() {
         selectedCollectionInvoice.customer,
       ) ||
       getAddressMapSearchLink(
-        selectedLinkedCustomer?.installationAddress ??
-          selectedCollectionInvoice.customer?.installationAddress,
+        getPreferredAddress(selectedLinkedCustomer) ||
+          getPreferredAddress(selectedCollectionInvoice.customer),
       );
 
     setSelectedCollectionMapLocationLink(rawMapLink);
@@ -1884,7 +1898,7 @@ export default function CollectorDashboard() {
                     const mapLocationLink =
                       resolveMapLocationLink(linkedProfile, linkedCustomer, bill.customer) ||
                       getAddressMapSearchLink(
-                        linkedCustomer?.installationAddress ?? bill.customer?.installationAddress,
+                        getPreferredAddress(linkedCustomer) || getPreferredAddress(bill.customer),
                       );
                     const collectionStatus = getCollectionStatusForInvoice(bill);
                     const displayName = linkedCustomer
@@ -2102,7 +2116,7 @@ export default function CollectorDashboard() {
                     const mapLocationLink =
                       resolveMapLocationLink(linkedProfile, linkedCustomer, bill.customer) ||
                       getAddressMapSearchLink(
-                        linkedCustomer?.installationAddress ?? bill.customer?.installationAddress,
+                        getPreferredAddress(linkedCustomer) || getPreferredAddress(bill.customer),
                       );
                     const collectionStatus = getCollectionStatusForInvoice(bill);
                     const displayName = linkedCustomer
@@ -2216,8 +2230,8 @@ export default function CollectorDashboard() {
                 const mapLinkForCollectionFlow =
                   selectedCollectionResolvedMapLocationLink || selectedCollectionMapLocationLink;
                 const selectedCollectionAddressMapLink = getAddressMapSearchLink(
-                  selectedLinkedCustomer?.installationAddress ??
-                    selectedCollectionInvoice.customer?.installationAddress,
+                  getPreferredAddress(selectedLinkedCustomer) ||
+                    getPreferredAddress(selectedCollectionInvoice.customer),
                 );
                 const selectedCollectionMapEmbedLink =
                   getGoogleMapEmbedLink(mapLinkForCollectionFlow) ||
@@ -2661,8 +2675,8 @@ export default function CollectorDashboard() {
                       selectedBillDetails.customer,
                     ) ||
                     getAddressMapSearchLink(
-                      selectedLinkedCustomer?.installationAddress ??
-                        selectedBillDetails.customer?.installationAddress,
+                      getPreferredAddress(selectedLinkedCustomer) ||
+                        getPreferredAddress(selectedBillDetails.customer),
                     );
                   return (
                     <>
@@ -2720,7 +2734,7 @@ export default function CollectorDashboard() {
                   <Label className="text-sm font-medium text-gray-500">{copy.address}</Label>
                   <div className="mt-1 flex items-start space-x-2">
                     <MapPin className="mt-0.5 h-4 w-4 text-gray-400" />
-                    <span className="text-sm">{selectedBillDetails.customer?.installationAddress || '-'}</span>
+                    <span className="text-sm">{getPreferredAddress(selectedBillDetails.customer) || '-'}</span>
                   </div>
                 </div>
 
@@ -2771,7 +2785,7 @@ export default function CollectorDashboard() {
                   );
                   const selectedCustomerMapLocationLink =
                     resolveMapLocationLink(selectedCustomerProfile, selectedCustomerDetails.customer) ||
-                    getAddressMapSearchLink(selectedCustomerDetails.customer.installationAddress);
+                    getAddressMapSearchLink(getPreferredAddress(selectedCustomerDetails.customer));
                   return (
                     <>
                 <div className="grid grid-cols-2 gap-4">
@@ -2821,7 +2835,7 @@ export default function CollectorDashboard() {
                   <Label className="text-sm font-medium text-gray-500">{copy.address}</Label>
                   <div className="mt-1 flex items-start space-x-2">
                     <MapPin className="mt-0.5 h-4 w-4 text-gray-400" />
-                    <span className="text-sm">{selectedCustomerDetails.customer.installationAddress || '-'}</span>
+                    <span className="text-sm">{getPreferredAddress(selectedCustomerDetails.customer) || '-'}</span>
                   </div>
                 </div>
 
