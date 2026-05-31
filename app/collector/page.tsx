@@ -180,6 +180,11 @@ const normalizeInvoiceStatus = (status: string | null | undefined): InvoiceStatu
   return 'unpaid';
 };
 
+const isCollectorSuspended = (status: unknown) => {
+  const normalized = String(status ?? '').trim().toLowerCase();
+  return ['suspended', 'disable', 'disabled', 'takeoff', 'inactive'].includes(normalized);
+};
+
 const getCustomerDisplayName = (customer: {
   personalName?: string | null;
   companyName?: string | null;
@@ -1658,6 +1663,10 @@ export default function CollectorDashboard() {
 
   if (!user || user.role !== 'collector') {
     return <div>{copy.accessDenied}</div>;
+  }
+
+  if (isCollectorSuspended(user.status)) {
+    return <div>Collector account is suspended. Please contact admin.</div>;
   }
 
   return (

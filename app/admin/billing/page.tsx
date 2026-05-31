@@ -167,6 +167,9 @@ type BillingCustomer = {
   phone: string;
   address: string;
   status: string;
+  collectionService?: 'yes' | 'no' | null;
+  collectorCode?: string;
+  collectorName?: string;
   billingCycle: string;
   firstInvoiceMode?: string | null;
   serviceStartDate?: string | null;
@@ -326,6 +329,16 @@ const formatInvoiceTypeLabel = (value: string | null | undefined) => {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
+};
+
+const normalizeCollectionServiceValue = (value: unknown): 'yes' | 'no' | null => {
+  if (typeof value === 'boolean') return value ? 'yes' : 'no';
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
+  if (['yes', 'true', '1', 'enable', 'enabled', 'active', 'on'].includes(normalized)) return 'yes';
+  if (['no', 'false', '0', 'disable', 'disabled', 'off'].includes(normalized)) return 'no';
+  return null;
 };
 
 const normalizeInvoiceStatusLabel = (status: string | null | undefined) => {
@@ -774,6 +787,10 @@ export default function BillingPage() {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<'all' | InvoiceStatus>('all');
+  const [selectedCollectorCode, setSelectedCollectorCode] = useState('all');
+  const [selectedCollectionService, setSelectedCollectionService] = useState<'all' | 'yes' | 'no'>('all');
+  const [collectorCollectedFrom, setCollectorCollectedFrom] = useState('');
+  const [collectorCollectedTo, setCollectorCollectedTo] = useState('');
   const [transactionSearchTerm, setTransactionSearchTerm] = useState('');
   const [transactionDetailOpen, setTransactionDetailOpen] = useState(false);
   const [selectedTransactionGroup, setSelectedTransactionGroup] = useState<TransactionGroup | null>(null);
@@ -1176,6 +1193,24 @@ export default function BillingPage() {
           item?.address ||
           '',
         status: String(item?.status ?? ''),
+        collectionService: normalizeCollectionServiceValue(
+          item?.collectionService ??
+            item?.collectionServiceEnabled ??
+            item?.billingInformation?.collectionService ??
+            item?.customer?.collectionService ??
+            item?.customer?.collectionServiceEnabled
+        ),
+        collectorCode: String(
+          item?.collectorCode ??
+            item?.collectorId ??
+            item?.collector?.collectorCode ??
+            ''
+        ).trim(),
+        collectorName: String(
+          item?.collector?.user?.name ??
+            item?.collector?.name ??
+            ''
+        ).trim(),
         billingCycle: String(
           item?.billingCycle ??
           item?.billingInformation?.billingCycle ??
@@ -1677,11 +1712,28 @@ export default function BillingPage() {
   }, [invoiceDetailMode, selectedInvoiceStatus]);
 
   const filteredInvoices = useMemo(() => {
+    const customerById = new Map(customers.map((customer) => [customer.id, customer]));
+    const customerByCode = new Map(customers.map((customer) => [customer.customerCode, customer]));
+    const getCollectorCollectedDate = (invoice: InvoiceRecord): Date | null => {
+      const events = Array.isArray(invoice.collectionEvents)
+        ? invoice.collectionEvents
+        : collectionMap[invoice.id]?.events ?? [];
+      const collectedEvent = events.find((event) => event.type === 'collector_collected');
+      if (!collectedEvent?.timestamp) return null;
+      const parsed = new Date(collectedEvent.timestamp);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+    const fromDate = collectorCollectedFrom ? new Date(`${collectorCollectedFrom}T00:00:00`) : null;
+    const toDate = collectorCollectedTo ? new Date(`${collectorCollectedTo}T23:59:59`) : null;
+
     return releasedInvoices.filter((invoice) => {
       const customerName =
         invoice.customer?.personalName || invoice.customer?.companyName || 'Unknown Customer';
       const customerCode = invoice.customer?.customerCode || '';
       const invoiceNo = invoice.invoiceNo || '';
+      const matchedCustomer =
+        (invoice.customer?.id ? customerById.get(String(invoice.customer.id)) : undefined) ||
+        (customerCode ? customerByCode.get(String(customerCode)) : undefined);
 
       const matchesSearch =
         customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -1689,9 +1741,49 @@ export default function BillingPage() {
         invoiceNo.toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchesStatus = selectedStatus === 'all' || invoice.status === selectedStatus;
-      return matchesSearch && matchesStatus;
+      const matchesCollector =
+        selectedCollectorCode === 'all' ||
+        String(matchedCustomer?.collectorCode || '').trim() === selectedCollectorCode;
+      const matchesCollectionService =
+        selectedCollectionService === 'all' ||
+        (matchedCustomer?.collectionService ?? null) === selectedCollectionService;
+      const collectedDate = getCollectorCollectedDate(invoice);
+      const matchesCollectedRange =
+        (!fromDate || (collectedDate && collectedDate >= fromDate)) &&
+        (!toDate || (collectedDate && collectedDate <= toDate));
+
+      return (
+        matchesSearch &&
+        matchesStatus &&
+        matchesCollector &&
+        matchesCollectionService &&
+        matchesCollectedRange
+      );
     });
-  }, [releasedInvoices, searchTerm, selectedStatus]);
+  }, [
+    releasedInvoices,
+    searchTerm,
+    selectedStatus,
+    selectedCollectorCode,
+    selectedCollectionService,
+    collectorCollectedFrom,
+    collectorCollectedTo,
+    customers,
+    collectionMap,
+  ]);
+
+  const collectorFilterOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    customers.forEach((customer) => {
+      const code = String(customer.collectorCode || '').trim();
+      if (!code) return;
+      const label = customer.collectorName ? `${customer.collectorName} (${code})` : code;
+      if (!options.has(code)) {
+        options.set(code, label);
+      }
+    });
+    return Array.from(options.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  }, [customers]);
 
   const stats = useMemo(() => {
     const totalInvoices = releasedInvoices.length;
@@ -4431,7 +4523,7 @@ export default function BillingPage() {
 
             <Card>
               <CardContent className="pt-6">
-                <div className="flex flex-col gap-4 md:flex-row">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
                     <Input
@@ -4456,6 +4548,65 @@ export default function BillingPage() {
                       <SelectItem value="cancelled">Cancelled</SelectItem>
                     </SelectContent>
                   </Select>
+
+                  <Select value={selectedCollectorCode} onValueChange={setSelectedCollectorCode}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Filter by collector" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Collectors</SelectItem>
+                      {collectorFilterOptions.map(([code, label]) => (
+                        <SelectItem key={code} value={code}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select
+                    value={selectedCollectionService}
+                    onValueChange={(value) =>
+                      setSelectedCollectionService(value as 'all' | 'yes' | 'no')
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Collection Service" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Collection Service</SelectItem>
+                      <SelectItem value="yes">Collection Service = Yes</SelectItem>
+                      <SelectItem value="no">Collection Service = No</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <Input
+                    type="date"
+                    value={collectorCollectedFrom}
+                    onChange={(event) => setCollectorCollectedFrom(event.target.value)}
+                    placeholder="Collector collected from"
+                  />
+
+                  <Input
+                    type="date"
+                    value={collectorCollectedTo}
+                    onChange={(event) => setCollectorCollectedTo(event.target.value)}
+                    placeholder="Collector collected to"
+                  />
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setSearchTerm('');
+                      setSelectedStatus('all');
+                      setSelectedCollectorCode('all');
+                      setSelectedCollectionService('all');
+                      setCollectorCollectedFrom('');
+                      setCollectorCollectedTo('');
+                    }}
+                  >
+                    Reset Filters
+                  </Button>
                 </div>
               </CardContent>
             </Card>

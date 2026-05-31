@@ -64,6 +64,11 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 
+const isCollectorSuspended = (status: unknown) => {
+  const normalized = String(status ?? '').trim().toLowerCase();
+  return ['suspended', 'disable', 'disabled', 'takeoff', 'inactive'].includes(normalized);
+};
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -94,6 +99,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const isResetRoute = pathname?.startsWith('/reset-password');
       const isSuperAdminRoute = pathname?.startsWith('/super-admin');
       if (!user && pathname !== '/' && !isResetRoute && !isSuperAdminRoute) {
+        router.replace('/');
+      } else if (user?.role === 'collector' && isCollectorSuspended(user?.status)) {
+        setUser(null);
+        window.localStorage.removeItem('billflow_user');
         router.replace('/');
       } else if (user && pathname === '/') {
         const dashboardPath = user.role === 'admin' ? '/admin' : user.role === 'collector' ? '/collector' : '/customer';
@@ -127,6 +136,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (!userData || !userData.role) {
         throw new Error('Invalid response from server');
+      }
+
+      if (userData.role === 'collector' && isCollectorSuspended(userData.status)) {
+        throw new Error('Collector account is suspended. Please contact admin.');
       }
 
       setUser(userData);

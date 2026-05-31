@@ -32,6 +32,7 @@ export interface Collector {
   phone: string;
   email: string;
   area: string;
+  assignedAreas?: string[];
   status?: 'enable' | 'disable' | 'takeoff';
   nrc?: string;
   address?: string;

@@ -50,6 +50,15 @@ const toMyanmarPhoneLocal = (value: string | null | undefined) => {
   return digits.slice(0, 11);
 };
 
+const sanitizeCollectorEmail = (value: unknown) => {
+  const email = String(value ?? '').trim();
+  if (!email) return '';
+  // Hide system-generated placeholder emails from UI.
+  if (/@billpro\.local$/i.test(email)) return '';
+  if (/^collector-\d+-[a-z0-9]+@/i.test(email)) return '';
+  return email;
+};
+
 const readCustomerBillingFeeCache = (): Record<
   string,
   { collectionService?: 'yes' | 'no' }
@@ -164,11 +173,39 @@ type CollectorsPageProps = {
   listPath?: string;
 };
 
+type CollectorInvoiceRecord = {
+  id?: string | number;
+  customerId?: string | number | null;
+  status?: string | null;
+  totalAmount?: string | number | null;
+  amount?: string | number | null;
+};
+
+type CollectorStatusValue = 'active' | 'suspended';
+
+const normalizeCollectorStatus = (value: unknown): CollectorStatusValue => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (
+    normalized === 'suspended' ||
+    normalized === 'disable' ||
+    normalized === 'disabled' ||
+    normalized === 'takeoff' ||
+    normalized === 'inactive'
+  ) {
+    return 'suspended';
+  }
+  return 'active';
+};
+
+const toCollectorApiStatus = (value: CollectorStatusValue): 'enable' | 'disable' =>
+  value === 'active' ? 'enable' : 'disable';
+
 export default function CollectorsPage({
   openNew = false,
   inlineForm = false,
   listPath = '/admin/collectors/collector-list'
 }: CollectorsPageProps) {
+  type AssignableCustomer = { id: string; name: string; collectorId?: string; area?: string };
   const { collectors, customers, bills, addCollector, updateCollector, deleteCollector } = useData();
   const { user, isLoading: authLoading } = useAuth();
   const router = useRouter();
@@ -183,11 +220,10 @@ export default function CollectorsPage({
   const [isAddingCollector, setIsAddingCollector] = useState(false);
   const [isUpdatingCollectorStatus, setIsUpdatingCollectorStatus] = useState<Record<string, boolean>>({});
   const [isUpdatingCollector, setIsUpdatingCollector] = useState(false);
-  const [availableCustomers, setAvailableCustomers] = useState<
-    Array<{ id: string; name: string; collectorId?: string }>
-  >([]);
+  const [availableCustomers, setAvailableCustomers] = useState<AssignableCustomer[]>([]);
   const [customersLoading, setCustomersLoading] = useState(false);
   const [customersError, setCustomersError] = useState('');
+  const [remoteInvoices, setRemoteInvoices] = useState<CollectorInvoiceRecord[]>([]);
   const [assignedCustomerIds, setAssignedCustomerIds] = useState<string[]>([]);
   const [customerQuery, setCustomerQuery] = useState('');
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
@@ -198,7 +234,7 @@ export default function CollectorsPage({
   const [isSavingAssignments, setIsSavingAssignments] = useState(false);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [viewCollector, setViewCollector] = useState<Collector | null>(null);
-  const [collectorStatus, setCollectorStatus] = useState<'enable' | 'disable' | 'takeoff'>('enable');
+  const [collectorStatus, setCollectorStatus] = useState<CollectorStatusValue>('active');
   const [nrcState, setNrcState] = useState('');
   const [nrcTownship, setNrcTownship] = useState('');
   const [nrcType, setNrcType] = useState('');
@@ -211,6 +247,8 @@ export default function CollectorsPage({
   const [collectorStreet, setCollectorStreet] = useState('');
   const [collectorBuilding, setCollectorBuilding] = useState('');
   const [collectorPostalCode, setCollectorPostalCode] = useState('');
+  const [selectedAssignedAreas, setSelectedAssignedAreas] = useState<string[]>([]);
+  const [assignedAreaCandidate, setAssignedAreaCandidate] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [newCollector, setNewCollector] = useState({
     name: '',
@@ -218,6 +256,23 @@ export default function CollectorsPage({
     email: '',
     area: ''
   });
+
+  const normalizeAssignedAreas = (areas: string[]) =>
+    Array.from(
+      new Set(
+        areas
+          .map((item) => item.trim())
+          .filter(Boolean)
+      )
+    );
+
+  const getCollectorAreaLabel = (collector: Collector) => {
+    const areas = Array.isArray(collector.assignedAreas)
+      ? collector.assignedAreas.filter(Boolean)
+      : [];
+    if (areas.length > 0) return areas.join(', ');
+    return collector.area || '—';
+  };
 
   const clearFieldError = (field: string) => {
     setErrors((prev) => {
@@ -277,10 +332,14 @@ export default function CollectorsPage({
   const collectorsSource = hasFetchedCollectors ? remoteCollectors : [];
 
   const filteredCollectors = collectorsSource.filter(collector => {
+    const assignedAreaText = Array.isArray(collector.assignedAreas)
+      ? collector.assignedAreas.join(' ').toLowerCase()
+      : '';
     const matchesSearch = collector.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          collector.phone.includes(searchTerm) ||
                          collector.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          collector.area.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         assignedAreaText.includes(searchTerm.toLowerCase()) ||
                          collector.id.includes(searchTerm);
     return matchesSearch;
   });
@@ -300,13 +359,32 @@ export default function CollectorsPage({
     );
   };
 
-  const filteredAssignCustomers = useMemo(
-    () =>
-      availableCustomers.filter((customer) =>
-        customer.name.toLowerCase().includes(assignQuery.toLowerCase())
-      ),
-    [availableCustomers, assignQuery]
-  );
+  const filteredAssignCustomers = useMemo(() => {
+    const collectorAreas = assigningCollector
+      ? normalizeAssignedAreas(
+          (Array.isArray(assigningCollector.assignedAreas) && assigningCollector.assignedAreas.length > 0
+            ? assigningCollector.assignedAreas
+            : [assigningCollector.area]
+          ).filter(Boolean)
+        ).map((value) => value.toLowerCase())
+      : [];
+
+    return availableCustomers.filter((customer) => {
+      const matchesQuery = customer.name.toLowerCase().includes(assignQuery.toLowerCase());
+      if (!matchesQuery) return false;
+
+      if (collectorAreas.length === 0) return true;
+      const customerArea = String(customer.area ?? '').trim().toLowerCase();
+      if (!customerArea) return false;
+
+      return collectorAreas.some(
+        (collectorArea) =>
+          customerArea === collectorArea ||
+          customerArea.includes(collectorArea) ||
+          collectorArea.includes(customerArea)
+      );
+    });
+  }, [availableCustomers, assignQuery, assigningCollector]);
 
   const viewAssignedCustomers = useMemo(() => {
     if (!viewCollector) return [];
@@ -315,10 +393,10 @@ export default function CollectorsPage({
     return source.filter((customer) => isCustomerAssignedToCollector(customer, viewCollector));
   }, [availableCustomers, customers, viewCollector]);
 
-  const updateRemoteCollectorStatus = (id: string, status: 'enable' | 'disable' | 'takeoff') => {
+  const updateRemoteCollectorStatus = (id: string, status: CollectorStatusValue) => {
     setRemoteCollectors((prev) =>
       prev.map((collector) =>
-        collector.id === id ? { ...collector, status } : collector
+        collector.id === id ? { ...collector, status: toCollectorApiStatus(status) } : collector
       )
     );
   };
@@ -334,7 +412,7 @@ export default function CollectorsPage({
 
   const handleCollectorStatusChange = async (
     collector: Collector,
-    status: 'enable' | 'disable' | 'takeoff'
+    status: CollectorStatusValue
   ) => {
     if (isUpdatingCollectorStatus[collector.id]) return;
     setIsUpdatingCollectorStatus((prev) => ({ ...prev, [collector.id]: true }));
@@ -346,7 +424,7 @@ export default function CollectorsPage({
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ status })
+        body: JSON.stringify({ status: toCollectorApiStatus(status) })
       });
 
       if (!response.ok) {
@@ -380,6 +458,20 @@ export default function CollectorsPage({
   const typeOptions = nrcData.nrcTypes;
   const stateOptions = nrcData.nrcStates;
   const regionOptions = useMemo(() => Object.keys(townshipData).sort(), []);
+  const allAreaSelectOptions = useMemo<SelectOption[]>(() => {
+    const areas = new Set<string>();
+    Object.values(townshipData as Record<string, Record<string, string[]>>).forEach((districtMap) => {
+      Object.values(districtMap).forEach((townships) => {
+        (townships ?? []).forEach((township) => {
+          const normalized = String(township ?? '').trim();
+          if (normalized) areas.add(normalized);
+        });
+      });
+    });
+    return Array.from(areas)
+      .sort((a, b) => a.localeCompare(b))
+      .map((value) => ({ value, label: value }));
+  }, []);
   const collectorDistrictOptions = useMemo(() => {
     if (!collectorRegion) return [];
     return Object.keys(townshipData[collectorRegion as keyof typeof townshipData]).sort();
@@ -425,9 +517,8 @@ export default function CollectorsPage({
     [collectorTownshipOptions]
   );
   const collectorStatusOptions = [
-    { value: 'enable', label: 'Enable' },
-    { value: 'disable', label: 'Disable' },
-    { value: 'takeoff', label: 'Take off' }
+    { value: 'active', label: 'Active' },
+    { value: 'suspended', label: 'Suspended' }
   ];
 
   const formatAddress = (address: {
@@ -629,7 +720,7 @@ export default function CollectorsPage({
             collectorCode: item?.collectorCode ?? item?.user?.username ?? '',
             name: item?.user?.name ?? 'Unknown',
             phone: item?.user?.phone ?? '',
-            email: item?.user?.email ?? '',
+            email: sanitizeCollectorEmail(item?.user?.email),
             area:
               item?.area ??
               item?.township ??
@@ -638,7 +729,14 @@ export default function CollectorsPage({
               item?.profile?.area ??
               item?.profile?.township ??
               '',
-            status: item?.status ?? item?.user?.status ?? 'enable',
+            assignedAreas:
+              (Array.isArray(item?.assignedAreas) ? item.assignedAreas : null) ??
+              (Array.isArray(item?.collectorProfile?.assignedAreas)
+                ? item.collectorProfile.assignedAreas
+                : null) ??
+              (Array.isArray(item?.profile?.assignedAreas) ? item.profile.assignedAreas : null) ??
+              [],
+            status: normalizeCollectorStatus(item?.status ?? item?.user?.status),
             nrc:
               item?.nrc ??
               item?.collectorProfile?.nrc ??
@@ -734,6 +832,45 @@ export default function CollectorsPage({
     if (inlineForm) return;
     let isMounted = true;
 
+    const fetchInvoices = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/billing/invoices`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (!response.ok) {
+          const data = await response.json().catch(() => null);
+          const message = data?.message ?? 'Failed to load invoices';
+          throw new Error(message);
+        }
+
+        const data = await response.json().catch(() => ([]));
+        const list = Array.isArray(data) ? data : Array.isArray(data?.invoices) ? data.invoices : [];
+
+        if (isMounted) {
+          setRemoteInvoices(list as CollectorInvoiceRecord[]);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setRemoteInvoices([]);
+        }
+      }
+    };
+
+    fetchInvoices();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [inlineForm]);
+
+  useEffect(() => {
+    if (inlineForm) return;
+    let isMounted = true;
+
     const fetchCustomers = async () => {
       setCustomersLoading(true);
       setCustomersError('');
@@ -787,14 +924,25 @@ export default function CollectorsPage({
                 item?.name ||
                 'Unknown',
               collectorId,
+              area: firstNonEmpty(
+                item?.township,
+                item?.area,
+                item?.addressInformation?.township,
+                item?.addressInformation?.city,
+                item?.addressInformation?.district,
+                item?.addressInformation?.region,
+                item?.address,
+                item?.fullAddress
+              ),
               collectionService
             };
           })
           .filter((item: { collectionService: 'yes' | 'no' }) => item.collectionService !== 'no')
-          .map((item: { id: string; name: string; collectorId?: string }) => ({
+          .map((item: { id: string; name: string; collectorId?: string; area?: string }) => ({
             id: item.id,
             name: item.name,
-            collectorId: item.collectorId
+            collectorId: item.collectorId,
+            area: item.area
           }));
 
         if (isMounted) {
@@ -860,12 +1008,14 @@ export default function CollectorsPage({
     const emailForCreate = enteredEmail || fallbackGeneratedEmail;
 
     const payload = {
+      assignedAreas: normalizeAssignedAreas(selectedAssignedAreas),
       collector: {
         name: newCollector.name,
         phone: newCollector.phone,
         email: emailForCreate,
         area: collectorTownship || collectorDistrict || newCollector.area,
-        status: collectorStatus,
+        assignedAreas: normalizeAssignedAreas(selectedAssignedAreas),
+        status: toCollectorApiStatus(collectorStatus),
         nrc: nrcValue,
         address: addressValue
       }
@@ -938,7 +1088,8 @@ export default function CollectorsPage({
     addCollector({
       ...newCollector,
       area: collectorTownship || collectorDistrict || newCollector.area,
-      status: collectorStatus,
+      assignedAreas: normalizeAssignedAreas(selectedAssignedAreas),
+      status: toCollectorApiStatus(collectorStatus),
       nrc: nrcValue,
       address: addressValue,
       addressDetails: {
@@ -959,7 +1110,7 @@ export default function CollectorsPage({
       createdCollectorId,
       newCollector.name,
       {
-        status: collectorStatus,
+        status: toCollectorApiStatus(collectorStatus),
         area: collectorTownship || collectorDistrict || newCollector.area
       }
     );
@@ -969,7 +1120,7 @@ export default function CollectorsPage({
       email: '',
       area: ''
     });
-    setCollectorStatus('enable');
+    setCollectorStatus('active');
     setNrcState('');
     setNrcTownship('');
     setNrcType('');
@@ -982,6 +1133,8 @@ export default function CollectorsPage({
     setCollectorStreet('');
     setCollectorBuilding('');
     setCollectorPostalCode('');
+    setSelectedAssignedAreas([]);
+    setAssignedAreaCandidate('');
     setErrors({});
     setAssignedCustomerIds([]);
     setCustomerQuery('');
@@ -1050,8 +1203,12 @@ export default function CollectorsPage({
       email: collector.email,
       area: collector.area
     });
+    setSelectedAssignedAreas(
+      Array.isArray(collector.assignedAreas) ? normalizeAssignedAreas(collector.assignedAreas) : []
+    );
+    setAssignedAreaCandidate('');
     setErrors({});
-    setCollectorStatus(collector.status ?? 'enable');
+    setCollectorStatus(normalizeCollectorStatus(collector.status));
     setNrcState(resolvedNrcState);
     setNrcTownship(resolvedNrcTownship);
     setNrcType(resolvedNrcType);
@@ -1128,7 +1285,8 @@ export default function CollectorsPage({
         phone: newCollector.phone,
         ...(newCollector.email.trim() ? { email: newCollector.email.trim() } : {}),
         area: collectorTownship || collectorDistrict || newCollector.area,
-        status: collectorStatus,
+        assignedAreas: normalizeAssignedAreas(selectedAssignedAreas),
+        status: toCollectorApiStatus(collectorStatus),
         nrc: nrcValue,
         address: addressValue
       };
@@ -1223,7 +1381,8 @@ export default function CollectorsPage({
       updateCollector(editingCollector.id, {
         ...newCollector,
         area: collectorTownship || collectorDistrict || newCollector.area,
-        status: collectorStatus,
+        assignedAreas: normalizeAssignedAreas(selectedAssignedAreas),
+        status: toCollectorApiStatus(collectorStatus),
         nrc: nrcValue,
         address: addressValue,
         addressDetails: {
@@ -1242,7 +1401,8 @@ export default function CollectorsPage({
         phone: newCollector.phone,
         email: newCollector.email,
         area: collectorTownship || collectorDistrict || newCollector.area,
-        status: collectorStatus,
+        assignedAreas: normalizeAssignedAreas(selectedAssignedAreas),
+        status: toCollectorApiStatus(collectorStatus),
         nrc: nrcValue,
         address: addressValue,
         addressDetails: {
@@ -1275,7 +1435,7 @@ export default function CollectorsPage({
         email: '',
         area: ''
       });
-      setCollectorStatus('enable');
+      setCollectorStatus('active');
       setNrcState('');
       setNrcTownship('');
       setNrcType('');
@@ -1288,6 +1448,8 @@ export default function CollectorsPage({
       setCollectorStreet('');
       setCollectorBuilding('');
       setCollectorPostalCode('');
+      setSelectedAssignedAreas([]);
+      setAssignedAreaCandidate('');
       setErrors({});
       setAssignedCustomerIds([]);
       setCustomerQuery('');
@@ -1311,9 +1473,23 @@ export default function CollectorsPage({
     const assignedCustomers = hasRemoteAssignments
       ? availableCustomers.filter((customer) => isCustomerAssignedToCollector(customer, collector))
       : customers.filter((customer) => isCustomerAssignedToCollector(customer, collector));
-    const collectorBills = bills.filter((bill) => bill.collectorId === collector.id);
-    const paidBills = collectorBills.filter(b => b.status === 'paid');
-    const totalCollected = paidBills.reduce((sum, b) => sum + b.amount, 0);
+    const assignedCustomerIds = new Set(assignedCustomers.map((customer) => String(customer.id)));
+    const hasRemoteInvoices = remoteInvoices.length > 0;
+
+    const collectorBills = hasRemoteInvoices
+      ? remoteInvoices.filter((invoice) => assignedCustomerIds.has(String(invoice.customerId ?? '')))
+      : bills.filter((bill) => bill.collectorId === collector.id);
+
+    const paidBills = collectorBills.filter(
+      (bill) => String((bill as { status?: string }).status ?? '').trim().toLowerCase() === 'paid'
+    );
+    const totalCollected = paidBills.reduce((sum, bill) => {
+      const amountValue = hasRemoteInvoices
+        ? (bill as CollectorInvoiceRecord).totalAmount ?? (bill as CollectorInvoiceRecord).amount
+        : (bill as { amount: number }).amount;
+      const numericAmount = typeof amountValue === 'number' ? amountValue : Number(amountValue ?? 0);
+      return sum + (Number.isFinite(numericAmount) ? numericAmount : 0);
+    }, 0);
     const collectionRate = collectorBills.length > 0 ? (paidBills.length / collectorBills.length * 100) : 0;
 
     return {
@@ -1323,6 +1499,31 @@ export default function CollectorsPage({
       totalBills: collectorBills.length
     };
   };
+
+  const collectorStatsById = useMemo(() => {
+    return collectorsSource.reduce<Record<string, ReturnType<typeof getCollectorStats>>>((acc, collector) => {
+      acc[collector.id] = getCollectorStats(collector);
+      return acc;
+    }, {});
+  }, [collectorsSource, availableCustomers, customers, bills, remoteInvoices]);
+
+  const topPerformer = useMemo<Collector | null>(() => {
+    if (collectorsSource.length === 0) return null;
+    let bestCollector: Collector | null = null;
+    let bestScore = -1;
+
+    collectorsSource.forEach((collector) => {
+      const stats = collectorStatsById[collector.id];
+      if (!stats) return;
+      const score = stats.totalCollected;
+      if (score > bestScore) {
+        bestScore = score;
+        bestCollector = collector;
+      }
+    });
+
+    return bestCollector;
+  }, [collectorsSource, collectorStatsById]);
 
   const openAssignDialog = (collector: Collector) => {
     const currentAssigned = availableCustomers
@@ -1442,7 +1643,7 @@ export default function CollectorsPage({
           <Label htmlFor="collector-status" className="text-sm font-medium text-slate-700">
             Collector Status <span className="text-rose-600">*</span>
           </Label>
-          <Select value={collectorStatus} onValueChange={(value) => setCollectorStatus(value as 'enable' | 'disable' | 'takeoff')}>
+          <Select value={collectorStatus} onValueChange={(value) => setCollectorStatus(value as CollectorStatusValue)}>
             <SelectTrigger id="collector-status">
               <SelectValue placeholder="Select status" />
             </SelectTrigger>
@@ -1697,8 +1898,63 @@ export default function CollectorsPage({
               placeholder="Postal code"
             />
           </div>
-          <div className="space-y-2 md:col-span-2">
-            <Label className="text-sm font-medium text-slate-700">Full Address</Label>
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="assigned-areas" className="text-sm font-medium text-slate-700">
+                Assigned Areas (Multiple)
+              </Label>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <SearchableSelect
+                    id="assigned-areas"
+                    value={assignedAreaCandidate}
+                    onValueChange={setAssignedAreaCandidate}
+                    options={allAreaSelectOptions}
+                    placeholder="Select area"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    const next = assignedAreaCandidate.trim();
+                    if (!next) return;
+                    setSelectedAssignedAreas((prev) =>
+                      normalizeAssignedAreas([...prev, next]),
+                    );
+                    setAssignedAreaCandidate('');
+                  }}
+                >
+                  Add
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {selectedAssignedAreas.length === 0 ? (
+                  <span className="text-xs text-slate-500">No area selected.</span>
+                ) : (
+                  selectedAssignedAreas.map((area) => (
+                    <Badge key={area} variant="secondary" className="gap-1">
+                      {area}
+                      <button
+                        type="button"
+                        className="ml-1 text-slate-500 hover:text-slate-700"
+                        onClick={() =>
+                          setSelectedAssignedAreas((prev) =>
+                            prev.filter((item) => item !== area),
+                          )
+                        }
+                      >
+                        ×
+                      </button>
+                    </Badge>
+                  ))
+                )}
+              </div>
+              <p className="text-xs text-slate-500">
+                Choose one or more areas from dropdown.
+              </p>
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <Label className="text-sm font-medium text-slate-700">Full Address</Label>
             <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
               {formatAddress({
                 building: collectorBuilding,
@@ -1792,7 +2048,9 @@ export default function CollectorsPage({
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">
-                    {collectorsSource.length > 0 ? Math.round(customers.length / collectorsSource.length) : 0}
+                    {collectorsSource.length > 0
+                      ? Math.round(availableCustomers.length / collectorsSource.length)
+                      : 0}
                   </div>
                   <p className="text-xs text-muted-foreground">Customer distribution</p>
                 </CardContent>
@@ -1805,7 +2063,7 @@ export default function CollectorsPage({
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">
-                    {collectorsSource.length > 0 ? collectorsSource[0].name.split(' ')[0] : 'N/A'}
+                    {topPerformer ? topPerformer.name.split(' ')[0] : 'N/A'}
                   </div>
                   <p className="text-xs text-muted-foreground">Highest collection rate</p>
                 </CardContent>
@@ -1818,7 +2076,13 @@ export default function CollectorsPage({
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">
-                    {new Set(collectorsSource.map(c => c.area)).size}
+                    {new Set(
+                      collectorsSource.flatMap((collector) =>
+                        Array.isArray(collector.assignedAreas) && collector.assignedAreas.length > 0
+                          ? collector.assignedAreas
+                          : [collector.area]
+                      ).filter(Boolean)
+                    ).size}
                   </div>
                   <p className="text-xs text-muted-foreground">Geographic coverage</p>
                 </CardContent>
@@ -1898,25 +2162,23 @@ export default function CollectorsPage({
                             <TableCell>
                               <div className="flex items-center">
                                 <MapPin className="h-3 w-3 mr-1 text-gray-400" />
-                                {collector.area}
+                                {getCollectorAreaLabel(collector)}
                               </div>
                             </TableCell>
                             <TableCell>
                               {(() => {
-                                const statusValue = (collector.status ?? 'enable') as 'enable' | 'disable' | 'takeoff';
+                                const statusValue = normalizeCollectorStatus(collector.status);
                                 const statusClass =
-                                  statusValue === 'enable'
+                                  statusValue === 'active'
                                     ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                    : statusValue === 'disable'
-                                    ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                    : 'bg-amber-50 text-amber-700 border-amber-200';
+                                    : 'bg-rose-50 text-rose-700 border-rose-200';
                                 return (
                                   <Select
                                     value={statusValue}
                                     onValueChange={(value) =>
                                       handleCollectorStatusChange(
                                         collector,
-                                        value as 'enable' | 'disable' | 'takeoff'
+                                        value as CollectorStatusValue
                                       )
                                     }
                                     disabled={isUpdatingCollectorStatus[collector.id]}
@@ -1993,13 +2255,11 @@ export default function CollectorsPage({
                 <div className="space-y-4 md:hidden">
                   {filteredCollectors.map((collector) => {
                     const stats = getCollectorStats(collector);
-                    const statusValue = (collector.status ?? 'enable') as 'enable' | 'disable' | 'takeoff';
+                    const statusValue = normalizeCollectorStatus(collector.status);
                     const statusClass =
-                      statusValue === 'enable'
+                      statusValue === 'active'
                         ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                        : statusValue === 'disable'
-                        ? 'bg-rose-50 text-rose-700 border-rose-200'
-                        : 'bg-amber-50 text-amber-700 border-amber-200';
+                        : 'bg-rose-50 text-rose-700 border-rose-200';
                     return (
                       <Card key={collector.id}>
                         <CardContent className="space-y-3 pt-4">
@@ -2031,7 +2291,7 @@ export default function CollectorsPage({
                             </div>
                             <div className="flex items-start">
                               <MapPin className="mr-2 mt-0.5 h-4 w-4 text-slate-400" />
-                              <span>{collector.area}</span>
+                              <span>{getCollectorAreaLabel(collector)}</span>
                             </div>
                           </div>
 
@@ -2043,7 +2303,7 @@ export default function CollectorsPage({
                                 onValueChange={(value) =>
                                   handleCollectorStatusChange(
                                     collector,
-                                    value as 'enable' | 'disable' | 'takeoff'
+                                    value as CollectorStatusValue
                                   )
                                 }
                                 disabled={isUpdatingCollectorStatus[collector.id]}
@@ -2127,7 +2387,12 @@ export default function CollectorsPage({
                             key={customer.id}
                             className="flex items-center justify-between gap-3 py-2 text-sm text-slate-700"
                           >
-                            <span>{customer.name}</span>
+                            <span>
+                              {customer.name}
+                              {customer.area ? (
+                                <span className="ml-2 text-xs text-slate-400">({customer.area})</span>
+                              ) : null}
+                            </span>
                             <input
                               type="checkbox"
                               checked={checked}
@@ -2197,11 +2462,13 @@ export default function CollectorsPage({
                       </div>
                       <div>
                         <p className="text-xs text-slate-500">Status</p>
-                        <p className="font-semibold text-slate-900 capitalize">{viewCollector.status || 'enable'}</p>
+                        <p className="font-semibold text-slate-900 capitalize">
+                          {normalizeCollectorStatus(viewCollector.status)}
+                        </p>
                       </div>
                       <div>
                         <p className="text-xs text-slate-500">Area</p>
-                        <p className="font-semibold text-slate-900">{viewCollector.area || '—'}</p>
+                        <p className="font-semibold text-slate-900">{getCollectorAreaLabel(viewCollector)}</p>
                       </div>
                       <div>
                         <p className="text-xs text-slate-500">Assigned Customers</p>
