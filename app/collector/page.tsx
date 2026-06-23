@@ -616,6 +616,8 @@ export default function CollectorDashboard() {
     Record<string, CollectorPaymentMethod>
   >({});
   const [paymentAccountIdByInvoiceId, setPaymentAccountIdByInvoiceId] = useState<Record<string, string>>({});
+  const [paymentSlipFileByInvoiceId, setPaymentSlipFileByInvoiceId] = useState<Record<string, File | null>>({});
+  const [paymentSlipFileNameByInvoiceId, setPaymentSlipFileNameByInvoiceId] = useState<Record<string, string>>({});
   const [isPaymentDetailsOpen, setIsPaymentDetailsOpen] = useState(false);
 
   const resolveShortGoogleMapLink = useCallback(async (shortLink: string): Promise<string | null> => {
@@ -1368,6 +1370,12 @@ export default function CollectorDashboard() {
   const selectedPaymentAccount = availablePaymentAccounts.find(
     (account) => account.id === selectedPaymentAccountId,
   );
+  const selectedPaymentSlipFile = selectedCollectionInvoiceId
+    ? paymentSlipFileByInvoiceId[selectedCollectionInvoiceId] ?? null
+    : null;
+  const selectedPaymentSlipFileName = selectedCollectionInvoiceId
+    ? paymentSlipFileNameByInvoiceId[selectedCollectionInvoiceId] ?? ''
+    : '';
   const selectedCollectionRecord: CollectionWorkflowRecord | null = selectedCollectionInvoice
     ? collectionMap[selectedCollectionInvoice.id] ?? null
     : null;
@@ -1414,26 +1422,45 @@ export default function CollectorDashboard() {
       title: string;
       note?: string;
       paymentMethod?: string;
+      paymentSlipFile?: File | null;
     },
   ): Promise<boolean> => {
     if (isUpdatingCollection) return false;
     setIsUpdatingCollection(true);
 
     try {
+      const noteValue = (payload.note ?? collectionNote) || undefined;
       const response = await fetch(`${API_BASE_URL}/billing/invoices/${invoice.id}/collection-workflow`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          status: payload.status,
-          type: payload.type,
-          label: payload.label,
-          note: (payload.note ?? collectionNote) || undefined,
-          paymentMethod: payload.paymentMethod || undefined,
-          actorName: user?.name || undefined,
-          actorRole: user?.role || undefined,
-        }),
+        ...(payload.paymentSlipFile
+          ? {
+              body: (() => {
+                const formData = new FormData();
+                formData.append('status', payload.status);
+                formData.append('type', payload.type);
+                formData.append('label', payload.label);
+                if (noteValue) formData.append('note', noteValue);
+                if (payload.paymentMethod) formData.append('paymentMethod', payload.paymentMethod);
+                if (user?.name) formData.append('actorName', user.name);
+                if (user?.role) formData.append('actorRole', user.role);
+                formData.append('paymentSlip', payload.paymentSlipFile);
+                return formData;
+              })(),
+            }
+          : {
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                status: payload.status,
+                type: payload.type,
+                label: payload.label,
+                note: noteValue,
+                paymentMethod: payload.paymentMethod || undefined,
+                actorName: user?.name || undefined,
+                actorRole: user?.role || undefined,
+              }),
+            }),
       });
 
       const updatedData = await response.json().catch(() => null);
@@ -1490,7 +1517,7 @@ export default function CollectorDashboard() {
           customerId: invoice.customer?.id,
           customerCode: invoice.customer?.customerCode,
           status: payload.status,
-          note: (payload.note ?? collectionNote) || undefined,
+          note: noteValue,
           paymentMethod: payload.paymentMethod || undefined,
         },
       });
@@ -1528,6 +1555,8 @@ export default function CollectorDashboard() {
     setCollectJourneyStartedByInvoiceId((prev) => ({ ...prev, [selectedCollectionInvoice.id]: false }));
     setPaymentMethodByInvoiceId((prev) => ({ ...prev, [selectedCollectionInvoice.id]: 'cash' }));
     setPaymentAccountIdByInvoiceId((prev) => ({ ...prev, [selectedCollectionInvoice.id]: '' }));
+    setPaymentSlipFileByInvoiceId((prev) => ({ ...prev, [selectedCollectionInvoice.id]: null }));
+    setPaymentSlipFileNameByInvoiceId((prev) => ({ ...prev, [selectedCollectionInvoice.id]: '' }));
   };
 
   const handleCallCompleted = async () => {
@@ -1600,6 +1629,17 @@ export default function CollectorDashboard() {
       });
       return;
     }
+    if (
+      (selectedPaymentMethod === 'wallet' || selectedPaymentMethod === 'account') &&
+      !selectedPaymentSlipFile
+    ) {
+      toast({
+        title: 'Upload payment receipt',
+        description: 'Please upload payment receipt/slip image before submit.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     const paymentMethodName =
       selectedPaymentMethod === 'cash'
@@ -1623,6 +1663,10 @@ export default function CollectorDashboard() {
       title: copy.markedAsCollected,
       note: paymentNoteParts.join(' | '),
       paymentMethod: paymentMethodName,
+      paymentSlipFile:
+        selectedPaymentMethod === 'wallet' || selectedPaymentMethod === 'account'
+          ? selectedPaymentSlipFile
+          : null,
     });
   };
 
@@ -2280,7 +2324,8 @@ export default function CollectorDashboard() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label>{copy.invoice}</Label>
-                    <p>{getInvoicePeriodLabel(selectedCollectionInvoice)}</p>
+                    <p className="font-mono">{selectedCollectionInvoice.invoiceNo || selectedCollectionInvoice.id}</p>
+                    <p className="text-xs text-slate-500">{getInvoicePeriodLabel(selectedCollectionInvoice)}</p>
                   </div>
                   <div>
                     <Label>{copy.amount}</Label>
@@ -2495,6 +2540,35 @@ export default function CollectorDashboard() {
                         >
                           {showPaymentDetailsLabel}
                         </Button>
+                      )}
+
+                      {(selectedPaymentMethod === 'wallet' || selectedPaymentMethod === 'account') && (
+                        <div className="space-y-2">
+                          <Label>Payment Receipt / Slip</Label>
+                          <Input
+                            type="file"
+                            accept="image/*"
+                            onChange={(event) => {
+                              if (!selectedCollectionInvoice) return;
+                              const file = event.target.files?.[0] ?? null;
+                              setPaymentSlipFileByInvoiceId((prev) => ({
+                                ...prev,
+                                [selectedCollectionInvoice.id]: file,
+                              }));
+                              setPaymentSlipFileNameByInvoiceId((prev) => ({
+                                ...prev,
+                                [selectedCollectionInvoice.id]: file?.name ?? '',
+                              }));
+                            }}
+                          />
+                          {selectedPaymentSlipFileName ? (
+                            <p className="text-xs text-slate-500">Selected: {selectedPaymentSlipFileName}</p>
+                          ) : (
+                            <p className="text-xs text-slate-500">
+                              Upload payment receipt/slip image after customer pays.
+                            </p>
+                          )}
+                        </div>
                       )}
 
                       <div className="grid gap-2 md:grid-cols-2">

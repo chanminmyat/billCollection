@@ -59,7 +59,7 @@ type PlanOption = {
 type BillingRule = {
   id: string;
   name: string;
-  billingModel: 'recurring' | 'usage';
+  billingModel: 'recurring' | 'usage' | 'prepaid' | 'postpaid';
   billingType: 'fixed' | 'anniversary';
   billingMode: string;
   fixedBillingDay?: string;
@@ -2381,12 +2381,21 @@ export default function CustomersPage({
     const normalizeRules = (rawList: any[]) =>
       rawList
         .map((item, index) => {
-          const billingModel = String(item?.billingModel ?? item?.model ?? 'recurring').toLowerCase();
+          const billingModel = String(
+            item?.billingModel ?? item?.prepaidPostpaid ?? item?.paymentMode ?? item?.model ?? 'recurring',
+          ).toLowerCase();
           const billingType = String(item?.billingType ?? item?.type ?? 'fixed').toLowerCase();
           return {
             id: String(item?.id ?? index + 1),
             name: String(item?.name ?? item?.ruleName ?? `Rule ${index + 1}`),
-            billingModel: billingModel === 'usage' ? 'usage' : 'recurring',
+            billingModel:
+              billingModel === 'usage'
+                ? 'usage'
+                : billingModel === 'prepaid'
+                  ? 'prepaid'
+                  : billingModel === 'postpaid'
+                    ? 'postpaid'
+                    : 'recurring',
             billingType: billingType === 'anniversary' ? 'anniversary' : 'fixed',
             billingMode: String(item?.billingMode ?? item?.cycle ?? 'monthly'),
             fixedBillingDay: String(item?.fixedBillingDay ?? item?.config?.fixedBillingDay ?? ''),
@@ -2798,6 +2807,9 @@ export default function CustomersPage({
       nextErrors.installationDate = 'Enter installation date.';
     } else if (!normalizedInstallationDate) {
       nextErrors.installationDate = 'Use dd/mm/yyyy format.';
+    }
+    if (!customerCreateBillingRuleId.trim()) {
+      nextErrors.billingRuleId = 'Billing rule is required.';
     }
     if (collectionService === 'yes' && !collectionFee.trim()) {
       nextErrors.collectionFee = 'Collection fee is required when collection service is enabled.';
@@ -5718,7 +5730,10 @@ export default function CustomersPage({
               <Label className="text-sm font-medium text-slate-700">Default Billing Rule</Label>
               <Select
                 value={customerCreateBillingRuleId}
-                onValueChange={setCustomerCreateBillingRuleId}
+                onValueChange={(value) => {
+                  setCustomerCreateBillingRuleId(value);
+                  clearFieldError('billingRuleId');
+                }}
                 disabled={billingRulesLoading || activeBillingRules.length === 0}
               >
                 <SelectTrigger>
@@ -5728,7 +5743,7 @@ export default function CustomersPage({
                         ? 'Loading rules...'
                         : activeBillingRules.length === 0
                         ? 'No active rules'
-                        : 'Select billing rule (optional)'
+                        : 'Select billing rule'
                     }
                   />
                 </SelectTrigger>
@@ -5740,6 +5755,9 @@ export default function CustomersPage({
                   ))}
                 </SelectContent>
               </Select>
+              {errors.billingRuleId && (
+                <p className="text-xs text-rose-600">{errors.billingRuleId}</p>
+              )}
               {billingRulesError && <p className="text-xs text-rose-600">{billingRulesError}</p>}
             </div>
           )}
@@ -6011,7 +6029,10 @@ export default function CustomersPage({
                   <Button variant="outline" onClick={saveDraftAndReturnToList}>
                     Cancel
                   </Button>
-                  <Button onClick={handleAddCustomer} disabled={isAddingCustomer}>
+                  <Button
+                    onClick={handleAddCustomer}
+                    disabled={isAddingCustomer || !customerCreateBillingRuleId.trim()}
+                  >
                     {isAddingCustomer ? 'Adding...' : 'Add Customer'}
                   </Button>
                 </div>

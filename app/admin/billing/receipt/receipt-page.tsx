@@ -79,6 +79,9 @@ type PaymentAccount = {
   isActive?: boolean;
 };
 
+const amountsMatch = (left: string | number | null | undefined, right: string | number | null | undefined) =>
+  Math.abs(toNumber(left) - toNumber(right)) < 0.01;
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 
 const toNumber = (value: string | number | null | undefined) => {
@@ -256,6 +259,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [paymentMethodType, setPaymentMethodType] = useState<ReceiptPaymentMethodType>('');
   const [selectedPaymentAccountId, setSelectedPaymentAccountId] = useState('');
+  const [confirmAmountInput, setConfirmAmountInput] = useState('');
   const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([]);
   const [isLoadingPaymentAccounts, setIsLoadingPaymentAccounts] = useState(false);
   const [paidAtInput, setPaidAtInput] = useState('');
@@ -267,6 +271,8 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
   const [isCancellingReceiptById, setIsCancellingReceiptById] = useState<Record<string, boolean>>({});
   const [pendingCancelReceipt, setPendingCancelReceipt] = useState<ReceiptInvoice | null>(null);
   const listInvoiceFilterId = searchParams.get('invoiceId')?.trim() ?? '';
+  const confirmCollected = searchParams.get('confirmCollected') === '1';
+  const prefilledCollectedPaymentMethod = searchParams.get('paymentMethod')?.trim() ?? '';
 
   const fetchInvoiceCandidates = useCallback(async () => {
     const response = await fetch(`${API_BASE_URL}/billing/invoices`, {
@@ -573,6 +579,13 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
     () => invoiceCandidates.find((invoice) => invoice.id === selectedInvoiceId) ?? null,
     [invoiceCandidates, selectedInvoiceId],
   );
+  const isConfirmAmountMatched = useMemo(() => {
+    if (!confirmCollected || !selectedInvoice || isInvoiceEffectivelyPaid(selectedInvoice)) {
+      return true;
+    }
+    if (!confirmAmountInput.trim()) return false;
+    return amountsMatch(confirmAmountInput, selectedInvoice.totalAmount);
+  }, [confirmAmountInput, confirmCollected, selectedInvoice]);
   const selectedInvoiceReceiptLabel = selectedInvoice
     ? getReceiptStatusLabel(selectedInvoice)
     : '';
@@ -606,14 +619,32 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
       setPaymentMethodType('');
       setSelectedPaymentAccountId('');
       setPaidAtInput('');
+      setConfirmAmountInput('');
       setIsPaymentDetailsOpen(false);
       return;
     }
-    setPaymentMethodType('');
-    setSelectedPaymentAccountId('');
+    const matchedAccount = activePaymentAccounts.find(
+      (account) => formatPaymentMethodLabel(account) === prefilledCollectedPaymentMethod,
+    );
+    if (confirmCollected && prefilledCollectedPaymentMethod) {
+      if (matchedAccount) {
+        setPaymentMethodType(matchedAccount.kind);
+        setSelectedPaymentAccountId(matchedAccount.id);
+      } else if (prefilledCollectedPaymentMethod.toLowerCase() === 'cash') {
+        setPaymentMethodType('cash');
+        setSelectedPaymentAccountId('');
+      } else {
+        setPaymentMethodType('');
+        setSelectedPaymentAccountId('');
+      }
+    } else {
+      setPaymentMethodType('');
+      setSelectedPaymentAccountId('');
+    }
     setPaidAtInput(selectedInvoice.paidAt ? selectedInvoice.paidAt.slice(0, 16) : '');
+    setConfirmAmountInput('');
     setIsPaymentDetailsOpen(false);
-  }, [selectedInvoice]);
+  }, [activePaymentAccounts, confirmCollected, prefilledCollectedPaymentMethod, selectedInvoice]);
 
   useEffect(() => {
     if (paymentMethodType === 'cash' || !selectedPaymentAccount) {
@@ -668,10 +699,17 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
       });
       return;
     }
-    if (selectedInvoice && !isInvoiceEffectivelyPaid(selectedInvoice) && !hasSelectedPaymentMethod) {
+    const effectiveCollectedPaymentMethod =
+      confirmCollected && prefilledCollectedPaymentMethod
+        ? prefilledCollectedPaymentMethod
+        : resolvedPaymentMethod.trim();
+
+    if (selectedInvoice && !isInvoiceEffectivelyPaid(selectedInvoice) && !effectiveCollectedPaymentMethod) {
       toast({
         title: 'Payment method is required',
-        description: 'Please choose cash, wallet, or account.',
+        description: confirmCollected
+          ? 'Collected payment method is missing. Please go back and collect again.'
+          : 'Please choose cash, wallet, or account.',
         variant: 'destructive',
       });
       return;
@@ -689,7 +727,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
       });
       return;
     }
-    if (selectedInvoice && !isInvoiceEffectivelyPaid(selectedInvoice) && !resolvedPaymentMethod.trim()) {
+    if (selectedInvoice && !isInvoiceEffectivelyPaid(selectedInvoice) && !effectiveCollectedPaymentMethod) {
       toast({
         title: 'Payment method is required',
         description: 'Please complete payment method step.',
@@ -697,11 +735,10 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
       });
       return;
     }
-
     setIsGenerating(true);
     try {
       const requestBody: Record<string, string> = {};
-      if (resolvedPaymentMethod.trim()) requestBody.paymentMethod = resolvedPaymentMethod.trim();
+      if (effectiveCollectedPaymentMethod.trim()) requestBody.paymentMethod = effectiveCollectedPaymentMethod.trim();
       if (paidAtInput.trim()) requestBody.paidAt = new Date(paidAtInput).toISOString();
 
       const response = await fetch(`${API_BASE_URL}/billing/invoices/${selectedInvoiceId}/receipt`, {
@@ -721,7 +758,8 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
         id: String(payload?.id ?? selectedInvoiceId),
         invoiceNo: payload?.invoiceNo ?? selectedInvoice?.invoiceNo ?? null,
         receiptNo: payload?.receiptNo ?? null,
-        paymentMethod: payload?.paymentMethod ?? selectedInvoice?.paymentMethod ?? null,
+        paymentMethod:
+          payload?.paymentMethod ?? effectiveCollectedPaymentMethod ?? selectedInvoice?.paymentMethod ?? null,
         paidAt: payload?.paidAt ?? selectedInvoice?.paidAt ?? null,
         status: payload?.status ?? selectedInvoice?.status ?? 'paid',
         totalAmount: payload?.totalAmount ?? selectedInvoice?.totalAmount ?? null,
@@ -1326,31 +1364,42 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                   <div className="grid gap-3 md:grid-cols-3">
                     <div className="space-y-1">
                       <Label>Payment Method</Label>
-                      <Select
-                        value={paymentMethodType || undefined}
-                        onValueChange={(value) => {
-                          const nextType: ReceiptPaymentMethodType =
-                            value === 'wallet' || value === 'account' || value === 'cash'
-                              ? value
-                              : '';
-                          setPaymentMethodType(nextType);
-                          setSelectedPaymentAccountId('');
-                        }}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Choose method" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="cash">Cash</SelectItem>
-                          <SelectItem value="wallet">Wallet</SelectItem>
-                          <SelectItem value="account">Account</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-slate-500">
-                        {isLoadingPaymentAccounts
-                          ? 'Loading methods from payment config...'
-                          : 'Choose payment method for this receipt.'}
-                      </p>
+                      {confirmCollected ? (
+                        <>
+                          <Input value={prefilledCollectedPaymentMethod || '—'} readOnly />
+                          <p className="text-xs text-slate-500">
+                            Auto-filled from collected payment information.
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <Select
+                            value={paymentMethodType || undefined}
+                            onValueChange={(value) => {
+                              const nextType: ReceiptPaymentMethodType =
+                                value === 'wallet' || value === 'account' || value === 'cash'
+                                  ? value
+                                  : '';
+                              setPaymentMethodType(nextType);
+                              setSelectedPaymentAccountId('');
+                            }}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Choose method" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="cash">Cash</SelectItem>
+                              <SelectItem value="wallet">Wallet</SelectItem>
+                              <SelectItem value="account">Account</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-slate-500">
+                            {isLoadingPaymentAccounts
+                              ? 'Loading methods from payment config...'
+                              : 'Choose payment method for this receipt.'}
+                          </p>
+                        </>
+                      )}
                     </div>
 
                     <div className="space-y-1">
@@ -1358,7 +1407,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                       <Select
                         value={selectedPaymentAccountId}
                         onValueChange={setSelectedPaymentAccountId}
-                        disabled={!requiresPaymentAccount}
+                        disabled={!requiresPaymentAccount || confirmCollected}
                       >
                         <SelectTrigger>
                           <SelectValue
@@ -1395,6 +1444,47 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                     </div>
                   </div>
 
+                  {confirmCollected && (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label>Invoice Total</Label>
+                        <Input
+                          value={formatMoney(selectedInvoice.totalAmount, selectedInvoice.currency || 'MMK')}
+                          readOnly
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Confirm Amount</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={confirmAmountInput}
+                          onChange={(event) => setConfirmAmountInput(event.target.value)}
+                          placeholder="Type amount again to confirm"
+                          className={
+                            confirmAmountInput.trim().length > 0 && !isConfirmAmountMatched
+                              ? 'border-rose-300 focus-visible:ring-rose-400'
+                              : ''
+                          }
+                        />
+                        <p className="text-xs text-slate-500">
+                          Admin must type the exact invoice total before confirming receipt.
+                        </p>
+                        {confirmAmountInput.trim().length > 0 && !isConfirmAmountMatched && (
+                          <p className="text-xs font-medium text-rose-600">
+                            Amount does not match invoice total.
+                          </p>
+                        )}
+                        {confirmAmountInput.trim().length > 0 && isConfirmAmountMatched && (
+                          <p className="text-xs font-medium text-emerald-600">
+                            Amount confirmed.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {requiresPaymentAccount && selectedPaymentAccount ? (
                     <Button
                       type="button"
@@ -1422,10 +1512,12 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
               >
                 {isGenerating
                   ? 'Processing...'
-                  : isSelectedInvoiceReceiptIssued
+                : isSelectedInvoiceReceiptIssued
                     ? 'Receipt Already Issued'
                   : selectedInvoice && !isInvoiceEffectivelyPaid(selectedInvoice)
-                    ? 'Confirm Payment & Create Receipt'
+                    ? confirmCollected
+                      ? 'Confirm Collected Payment & Create Receipt'
+                      : 'Confirm Payment & Create Receipt'
                     : 'Create Receipt'}
               </Button>
 

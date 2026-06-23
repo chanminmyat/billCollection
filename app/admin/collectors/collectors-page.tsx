@@ -2541,7 +2541,7 @@ export default function CollectorsPage({
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {collectors.map((collector) => {
+                  {collectorsSource.map((collector) => {
                     const stats = getCollectorStats(collector);
                     return (
                       <div key={collector.id} className="p-4 border rounded-lg">
@@ -2560,7 +2560,7 @@ export default function CollectorsPage({
                         <div className="space-y-1 text-sm text-gray-600">
                           <div className="flex justify-between">
                             <span>Area:</span>
-                            <span>{collector.area}</span>
+                            <span>{getCollectorAreaLabel(collector)}</span>
                           </div>
                           <div className="flex justify-between">
                             <span>Customers:</span>

@@ -7,6 +7,7 @@ import {
   ArrowUpRight,
   BadgeCheck,
   Languages,
+  Network,
   Settings,
   SlidersHorizontal,
   Users,
@@ -24,6 +25,7 @@ const quickLinks = [
   { label: 'Manage Admins', href: '/super-admin/admins', icon: Users },
   { label: 'Update Packages', href: '/super-admin/packages', icon: Wifi },
   { label: 'Billing Rules', href: '/super-admin/billing-rules', icon: SlidersHorizontal },
+  { label: 'Technician API', href: '/super-admin/technician-api', icon: Network },
   { label: 'Collector Dashboard Texts', href: '/super-admin/collector-dashboard-texts', icon: Languages },
   { label: 'Content Rules', href: '/super-admin/content', icon: BadgeCheck },
   { label: 'System Branding', href: '/super-admin/settings', icon: Settings }

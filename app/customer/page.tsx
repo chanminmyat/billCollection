@@ -28,7 +28,7 @@ import {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 
-type InvoiceStatus = 'paid' | 'unpaid' | 'overdue' | 'cancelled';
+type InvoiceStatus = 'paid' | 'unpaid' | 'overdue' | 'cancelled' | 'carried_forward';
 
 type InvoiceRecord = {
   id: string;
@@ -99,8 +99,12 @@ const formatMoney = (value: string | number | null | undefined, currency = 'MMK'
 const statusBadgeVariant = (status: InvoiceStatus) => {
   if (status === 'paid') return 'default';
   if (status === 'unpaid') return 'secondary';
+  if (status === 'carried_forward') return 'outline';
   return 'destructive';
 };
+
+const formatInvoiceStatus = (status: InvoiceStatus) =>
+  status === 'carried_forward' ? 'carried forward' : status;
 
 const getInvoiceSortDate = (invoice: InvoiceRecord) => {
   const candidate = invoice.invoiceDate || invoice.dueDate || invoice.paidAt;
@@ -364,7 +368,7 @@ export default function CustomerDashboard() {
     .filter((bill) => bill.status === 'paid')
     .reduce((sum, bill) => sum + toNumber(bill.totalAmount), 0);
   const totalOutstanding = customerInvoices
-    .filter((bill) => bill.status !== 'paid')
+    .filter((bill) => bill.status === 'unpaid' || bill.status === 'overdue')
     .reduce((sum, bill) => sum + toNumber(bill.totalAmount), 0);
   const paymentHistory = customerInvoices.filter((bill) => bill.status === 'paid');
 
@@ -631,7 +635,9 @@ export default function CustomerDashboard() {
                     <TableCell>{formatMoney(invoice.totalAmount, invoice.currency || 'MMK')}</TableCell>
                     <TableCell>{formatDisplayDate(invoice.dueDate, '-')}</TableCell>
                     <TableCell>
-                      <Badge variant={statusBadgeVariant(invoice.status)}>{invoice.status}</Badge>
+                      <Badge variant={statusBadgeVariant(invoice.status)}>
+                        {formatInvoiceStatus(invoice.status)}
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       {getCollectionStatusForInvoice(invoice) === 'collected_pending_admin' ? (
@@ -650,7 +656,7 @@ export default function CustomerDashboard() {
                     <TableCell>{formatDisplayDate(invoice.paidAt, '-')}</TableCell>
                     <TableCell>
                       {canCustomerSelfPay &&
-                      invoice.status !== 'paid' &&
+                      (invoice.status === 'unpaid' || invoice.status === 'overdue') &&
                       getCollectionStatusForInvoice(invoice) !== 'collected_pending_admin' ? (
                         <Button size="sm" onClick={() => openPayBillDialog(invoice)}>
                           Pay Bill
@@ -791,6 +797,24 @@ export default function CustomerDashboard() {
             </DialogHeader>
             <div className="space-y-4">
               <div className="rounded-md border bg-slate-50 p-3 text-sm">
+                <p>
+                  Invoice No:{' '}
+                  <span className="font-semibold">
+                    {selectedInvoiceForPayment?.invoiceNo || selectedInvoiceForPayment?.id || '-'}
+                  </span>
+                </p>
+                <p className="mt-1">
+                  Billing Period:{' '}
+                  <span className="font-semibold">
+                    {selectedInvoiceForPayment ? getBillingPeriod(selectedInvoiceForPayment) : '-'}
+                  </span>
+                </p>
+                <p className="mt-1">
+                  Due Date:{' '}
+                  <span className="font-semibold">
+                    {formatDisplayDate(selectedInvoiceForPayment?.dueDate, '-')}
+                  </span>
+                </p>
                 <p>
                   Amount:{' '}
                   <span className="font-semibold">

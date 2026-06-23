@@ -14,10 +14,9 @@ import { Plus, SlidersHorizontal } from 'lucide-react';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 
-type BillingModel = 'recurring' | 'usage';
+type BillingModel = 'recurring' | 'usage' | 'prepaid' | 'postpaid';
 type BillingType = 'fixed' | 'anniversary';
 type BillingMode = 'monthly' | 'quarterly' | 'bi_yearly' | 'yearly' | 'custom';
-type PrepaidMode = 'prepaid' | 'postpaid';
 type AdjustmentType = 'plus' | 'minus';
 type AdjustmentValueType = 'fixed' | 'percent';
 type LateFeeApplyMode = 'once' | 'per_day';
@@ -31,7 +30,6 @@ type BillingRuleItem = {
   customMonths: string;
   fixedBillingDay: string;
   dueAfterDays: string;
-  prepaidPostpaid: PrepaidMode;
   suspendOnOverdue: boolean;
   graceDays: string;
   lateFeeEnabled: boolean;
@@ -61,7 +59,6 @@ const initialRule: BillingRuleItem = {
   customMonths: '',
   fixedBillingDay: '1',
   dueAfterDays: '14',
-  prepaidPostpaid: 'postpaid',
   suspendOnOverdue: true,
   graceDays: '0',
   lateFeeEnabled: false,
@@ -96,17 +93,23 @@ export default function SuperAdminBillingRulesPage() {
   const [newAdjustmentIsActive, setNewAdjustmentIsActive] = useState(true);
 
   const normalizeRule = (item: any, fallback: BillingRuleItem): BillingRuleItem => {
-    const modelRaw = String(item?.billingModel ?? item?.model ?? fallback.billingModel).toLowerCase();
+    const modelRaw = String(
+      item?.billingModel ?? item?.prepaidPostpaid ?? item?.paymentMode ?? item?.model ?? fallback.billingModel,
+    ).toLowerCase();
     const typeRaw = String(item?.billingType ?? item?.type ?? fallback.billingType).toLowerCase();
     const modeRaw = String(item?.billingMode ?? item?.cycle ?? fallback.billingMode).toLowerCase();
-    const prepaidRaw = String(
-      item?.prepaidPostpaid ?? item?.paymentMode ?? fallback.prepaidPostpaid
-    ).toLowerCase();
 
     return {
       id: item?.id ?? fallback.id,
       name: String(item?.name ?? item?.ruleName ?? fallback.name),
-      billingModel: modelRaw === 'usage' ? 'usage' : 'recurring',
+      billingModel:
+        modelRaw === 'usage'
+          ? 'usage'
+          : modelRaw === 'prepaid'
+            ? 'prepaid'
+            : modelRaw === 'postpaid'
+              ? 'postpaid'
+              : 'recurring',
       billingType: typeRaw === 'anniversary' ? 'anniversary' : 'fixed',
       billingMode:
         modeRaw === 'quarterly' || modeRaw === 'bi_yearly' || modeRaw === 'yearly' || modeRaw === 'custom'
@@ -119,7 +122,6 @@ export default function SuperAdminBillingRulesPage() {
       dueAfterDays: String(
         item?.dueAfterDays ?? item?.config?.dueAfterDays ?? fallback.dueAfterDays ?? '14'
       ),
-      prepaidPostpaid: prepaidRaw === 'prepaid' ? 'prepaid' : 'postpaid',
       suspendOnOverdue:
         item?.suspendOnOverdue !== undefined
           ? item.suspendOnOverdue === true
@@ -475,7 +477,6 @@ export default function SuperAdminBillingRulesPage() {
       customMonths: form.billingMode === 'custom' ? toIntegerOrNull(form.customMonths) : null,
       fixedBillingDay: form.billingType === 'fixed' ? toIntegerOrNull(form.fixedBillingDay) : null,
       dueAfterDays: toIntegerOrNull(form.dueAfterDays),
-      prepaidPostpaid: form.prepaidPostpaid,
       suspendOnOverdue: form.suspendOnOverdue,
       graceDays: toIntegerOrNull(form.graceDays) ?? 0,
       lateFeeEnabled: form.lateFeeEnabled,
@@ -640,6 +641,8 @@ export default function SuperAdminBillingRulesPage() {
                 <SelectContent>
                   <SelectItem value="recurring">Recurring</SelectItem>
                   <SelectItem value="usage">Usage Based</SelectItem>
+                  <SelectItem value="prepaid">Prepaid</SelectItem>
+                  <SelectItem value="postpaid">Postpaid</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -823,24 +826,6 @@ export default function SuperAdminBillingRulesPage() {
                 </div>
               </>
             )}
-
-            <div className="space-y-2">
-              <Label>Prepaid / Postpaid</Label>
-              <Select
-                value={form.prepaidPostpaid}
-                onValueChange={(value) =>
-                  setForm((prev) => ({ ...prev, prepaidPostpaid: value as PrepaidMode }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="prepaid">Prepaid</SelectItem>
-                  <SelectItem value="postpaid">Postpaid</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
 
             <div className="space-y-2">
               <Label>Grace Days</Label>
@@ -1125,8 +1110,8 @@ export default function SuperAdminBillingRulesPage() {
                   <p className="font-medium capitalize">{rule.billingMode.replace('_', '-')}</p>
                 </div>
                 <div className="rounded-md border bg-slate-50 px-2 py-1">
-                  <span className="text-xs text-slate-500">Payment</span>
-                  <p className="font-medium capitalize">{rule.prepaidPostpaid}</p>
+                  <span className="text-xs text-slate-500">Custom Months</span>
+                  <p className="font-medium">{rule.billingMode === 'custom' ? rule.customMonths || '-' : '-'}</p>
                 </div>
               </div>
 

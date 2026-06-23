@@ -47,13 +47,6 @@ export const isInvoiceReleased = (invoice: unknown, now: Date = new Date()) => {
     return false;
   }
 
-  // Fallback: if backend doesn't send explicit release date but billing period starts in future,
-  // keep it hidden until period start.
-  const billingPeriodFrom = parseDateSafe(record.billingPeriodFrom);
-  if (billingPeriodFrom && atStartOfDay(billingPeriodFrom).getTime() > today.getTime()) {
-    return false;
-  }
-
   return true;
 };
 

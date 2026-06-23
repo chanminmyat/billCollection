@@ -53,7 +53,7 @@ type CustomerOption = {
 type BillingRule = {
   id: string;
   name: string;
-  billingModel: 'recurring' | 'usage';
+  billingModel: 'recurring' | 'usage' | 'prepaid' | 'postpaid';
   billingType: 'fixed' | 'anniversary';
   billingMode: string;
   fixedBillingDay?: string;
@@ -376,12 +376,21 @@ export default function CreateInvoicePage() {
     const normalizeRules = (rawList: any[]) =>
       rawList
         .map((item, index) => {
-          const billingModel = String(item?.billingModel ?? item?.model ?? 'recurring').toLowerCase();
+          const billingModel = String(
+            item?.billingModel ?? item?.prepaidPostpaid ?? item?.paymentMode ?? item?.model ?? 'recurring',
+          ).toLowerCase();
           const billingType = String(item?.billingType ?? item?.type ?? 'fixed').toLowerCase();
           return {
             id: String(item?.id ?? index + 1),
             name: String(item?.name ?? item?.ruleName ?? `Rule ${index + 1}`),
-            billingModel: billingModel === 'usage' ? 'usage' : 'recurring',
+            billingModel:
+              billingModel === 'usage'
+                ? 'usage'
+                : billingModel === 'prepaid'
+                  ? 'prepaid'
+                  : billingModel === 'postpaid'
+                    ? 'postpaid'
+                    : 'recurring',
             billingType: billingType === 'anniversary' ? 'anniversary' : 'fixed',
             billingMode: String(item?.billingMode ?? item?.cycle ?? 'monthly'),
             fixedBillingDay: String(item?.fixedBillingDay ?? item?.config?.fixedBillingDay ?? ''),

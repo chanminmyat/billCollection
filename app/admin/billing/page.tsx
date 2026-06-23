@@ -35,6 +35,7 @@ import {
   CheckCircle2,
   Trash2,
   Clock3,
+  ChevronDown,
   Play,
   Zap,
   Edit,
@@ -79,7 +80,7 @@ const INVOICE_LOCAL_CANCELLED_STORAGE_KEY = 'billing_local_cancelled_invoice_ids
 const INVOICE_FORCE_RELEASED_STORAGE_KEY = 'billing_force_released_invoice_ids_v1';
 const INVOICE_RULE_NONE_VALUE = '__none__';
 
-type InvoiceStatus = 'paid' | 'unpaid' | 'overdue' | 'cancelled';
+type InvoiceStatus = 'paid' | 'unpaid' | 'overdue' | 'cancelled' | 'carried_forward';
 type AdjustmentType = 'plus' | 'minus';
 type AdjustmentValueType = 'fixed' | 'percent';
 type FixedFirstInvoiceChargeMode = 'full_month' | 'prorated';
@@ -180,7 +181,7 @@ type BillingCustomer = {
 type BillingRule = {
   id: string;
   name: string;
-  billingModel: 'recurring' | 'usage';
+  billingModel: 'recurring' | 'usage' | 'prepaid' | 'postpaid';
   billingType: 'fixed' | 'anniversary';
   billingMode: string;
   customMonths?: number | null;
@@ -248,6 +249,9 @@ type TransactionLog = {
   amount: string | number | null | undefined;
   currency?: string | null;
   note: string;
+  paymentMethod?: string;
+  paymentAccount?: string;
+  paymentSlipUrl?: string | null;
 };
 
 type TransactionGroup = {
@@ -291,6 +295,45 @@ const toNumber = (value: string | number | null | undefined) => {
 
 const formatMoney = (value: string | number | null | undefined, currency = 'MMK') =>
   `${toNumber(value).toLocaleString()} ${currency}`;
+
+const isPreviousBalanceAdjustment = (description?: string | null) =>
+  String(description || '').trim().toLowerCase().startsWith('previous unpaid balance');
+
+const invoiceHasPreviousBalance = (
+  invoice: Pick<InvoiceRecord, 'adjustments'> | null | undefined,
+) => {
+  const adjustments = invoice?.adjustments;
+  if (!Array.isArray(adjustments)) return false;
+  return adjustments.some((adjustment) => isPreviousBalanceAdjustment(adjustment.description));
+};
+
+const resolveDisplayedInvoiceStatus = (
+  invoice: Pick<
+    InvoiceRecord,
+    'status' | 'dueDate' | 'adjustments' | 'receiptStatus' | 'receiptNo' | 'collectionEvents'
+  >,
+) => {
+  const normalized = normalizeInvoiceStatusLabel(invoice.status);
+  if (normalized !== 'overdue') {
+    return getEffectiveInvoiceStatus(invoice);
+  }
+
+  const hasPreviousBalance = invoiceHasPreviousBalance(invoice);
+  const dueDate = parseDateSafe(invoice.dueDate);
+  const isPastDue = dueDate ? startOfDay(dueDate).getTime() < startOfDay(new Date()).getTime() : false;
+
+  if (hasPreviousBalance && !isPastDue) {
+    return 'unpaid';
+  }
+
+  return getEffectiveInvoiceStatus(invoice);
+};
+
+const extractCarriedInvoiceRef = (description?: string | null) => {
+  const raw = String(description || '').trim();
+  const match = raw.match(/previous unpaid balance\s*-\s*(.+)$/i);
+  return String(match?.[1] ?? '').trim() || raw;
+};
 
 const inferFixedFirstChargeModeFromInvoice = (
   invoice: Pick<InvoiceRecord, 'monthlyFee' | 'subscription'>,
@@ -345,6 +388,13 @@ const normalizeInvoiceStatusLabel = (status: string | null | undefined) => {
   const normalized = String(status ?? '').trim().toLowerCase();
   if (normalized === 'canceled') return 'cancelled';
   if (normalized === 'cancel' || normalized === 'cancelled') return 'cancelled';
+  if (
+    normalized === 'carried_forward' ||
+    normalized === 'carried-forward' ||
+    normalized === 'carried forward'
+  ) {
+    return 'carried_forward';
+  }
   if (
     normalized === 'unpaid' ||
     normalized === 'pending' ||
@@ -413,7 +463,10 @@ const isReceiptCurrentlyCancelled = (
 };
 
 const getEffectiveInvoiceStatus = (
-  invoice: Pick<InvoiceRecord, 'status' | 'receiptStatus' | 'receiptNo' | 'collectionEvents'>,
+  invoice: Pick<
+    InvoiceRecord,
+    'status' | 'dueDate' | 'adjustments' | 'receiptStatus' | 'receiptNo' | 'collectionEvents'
+  >,
 ) => {
   const normalized = normalizeInvoiceStatusLabel(invoice.status);
   if (normalized === 'cancelled') {
@@ -422,14 +475,26 @@ const getEffectiveInvoiceStatus = (
   if (isReceiptCurrentlyCancelled(invoice)) {
     return 'unpaid';
   }
+  if (normalized === 'overdue') {
+    const hasPreviousBalance = invoiceHasPreviousBalance(invoice);
+    const dueDate = parseDateSafe(invoice.dueDate);
+    const isPastDue = dueDate ? startOfDay(dueDate).getTime() < startOfDay(new Date()).getTime() : false;
+    if (hasPreviousBalance && !isPastDue) {
+      return 'unpaid';
+    }
+  }
   return normalized;
 };
 
 const getInvoiceDisplayStatusLabel = (
-  invoice: Pick<InvoiceRecord, 'status' | 'receiptNo' | 'receiptStatus' | 'collectionEvents'>,
+  invoice: Pick<
+    InvoiceRecord,
+    'status' | 'dueDate' | 'adjustments' | 'receiptNo' | 'receiptStatus' | 'collectionEvents'
+  >,
 ) => {
-  const normalized = normalizeInvoiceStatusLabel(invoice.status);
+  const normalized = resolveDisplayedInvoiceStatus(invoice);
   if (normalized === 'cancelled') return 'cancelled invoice';
+  if (normalized === 'carried_forward') return 'carried forward';
   if (isReceiptCurrentlyCancelled(invoice)) {
     return 'cancelled receipt';
   }
@@ -440,6 +505,7 @@ const statusBadgeVariant = (status: InvoiceStatus | string) => {
   const normalized = String(status ?? '').trim().toLowerCase();
   if (normalized === 'paid') return 'default';
   if (normalized === 'unpaid') return 'secondary';
+  if (normalized === 'carried_forward' || normalized === 'carried forward') return 'outline';
   if (normalized === 'cancelled receipt') return 'secondary';
   if (normalized === 'cancelled invoice') return 'destructive';
   return 'destructive';
@@ -478,10 +544,13 @@ const getAdminCollectionStatusClassName = (status: CollectionWorkflowStatus) =>
     : getCollectionWorkflowStatusClassName(status);
 
 const getAdminCollectionStatusLabelForInvoice = (
-  invoice: Pick<InvoiceRecord, 'status' | 'receiptNo' | 'receiptStatus' | 'collectionEvents'>,
+  invoice: Pick<
+    InvoiceRecord,
+    'status' | 'dueDate' | 'adjustments' | 'receiptNo' | 'receiptStatus' | 'collectionEvents'
+  >,
   status: CollectionWorkflowStatus,
 ) => {
-  const invoiceStatus = normalizeInvoiceStatusLabel(invoice.status);
+  const invoiceStatus = resolveDisplayedInvoiceStatus(invoice);
   if (invoiceStatus === 'cancelled') {
     return 'Cancelled Invoice';
   }
@@ -492,10 +561,13 @@ const getAdminCollectionStatusLabelForInvoice = (
 };
 
 const getAdminCollectionStatusClassNameForInvoice = (
-  invoice: Pick<InvoiceRecord, 'status' | 'receiptNo' | 'receiptStatus' | 'collectionEvents'>,
+  invoice: Pick<
+    InvoiceRecord,
+    'status' | 'dueDate' | 'adjustments' | 'receiptNo' | 'receiptStatus' | 'collectionEvents'
+  >,
   status: CollectionWorkflowStatus,
 ) => {
-  const invoiceStatus = normalizeInvoiceStatusLabel(invoice.status);
+  const invoiceStatus = resolveDisplayedInvoiceStatus(invoice);
   if (invoiceStatus === 'cancelled') {
     return 'bg-rose-100 text-rose-700';
   }
@@ -526,6 +598,42 @@ const parseCollectedPaymentSummary = (note?: string | null) => {
     paymentMethod: paymentMethodPart ? paymentMethodPart.replace(/^payment method:\s*/i, '').trim() : '',
     paymentAccount: paymentAccountPart ? paymentAccountPart.replace(/^payment account:\s*/i, '').trim() : '',
     note: freeFormNote.join(' | ').trim(),
+  };
+};
+
+const getCollectionEventPaymentDetails = (
+  invoiceId: string,
+  event?: CollectionWorkflowEvent | null,
+) => {
+  if (!event) {
+    return {
+      paymentMethod: '',
+      paymentAccount: '',
+      paymentSlipUrl: null as string | null,
+    };
+  }
+
+  const rawEvent = event as CollectionWorkflowEvent & {
+    paymentMethod?: string | null;
+    paymentAccount?: string | null;
+    paymentSlipPath?: string | null;
+    paymentSlipUrl?: string | null;
+  };
+  const parsedSummary = parseCollectedPaymentSummary(rawEvent.note ?? null);
+  const paymentMethod = rawEvent.paymentMethod?.trim() || parsedSummary?.paymentMethod?.trim() || '';
+  const paymentAccount = rawEvent.paymentAccount?.trim() || parsedSummary?.paymentAccount?.trim() || '';
+  const paymentSlipUrl = rawEvent.paymentSlipUrl?.trim()
+    ? rawEvent.paymentSlipUrl.trim()
+    : rawEvent.paymentSlipPath
+      ? `${API_BASE_URL}/billing/invoices/${encodeURIComponent(invoiceId)}/payment-slip?eventId=${encodeURIComponent(
+          event.id,
+        )}`
+      : null;
+
+  return {
+    paymentMethod,
+    paymentAccount,
+    paymentSlipUrl,
   };
 };
 
@@ -772,6 +880,7 @@ export default function BillingPage() {
   const [loadError, setLoadError] = useState('');
   const [customersLoading, setCustomersLoading] = useState(false);
   const [customersError, setCustomersError] = useState('');
+  const [collectorNameByCode, setCollectorNameByCode] = useState<Record<string, string>>({});
 
   const [activeTab, setActiveTab] = useState<'invoice-list' | 'next-engine' | 'rule-config' | 'transactions'>(
     'invoice-list',
@@ -789,15 +898,22 @@ export default function BillingPage() {
   const [selectedStatus, setSelectedStatus] = useState<'all' | InvoiceStatus>('all');
   const [selectedCollectorCode, setSelectedCollectorCode] = useState('all');
   const [selectedCollectionService, setSelectedCollectionService] = useState<'all' | 'yes' | 'no'>('all');
+  const [selectedCollectionStatusFilter, setSelectedCollectionStatusFilter] = useState<
+    'all' | CollectionWorkflowStatus
+  >('all');
   const [collectorCollectedFrom, setCollectorCollectedFrom] = useState('');
   const [collectorCollectedTo, setCollectorCollectedTo] = useState('');
   const [transactionSearchTerm, setTransactionSearchTerm] = useState('');
   const [transactionDetailOpen, setTransactionDetailOpen] = useState(false);
   const [selectedTransactionGroup, setSelectedTransactionGroup] = useState<TransactionGroup | null>(null);
+  const [paymentSlipPreviewOpen, setPaymentSlipPreviewOpen] = useState(false);
+  const [paymentSlipPreviewUrl, setPaymentSlipPreviewUrl] = useState('');
+  const [paymentSlipPreviewTitle, setPaymentSlipPreviewTitle] = useState('Payment Slip');
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [invoiceDetailMode, setInvoiceDetailMode] = useState<'view' | 'edit'>('view');
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceRecord | null>(null);
+  const [isPreviousBalanceExpanded, setIsPreviousBalanceExpanded] = useState(true);
   const [adjustmentRows, setAdjustmentRows] = useState<AdjustmentFormRow[]>([]);
   const [editedInvoiceFixedFirstChargeMode, setEditedInvoiceFixedFirstChargeMode] =
     useState<FixedFirstInvoiceChargeMode>('full_month');
@@ -1153,12 +1269,20 @@ export default function BillingPage() {
     setCustomersLoading(true);
     setCustomersError('');
     try {
-      const response = await fetch(`${API_BASE_URL}/customers`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      const [response, collectorsResponse] = await Promise.all([
+        fetch(`${API_BASE_URL}/customers`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }),
+        fetch(`${API_BASE_URL}/collectors`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }).catch(() => null),
+      ]);
 
       if (!response.ok) {
         const data = await response.json().catch(() => null);
@@ -1173,6 +1297,27 @@ export default function BillingPage() {
           : Array.isArray(data?.data)
             ? data.data
             : [];
+
+      let nextCollectorNameByCode: Record<string, string> = {};
+      if (collectorsResponse?.ok) {
+        const collectorsData = await collectorsResponse.json().catch(() => []);
+        const collectorsList = Array.isArray(collectorsData)
+          ? collectorsData
+          : Array.isArray(collectorsData?.collectors)
+            ? collectorsData.collectors
+            : Array.isArray(collectorsData?.data)
+              ? collectorsData.data
+              : [];
+
+        nextCollectorNameByCode = (collectorsList as any[]).reduce<Record<string, string>>((acc, item) => {
+          const code = String(item?.collectorCode ?? item?.user?.username ?? '').trim();
+          const name = String(item?.user?.name ?? item?.name ?? '').trim();
+          if (code && name) {
+            acc[code] = name;
+          }
+          return acc;
+        }, {});
+      }
 
       const normalized = (list as any[]).map((item: any, index: number) => ({
         id: String(item?.id ?? index + 1),
@@ -1257,8 +1402,10 @@ export default function BillingPage() {
       });
 
       setCustomers(enriched);
+      setCollectorNameByCode(nextCollectorNameByCode);
     } catch (error) {
       setCustomers([]);
+      setCollectorNameByCode({});
       setCustomersError(error instanceof Error ? error.message : 'Failed to load customers');
     } finally {
       setCustomersLoading(false);
@@ -1368,7 +1515,9 @@ export default function BillingPage() {
     const normalizeRules = (rawList: any[]) =>
       rawList
         .map((item, index) => {
-          const billingModel = String(item?.billingModel ?? item?.model ?? 'recurring').toLowerCase();
+          const billingModel = String(
+            item?.billingModel ?? item?.prepaidPostpaid ?? item?.paymentMode ?? item?.model ?? 'recurring',
+          ).toLowerCase();
           const billingType = String(item?.billingType ?? item?.type ?? 'fixed').toLowerCase();
           const lateFeeTypeRaw = String(
             item?.lateFeeType ?? item?.lateFee?.type ?? 'fixed',
@@ -1383,7 +1532,14 @@ export default function BillingPage() {
           return {
             id: String(item?.id ?? index + 1),
             name: String(item?.name ?? item?.ruleName ?? `Rule ${index + 1}`),
-            billingModel: billingModel === 'usage' ? 'usage' : 'recurring',
+            billingModel:
+              billingModel === 'usage'
+                ? 'usage'
+                : billingModel === 'prepaid'
+                  ? 'prepaid'
+                  : billingModel === 'postpaid'
+                    ? 'postpaid'
+                    : 'recurring',
             billingType: billingType === 'anniversary' ? 'anniversary' : 'fixed',
             billingMode: String(item?.billingMode ?? item?.cycle ?? 'monthly'),
             customMonths: parseNumber(item?.customMonths ?? item?.config?.customMonths),
@@ -1665,6 +1821,21 @@ export default function BillingPage() {
     return parseCollectedPaymentSummary(latestCollectorEvent?.note ?? null);
   }, [selectedCollectionTimeline]);
 
+  const selectedCollectedPaymentEventDetails = useMemo(() => {
+    if (!selectedInvoice) {
+      return {
+        paymentMethod: '',
+        paymentAccount: '',
+        paymentSlipUrl: null as string | null,
+      };
+    }
+    const latestCollectorEvent = selectedCollectionTimeline
+      .slice()
+      .reverse()
+      .find((event) => event.type === 'collector_collected' || event.type === 'admin_confirmed');
+    return getCollectionEventPaymentDetails(selectedInvoice.id, latestCollectorEvent);
+  }, [selectedCollectionTimeline, selectedInvoice]);
+
   const selectedInvoiceStatus = useMemo<InvoiceStatus | null>(() => {
     if (!selectedInvoice) return null;
     return normalizeInvoiceStatusLabel(selectedInvoice.status) as InvoiceStatus;
@@ -1673,12 +1844,31 @@ export default function BillingPage() {
     if (!selectedInvoice) return '';
     return getInvoiceDisplayStatusLabel(selectedInvoice);
   }, [selectedInvoice]);
+  const selectedInvoicePreviousBalanceRefs = useMemo(() => {
+    if (!selectedInvoice) return [];
+    return Array.from(
+      new Set(
+        (selectedInvoice.adjustments || [])
+          .filter((adjustment) => isPreviousBalanceAdjustment(adjustment.description))
+          .map((adjustment) => extractCarriedInvoiceRef(adjustment.description))
+          .filter(Boolean),
+      ),
+    );
+  }, [selectedInvoice]);
+
+  useEffect(() => {
+    setIsPreviousBalanceExpanded(selectedInvoicePreviousBalanceRefs.length > 0);
+  }, [selectedInvoice?.id, selectedInvoicePreviousBalanceRefs.length]);
 
   const canEditSelectedInvoiceInDialog = useMemo(() => {
     if (!selectedInvoiceStatus) return false;
     if (selectedInvoiceDisplayStatus === 'cancelled invoice') return false;
     if (selectedInvoiceDisplayStatus === 'cancelled receipt') return invoiceDetailMode === 'edit';
-    return invoiceDetailMode === 'edit' && selectedInvoiceStatus !== 'paid';
+    return (
+      invoiceDetailMode === 'edit' &&
+      selectedInvoiceStatus !== 'paid' &&
+      selectedInvoiceStatus !== 'carried_forward'
+    );
   }, [invoiceDetailMode, selectedInvoiceDisplayStatus, selectedInvoiceStatus]);
 
   const canCancelInvoiceAction = useCallback(
@@ -1690,7 +1880,7 @@ export default function BillingPage() {
       const isCollectionCollected =
         collectionStatus === 'completed' || collectionStatus === 'collected_pending_admin';
 
-      if (invoiceStatus === 'cancelled') return false;
+      if (invoiceStatus === 'cancelled' || invoiceStatus === 'carried_forward') return false;
       if (hasReceipt && receiptStatus !== 'cancelled') return false;
       if (invoiceStatus === 'paid' && isCollectionCollected && receiptStatus !== 'cancelled') {
         return false;
@@ -1747,6 +1937,10 @@ export default function BillingPage() {
       const matchesCollectionService =
         selectedCollectionService === 'all' ||
         (matchedCustomer?.collectionService ?? null) === selectedCollectionService;
+      const collectionStatus = getCollectionStatusForInvoice(invoice);
+      const matchesCollectionStatus =
+        selectedCollectionStatusFilter === 'all' ||
+        collectionStatus === selectedCollectionStatusFilter;
       const collectedDate = getCollectorCollectedDate(invoice);
       const matchesCollectedRange =
         (!fromDate || (collectedDate && collectedDate >= fromDate)) &&
@@ -1757,6 +1951,7 @@ export default function BillingPage() {
         matchesStatus &&
         matchesCollector &&
         matchesCollectionService &&
+        matchesCollectionStatus &&
         matchesCollectedRange
       );
     });
@@ -1766,6 +1961,7 @@ export default function BillingPage() {
     selectedStatus,
     selectedCollectorCode,
     selectedCollectionService,
+    selectedCollectionStatusFilter,
     collectorCollectedFrom,
     collectorCollectedTo,
     customers,
@@ -1777,13 +1973,13 @@ export default function BillingPage() {
     customers.forEach((customer) => {
       const code = String(customer.collectorCode || '').trim();
       if (!code) return;
-      const label = customer.collectorName ? `${customer.collectorName} (${code})` : code;
+      const label = collectorNameByCode[code] || customer.collectorName || code;
       if (!options.has(code)) {
         options.set(code, label);
       }
     });
     return Array.from(options.entries()).sort((a, b) => a[1].localeCompare(b[1]));
-  }, [customers]);
+  }, [customers, collectorNameByCode]);
 
   const stats = useMemo(() => {
     const totalInvoices = releasedInvoices.length;
@@ -1796,7 +1992,10 @@ export default function BillingPage() {
       .reduce((sum, invoice) => sum + toNumber(invoice.totalAmount), 0);
 
     const outstanding = releasedInvoices
-      .filter((invoice) => getEffectiveInvoiceStatus(invoice) !== 'paid')
+      .filter((invoice) => {
+        const status = getEffectiveInvoiceStatus(invoice);
+        return status === 'unpaid' || status === 'overdue';
+      })
       .reduce((sum, invoice) => sum + toNumber(invoice.totalAmount), 0);
 
     return {
@@ -2113,9 +2312,7 @@ export default function BillingPage() {
         }
 
         let rowStatus: EngineRowStatus = 'scheduled';
-        if (currentInvoice.status !== 'paid') {
-          rowStatus = 'waiting_payment';
-        } else if (isReleasingByCustomer[customer.id]) {
+        if (isReleasingByCustomer[customer.id]) {
           rowStatus = 'releasing';
         } else if (releaseDate && releaseDate <= today) {
           rowStatus = 'ready_to_release';
@@ -2319,6 +2516,7 @@ export default function BillingPage() {
 
       if (backendCollectionEvents.length > 0) {
         for (const event of backendCollectionEvents) {
+          const paymentDetails = getCollectionEventPaymentDetails(invoice.id, event);
           logs.push({
             id: `${invoice.id}-collection-backend-${event.id}`,
             action: 'collection',
@@ -2330,6 +2528,9 @@ export default function BillingPage() {
             amount: invoice.totalAmount,
             currency: invoice.currency,
             note: event.note ? `${event.label} (${event.note})` : event.label,
+            paymentMethod: paymentDetails.paymentMethod,
+            paymentAccount: paymentDetails.paymentAccount,
+            paymentSlipUrl: paymentDetails.paymentSlipUrl,
           });
         }
       }
@@ -2346,6 +2547,7 @@ export default function BillingPage() {
           if (existingKeys.has(dedupeKey)) {
             continue;
           }
+          const paymentDetails = getCollectionEventPaymentDetails(invoice.id, event);
           logs.push({
             id: `${invoice.id}-collection-${event.id}`,
             action: 'collection',
@@ -2357,6 +2559,9 @@ export default function BillingPage() {
             amount: invoice.totalAmount,
             currency: invoice.currency,
             note: event.note ? `${event.label} (${event.note})` : event.label,
+            paymentMethod: paymentDetails.paymentMethod,
+            paymentAccount: paymentDetails.paymentAccount,
+            paymentSlipUrl: paymentDetails.paymentSlipUrl,
           });
         }
       }
@@ -2431,6 +2636,13 @@ export default function BillingPage() {
   const openTransactionDetail = (group: TransactionGroup) => {
     setSelectedTransactionGroup(group);
     setTransactionDetailOpen(true);
+  };
+
+  const openPaymentSlipPreview = (url: string, title = 'Payment Slip') => {
+    if (!url.trim()) return;
+    setPaymentSlipPreviewUrl(url);
+    setPaymentSlipPreviewTitle(title);
+    setPaymentSlipPreviewOpen(true);
   };
 
   const filteredRuleCustomers = useMemo(() => {
@@ -2550,7 +2762,7 @@ export default function BillingPage() {
       ruleId: customerRuleId,
       customerIds: selectedRuleCustomerIds,
       effectiveFrom: effectiveFromDate || undefined,
-      alsoApplyToUnreleasedInvoices: applyToUnreleasedInvoices,
+      applyToUnreleasedInvoices: applyToUnreleasedInvoices,
     };
 
     setIsAssigningRuleToCustomers(true);
@@ -3372,89 +3584,30 @@ export default function BillingPage() {
       return;
     }
 
-    setIsMarkingPaid(true);
-    try {
-      const collectionStatus = getCollectionStatusForInvoice(invoice);
-      const shouldUseManualPaymentFields = collectionStatus === 'office_transfer';
+    const collectionStatus = getCollectionStatusForInvoice(invoice);
+    const shouldUseManualPaymentFields = collectionStatus === 'office_transfer';
 
-      const timeline = Array.isArray(invoice.collectionEvents)
-        ? invoice.collectionEvents
-        : collectionMap[invoice.id]?.events ?? [];
-      const latestCollectionEvent = timeline
-        .slice()
-        .reverse()
-        .find((event) => event.type === 'collector_collected' || event.type === 'admin_confirmed');
-      const parsedSummary = parseCollectedPaymentSummary(latestCollectionEvent?.note ?? null);
-      const fallbackCollectionPaymentMethod = parsedSummary?.paymentMethod?.trim() || '';
-      const resolvedPaymentMethod = shouldUseManualPaymentFields
-        ? paymentMethod.trim() || fallbackCollectionPaymentMethod
-        : (invoice.paymentMethod || '').trim() || fallbackCollectionPaymentMethod;
+    const timeline = Array.isArray(invoice.collectionEvents)
+      ? invoice.collectionEvents
+      : collectionMap[invoice.id]?.events ?? [];
+    const latestCollectionEvent = timeline
+      .slice()
+      .reverse()
+      .find((event) => event.type === 'collector_collected' || event.type === 'admin_confirmed');
+    const parsedSummary = parseCollectedPaymentSummary(latestCollectionEvent?.note ?? null);
+    const fallbackCollectionPaymentMethod = parsedSummary?.paymentMethod?.trim() || '';
+    const resolvedPaymentMethod = shouldUseManualPaymentFields
+      ? paymentMethod.trim() || fallbackCollectionPaymentMethod
+      : (invoice.paymentMethod || '').trim() || fallbackCollectionPaymentMethod;
 
-      const requestBody = resolvedPaymentMethod
-        ? { paymentMethod: resolvedPaymentMethod }
-        : {};
-
-      const response = await fetch(`${API_BASE_URL}/billing/invoices/${invoice.id}/receipt`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(data?.message ?? 'Failed to confirm payment');
-      }
-
-      const updatedRaw = (await response.json().catch(() => null)) as Partial<InvoiceRecord> | null;
-      const normalizedPaidStatus = normalizeInvoiceStatusLabel(updatedRaw?.status ?? 'paid') as InvoiceStatus;
-      const updated: InvoiceRecord = {
-        ...invoice,
-        ...(updatedRaw ?? {}),
-        status: normalizedPaidStatus,
-      };
-
-      if (selectedInvoice?.id === invoice.id) {
-        setSelectedInvoice(updated);
-      }
-
-      setInvoices((prev) =>
-        prev.map((item) =>
-          item.id === invoice.id
-            ? {
-                ...item,
-                ...(updatedRaw ?? {}),
-                status: normalizedPaidStatus,
-              }
-            : item,
-        ),
-      );
-
-      logAdminActivity(
-        'invoice_paid',
-        'Invoice confirmed, receipt generated, and marked as paid.',
-        'invoice',
-        updated.id,
-        updated.invoiceNo || updated.id,
-        {
-          paymentMethod: resolvedPaymentMethod || null,
-        }
-      );
-
-      toast({
-        title: 'Payment confirmed',
-        description: 'Receipt generated and invoice marked as paid. Next invoice is now scheduled in billing engine.',
-      });
-    } catch (error) {
-      toast({
-        title: 'Confirmation failed',
-        description: error instanceof Error ? error.message : 'Failed to confirm payment',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsMarkingPaid(false);
+    const params = new URLSearchParams({
+      invoiceId: invoice.id,
+      confirmCollected: '1',
+    });
+    if (resolvedPaymentMethod) {
+      params.set('paymentMethod', resolvedPaymentMethod);
     }
+    router.push(`/admin/billing/receipt/create?${params.toString()}`);
   };
 
   const generateReceiptForInvoice = async (invoice: InvoiceRecord) => {
@@ -3943,17 +4096,6 @@ export default function BillingPage() {
         return false;
       }
 
-      if (row.currentInvoiceStatus !== 'paid') {
-        if (!silent) {
-          toast({
-            title: 'Cannot release yet',
-            description: 'Current invoice is not paid.',
-            variant: 'destructive',
-          });
-        }
-        return false;
-      }
-
       setIsReleasingByCustomer((prev) => ({ ...prev, [row.customerId]: true }));
       try {
         const normalizedCycleMode = String(row.billingCycleMode ?? '')
@@ -4191,7 +4333,66 @@ export default function BillingPage() {
       `);
     }
 
-    for (const adjustment of selectedInvoice.adjustments || []) {
+    const previousBalanceAdjustments = (selectedInvoice.adjustments || []).filter((adjustment) =>
+      isPreviousBalanceAdjustment(adjustment.description),
+    );
+    const regularAdjustments = (selectedInvoice.adjustments || []).filter(
+      (adjustment) => !isPreviousBalanceAdjustment(adjustment.description),
+    );
+
+    if (previousBalanceAdjustments.length > 0) {
+      const previousBalanceTotal = previousBalanceAdjustments.reduce(
+        (sum, adjustment) => sum + Math.abs(toNumber(adjustment.amount)),
+        0,
+      );
+      const previousBalanceRefs = Array.from(
+        new Set(previousBalanceAdjustments.map((adjustment) => extractCarriedInvoiceRef(adjustment.description))),
+      ).filter(Boolean);
+      itemRows.push(`
+        <tr>
+          <td colspan="5" class="section">Previous Balance</td>
+        </tr>
+      `);
+      if (previousBalanceRefs.length > 0) {
+        itemRows.push(`
+          <tr>
+            <td></td>
+            <td colspan="4">Carried Invoice(s): ${escapeHtml(previousBalanceRefs.join(', '))}</td>
+          </tr>
+        `);
+      }
+      for (const adjustment of previousBalanceAdjustments) {
+        itemRows.push(`
+          <tr>
+            <td>${rowNumber++}</td>
+            <td>${escapeHtml(adjustment.description || 'Previous Balance')}</td>
+            <td class="right">1</td>
+            <td class="right">${
+              adjustment.valueType === 'percent'
+                ? `${escapeHtml(toNumber(adjustment.value).toString())}%`
+                : escapeHtml(formatMoney(adjustment.value, currency))
+            }</td>
+            <td class="right">${escapeHtml(formatMoney(adjustment.amount, currency))}</td>
+          </tr>
+        `);
+      }
+      itemRows.push(`
+        <tr>
+          <td colspan="4" class="right bold">Previous Balance Total</td>
+          <td class="right bold">${escapeHtml(formatMoney(previousBalanceTotal, currency))}</td>
+        </tr>
+      `);
+    }
+
+    if (regularAdjustments.length > 0) {
+      itemRows.push(`
+        <tr>
+          <td colspan="5" class="section">Adjustments</td>
+        </tr>
+      `);
+    }
+
+    for (const adjustment of regularAdjustments) {
       itemRows.push(`
         <tr>
           <td>${rowNumber++}</td>
@@ -4579,6 +4780,27 @@ export default function BillingPage() {
                     </SelectContent>
                   </Select>
 
+                  <Select
+                    value={selectedCollectionStatusFilter}
+                    onValueChange={(value) =>
+                      setSelectedCollectionStatusFilter(value as 'all' | CollectionWorkflowStatus)
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Collection Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Collection Status</SelectItem>
+                      <SelectItem value="idle">Not Started</SelectItem>
+                      <SelectItem value="en_route">On The Way</SelectItem>
+                      <SelectItem value="arrived">Arrived</SelectItem>
+                      <SelectItem value="rescheduled">Rescheduled</SelectItem>
+                      <SelectItem value="office_transfer">Office Transfer</SelectItem>
+                      <SelectItem value="collected_pending_admin">Collected Pending Admin</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                    </SelectContent>
+                  </Select>
+
                   <Input
                     type="date"
                     value={collectorCollectedFrom}
@@ -4601,6 +4823,7 @@ export default function BillingPage() {
                       setSelectedStatus('all');
                       setSelectedCollectorCode('all');
                       setSelectedCollectionService('all');
+                      setSelectedCollectionStatusFilter('all');
                       setCollectorCollectedFrom('');
                       setCollectorCollectedTo('');
                     }}
@@ -4649,7 +4872,10 @@ export default function BillingPage() {
                         const displayInvoiceStatus = getInvoiceDisplayStatusLabel(invoice);
                         const canEditInvoice =
                           displayInvoiceStatus === 'cancelled receipt' ||
-                          (invoiceStatus !== 'paid' && invoiceStatus !== 'cancelled');
+                          (invoiceStatus !== 'paid' &&
+                            invoiceStatus !== 'cancelled' &&
+                            invoiceStatus !== 'carried_forward');
+                        const hasPreviousBalance = invoiceHasPreviousBalance(invoice);
                         const collectionStatus = getCollectionStatusForInvoice(invoice);
                         const canConfirmCollectedInvoice = collectionStatus === 'collected_pending_admin';
                         const hasReceipt = Boolean((invoice.receiptNo ?? '').trim());
@@ -4676,7 +4902,19 @@ export default function BillingPage() {
                             </TableCell>
                             <TableCell>{formatMoney(invoice.totalAmount, invoice.currency)}</TableCell>
                             <TableCell>
-                              <Badge variant={statusBadgeVariant(displayInvoiceStatus)}>{displayInvoiceStatus}</Badge>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant={statusBadgeVariant(displayInvoiceStatus)}>
+                                  {displayInvoiceStatus}
+                                </Badge>
+                                {hasPreviousBalance && (
+                                  <Badge
+                                    variant="outline"
+                                    className="whitespace-nowrap border-amber-300 bg-amber-50 px-2 py-0 text-[10px] font-medium leading-4 text-amber-800"
+                                  >
+                                    Prev Balance
+                                  </Badge>
+                                )}
+                              </div>
                             </TableCell>
                             <TableCell>
                               <Badge
@@ -4728,7 +4966,7 @@ export default function BillingPage() {
                                       Receipt
                                     </Link>
                                   </Button>
-                                ) : invoiceStatus === 'cancelled' ? (
+                                ) : invoiceStatus === 'cancelled' || invoiceStatus === 'carried_forward' ? (
                                   <Button variant="outline" size="sm" disabled>
                                     <FileText className="mr-2 h-4 w-4" />
                                     Create Receipt
@@ -4762,7 +5000,10 @@ export default function BillingPage() {
                     const displayInvoiceStatus = getInvoiceDisplayStatusLabel(invoice);
                     const canEditInvoice =
                       displayInvoiceStatus === 'cancelled receipt' ||
-                      (invoiceStatus !== 'paid' && invoiceStatus !== 'cancelled');
+                      (invoiceStatus !== 'paid' &&
+                        invoiceStatus !== 'cancelled' &&
+                        invoiceStatus !== 'carried_forward');
+                    const hasPreviousBalance = invoiceHasPreviousBalance(invoice);
                     const collectionStatus = getCollectionStatusForInvoice(invoice);
                     const canConfirmCollectedInvoice = collectionStatus === 'collected_pending_admin';
                     const hasReceipt = Boolean((invoice.receiptNo ?? '').trim());
@@ -4775,7 +5016,19 @@ export default function BillingPage() {
                               <p className="text-sm text-slate-500">{formatInvoiceNo(invoice.invoiceNo, invoice.id)}</p>
                               <p className="text-base font-semibold text-slate-900">{customerName}</p>
                             </div>
-                            <Badge variant={statusBadgeVariant(displayInvoiceStatus)}>{displayInvoiceStatus}</Badge>
+                            <div className="flex flex-col items-end gap-2">
+                              <Badge variant={statusBadgeVariant(displayInvoiceStatus)}>
+                                {displayInvoiceStatus}
+                              </Badge>
+                              {hasPreviousBalance && (
+                                <Badge
+                                  variant="outline"
+                                  className="whitespace-nowrap border-amber-300 bg-amber-50 px-2 py-0 text-[10px] font-medium leading-4 text-amber-800"
+                                >
+                                  Prev Balance
+                                </Badge>
+                              )}
+                            </div>
                           </div>
 
                           <div className="space-y-1 text-sm text-slate-700">
@@ -4829,7 +5082,7 @@ export default function BillingPage() {
                                   Receipt
                                 </Link>
                               </Button>
-                            ) : invoiceStatus === 'cancelled' ? (
+                            ) : invoiceStatus === 'cancelled' || invoiceStatus === 'carried_forward' ? (
                               <Button className="w-full" variant="outline" disabled>
                                 <FileText className="mr-2 h-4 w-4" />
                                 Create Receipt
@@ -4936,14 +5189,10 @@ export default function BillingPage() {
                         const releaseValue =
                           manualReleaseDateByCustomer[row.customerId] ?? row.releaseDate ?? '';
                         const canEditSchedule =
-                          row.currentInvoiceStatus === 'paid' &&
-                          !Boolean(row.queuedInvoiceId) &&
-                          !isReleasingByCustomer[row.customerId];
+                          !Boolean(row.queuedInvoiceId) && !isReleasingByCustomer[row.customerId];
                         const isEditingSchedule = Boolean(isEditingScheduleByCustomer[row.customerId]);
                         const isDisabledRelease =
-                          row.currentInvoiceStatus !== 'paid' ||
-                          isReleasingByCustomer[row.customerId] ||
-                          Boolean(row.queuedInvoiceId);
+                          isReleasingByCustomer[row.customerId] || Boolean(row.queuedInvoiceId);
                         return (
                           <TableRow key={row.customerId}>
                             <TableCell>
@@ -5035,14 +5284,10 @@ export default function BillingPage() {
                     const releaseValue =
                       manualReleaseDateByCustomer[row.customerId] ?? row.releaseDate ?? '';
                     const canEditSchedule =
-                      row.currentInvoiceStatus === 'paid' &&
-                      !Boolean(row.queuedInvoiceId) &&
-                      !isReleasingByCustomer[row.customerId];
+                      !Boolean(row.queuedInvoiceId) && !isReleasingByCustomer[row.customerId];
                     const isEditingSchedule = Boolean(isEditingScheduleByCustomer[row.customerId]);
                     const isDisabledRelease =
-                      row.currentInvoiceStatus !== 'paid' ||
-                      isReleasingByCustomer[row.customerId] ||
-                      Boolean(row.queuedInvoiceId);
+                      isReleasingByCustomer[row.customerId] || Boolean(row.queuedInvoiceId);
                     return (
                       <Card key={row.customerId}>
                         <CardContent className="space-y-3 pt-4">
@@ -5680,12 +5925,78 @@ export default function BillingPage() {
                         <span className="text-xs text-slate-500">{formatDateTime(log.actionAt)}</span>
                       </div>
                       <p className="mt-2 text-sm text-slate-700">{log.note}</p>
+                      {(log.paymentMethod || log.paymentAccount || log.paymentSlipUrl) && (
+                        <div className="mt-3 space-y-1 rounded-md bg-slate-50 p-3 text-xs text-slate-600">
+                          {log.paymentMethod && (
+                            <p>
+                              Payment Method: <span className="font-medium text-slate-800">{log.paymentMethod}</span>
+                            </p>
+                          )}
+                          {log.paymentAccount && (
+                            <p>
+                              Payment Account: <span className="font-medium text-slate-800">{log.paymentAccount}</span>
+                            </p>
+                          )}
+                          {log.paymentSlipUrl && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openPaymentSlipPreview(
+                                  log.paymentSlipUrl || '',
+                                  `Payment Slip - ${formatInvoiceNo(log.invoiceNo, log.invoiceId)}`,
+                                )
+                              }
+                              className="inline-flex text-sm font-medium text-blue-600 underline underline-offset-2"
+                            >
+                              View Payment Slip
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
               </div>
             ) : (
               <p className="text-sm text-slate-500">No transaction selected.</p>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={paymentSlipPreviewOpen}
+          onOpenChange={(open) => {
+            setPaymentSlipPreviewOpen(open);
+            if (!open) {
+              setPaymentSlipPreviewUrl('');
+              setPaymentSlipPreviewTitle('Payment Slip');
+            }
+          }}
+        >
+          <DialogContent className="max-w-4xl">
+            <DialogHeader>
+              <DialogTitle>{paymentSlipPreviewTitle}</DialogTitle>
+            </DialogHeader>
+
+            {paymentSlipPreviewUrl ? (
+              <div className="space-y-3">
+                <div className="overflow-hidden rounded-md border bg-slate-50">
+                  <img
+                    src={paymentSlipPreviewUrl}
+                    alt={paymentSlipPreviewTitle}
+                    className="max-h-[75vh] w-full object-contain"
+                  />
+                </div>
+                <div className="flex justify-end">
+                  <Button type="button" variant="outline" asChild>
+                    <a href={paymentSlipPreviewUrl} target="_blank" rel="noreferrer">
+                      Open Original
+                    </a>
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">Payment slip not available.</p>
             )}
           </DialogContent>
         </Dialog>
@@ -5782,6 +6093,22 @@ export default function BillingPage() {
                             <Label className="text-sm font-medium text-slate-700">Due Date</Label>
                             <Input value={formatDisplayDate(selectedInvoice.dueDate)} readOnly />
                           </div>
+                          {selectedInvoicePreviousBalanceRefs.length > 0 && (
+                            <div className="space-y-2 md:col-span-2">
+                              <Label className="text-sm font-medium text-slate-700">Carry Forward</Label>
+                              <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+                                <Badge
+                                  variant="outline"
+                                  className="whitespace-nowrap border-amber-300 bg-amber-50 px-2 py-0 text-[10px] font-medium leading-4 text-amber-800"
+                                >
+                                  Prev Balance
+                                </Badge>
+                                <span className="text-sm text-amber-900">
+                                  Carried from: {selectedInvoicePreviousBalanceRefs.join(', ')}
+                                </span>
+                              </div>
+                            </div>
+                          )}
                           <div className="space-y-2 md:col-span-2">
                             <Label className="text-sm font-medium text-slate-700">
                               Rule For This Invoice Revision
@@ -5933,28 +6260,104 @@ export default function BillingPage() {
                                   </TableCell>
                                 </TableRow>
                               )}
-                              {adjustmentRows.map((row, index) => {
-                                const amount =
-                                  row.valueType === 'percent'
-                                    ? (adjustmentPreview.baseSubtotal * toNumber(row.value)) / 100
-                                    : toNumber(row.value);
-                                return (
-                                  <TableRow key={`${row.description}-${index}`}>
-                                    <TableCell>{index + 4 + (toNumber(selectedInvoice.collectionFee) > 0 ? 1 : 0)}</TableCell>
-                                    <TableCell>{row.description || 'Adjustment'}</TableCell>
-                                    <TableCell className="text-right">1</TableCell>
-                                    <TableCell className="text-right">
-                                      {row.valueType === 'percent'
-                                        ? `${toNumber(row.value)}%`
-                                        : formatMoney(row.value, selectedInvoice.currency)}
-                                    </TableCell>
-                                    <TableCell className="text-right">
-                                      {row.type === 'minus' ? '-' : ''}
-                                      {formatMoney(amount, selectedInvoice.currency)}
-                                    </TableCell>
-                                  </TableRow>
+                              {(() => {
+                                const previousBalanceRows = adjustmentRows.filter((row) =>
+                                  String(row.description || '')
+                                    .trim()
+                                    .toLowerCase()
+                                    .startsWith('previous unpaid balance'),
                                 );
-                              })}
+                                const regularAdjustmentRows = adjustmentRows.filter(
+                                  (row) =>
+                                    !String(row.description || '')
+                                      .trim()
+                                      .toLowerCase()
+                                      .startsWith('previous unpaid balance'),
+                                );
+                                let rowNumber = 2;
+                                if (toNumber(selectedInvoice.installationFee) > 0) rowNumber += 1;
+                                if (toNumber(selectedInvoice.additionalFees) > 0) rowNumber += 1;
+                                if (toNumber(selectedInvoice.collectionFee) > 0) rowNumber += 1;
+                                const previousBalanceTotal = previousBalanceRows.reduce((sum, row) => {
+                                  const amount =
+                                    row.valueType === 'percent'
+                                      ? (adjustmentPreview.baseSubtotal * toNumber(row.value)) / 100
+                                      : toNumber(row.value);
+                                  return sum + Math.abs(amount);
+                                }, 0);
+
+                                return (
+                                  <>
+                                    {previousBalanceRows.length > 0 && (
+                                      <TableRow>
+                                        <TableCell colSpan={5} className="bg-amber-50 font-semibold text-amber-900">
+                                          Previous Balance
+                                        </TableCell>
+                                      </TableRow>
+                                    )}
+                                    {previousBalanceRows.map((row, index) => {
+                                      const amount =
+                                        row.valueType === 'percent'
+                                          ? (adjustmentPreview.baseSubtotal * toNumber(row.value)) / 100
+                                          : toNumber(row.value);
+                                      return (
+                                        <TableRow key={`${row.description}-${index}`}>
+                                          <TableCell>{rowNumber++}</TableCell>
+                                          <TableCell>{row.description || 'Previous Balance'}</TableCell>
+                                          <TableCell className="text-right">1</TableCell>
+                                          <TableCell className="text-right">
+                                            {row.valueType === 'percent'
+                                              ? `${toNumber(row.value)}%`
+                                              : formatMoney(row.value, selectedInvoice.currency)}
+                                          </TableCell>
+                                          <TableCell className="text-right">
+                                            {formatMoney(amount, selectedInvoice.currency)}
+                                          </TableCell>
+                                        </TableRow>
+                                      );
+                                    })}
+                                    {previousBalanceRows.length > 0 && (
+                                      <TableRow>
+                                        <TableCell colSpan={4} className="text-right font-semibold text-amber-900">
+                                          Previous Balance Total
+                                        </TableCell>
+                                        <TableCell className="text-right font-semibold text-amber-900">
+                                          {formatMoney(previousBalanceTotal, selectedInvoice.currency)}
+                                        </TableCell>
+                                      </TableRow>
+                                    )}
+                                    {regularAdjustmentRows.length > 0 && (
+                                      <TableRow>
+                                        <TableCell colSpan={5} className="bg-slate-50 font-semibold">
+                                          Adjustments
+                                        </TableCell>
+                                      </TableRow>
+                                    )}
+                                    {regularAdjustmentRows.map((row, index) => {
+                                      const amount =
+                                        row.valueType === 'percent'
+                                          ? (adjustmentPreview.baseSubtotal * toNumber(row.value)) / 100
+                                          : toNumber(row.value);
+                                      return (
+                                        <TableRow key={`${row.description}-${index}-regular`}>
+                                          <TableCell>{rowNumber++}</TableCell>
+                                          <TableCell>{row.description || 'Adjustment'}</TableCell>
+                                          <TableCell className="text-right">1</TableCell>
+                                          <TableCell className="text-right">
+                                            {row.valueType === 'percent'
+                                              ? `${toNumber(row.value)}%`
+                                              : formatMoney(row.value, selectedInvoice.currency)}
+                                          </TableCell>
+                                          <TableCell className="text-right">
+                                            {row.type === 'minus' ? '-' : ''}
+                                            {formatMoney(amount, selectedInvoice.currency)}
+                                          </TableCell>
+                                        </TableRow>
+                                      );
+                                    })}
+                                  </>
+                                );
+                              })()}
                               <TableRow>
                                 <TableCell colSpan={4} className="text-right font-semibold">Subtotal</TableCell>
                                 <TableCell className="text-right font-semibold">
@@ -6270,14 +6673,31 @@ export default function BillingPage() {
                           amount: collectionFeeAmount
                         });
                       }
+                      const previousBalanceAdjustments = visibleAdjustments.filter((adjustment) =>
+                        isPreviousBalanceAdjustment(adjustment.description),
+                      );
+                      const regularAdjustments = visibleAdjustments.filter(
+                        (adjustment) => !isPreviousBalanceAdjustment(adjustment.description),
+                      );
+                      const previousBalanceTotal = previousBalanceAdjustments.reduce(
+                        (sum, adjustment) => sum + Math.abs(toNumber(adjustment.amount)),
+                        0,
+                      );
+                      const previousBalanceRefs = Array.from(
+                        new Set(
+                          previousBalanceAdjustments.map((adjustment) =>
+                            extractCarriedInvoiceRef(adjustment.description),
+                          ),
+                        ),
+                      ).filter(Boolean);
                       const displaySubtotal = visibleChargeRows.reduce((sum, row) => sum + row.amount, 0);
-                      const displayPlus = visibleAdjustments
+                      const displayPlus = regularAdjustments
                         .filter((adjustment) => adjustment.type !== 'minus')
                         .reduce((sum, adjustment) => sum + Math.abs(toNumber(adjustment.amount)), 0);
-                      const displayMinus = visibleAdjustments
+                      const displayMinus = regularAdjustments
                         .filter((adjustment) => adjustment.type === 'minus')
                         .reduce((sum, adjustment) => sum + Math.abs(toNumber(adjustment.amount)), 0);
-                      const displayTotal = displaySubtotal + displayPlus - displayMinus;
+                      const displayTotal = displaySubtotal + previousBalanceTotal + displayPlus - displayMinus;
 
                       return (
                         <div className="mt-8">
@@ -6303,22 +6723,103 @@ export default function BillingPage() {
                                     <TableCell className="text-right">{formatMoney(row.amount, currency)}</TableCell>
                                   </TableRow>
                                 ))}
-                                {visibleAdjustments.map((adjustment, index) => (
-                                  <TableRow key={adjustment.id || `${adjustment.description}-${index}`}>
-                                    <TableCell>{visibleChargeRows.length + index + 1}</TableCell>
-                                    <TableCell>{adjustment.description}</TableCell>
-                                    <TableCell className="text-right">1</TableCell>
-                                    <TableCell className="text-right">
-                                      {adjustment.valueType === 'percent'
-                                        ? `${toNumber(adjustment.value)}%`
-                                        : formatMoney(adjustment.value, currency)}
-                                    </TableCell>
-                                    <TableCell className="text-right">
-                                      {adjustment.type === 'minus' ? '-' : ''}
-                                      {formatMoney(adjustment.amount, currency)}
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
+                                {(() => {
+                                  let rowNumber = visibleChargeRows.length + 1;
+                                  return (
+                                    <>
+                                      {previousBalanceAdjustments.length > 0 && (
+                                        <>
+                                          <TableRow>
+                                            <TableCell colSpan={5} className="bg-amber-50">
+                                              <div className="flex items-center justify-between gap-3">
+                                                <div>
+                                                  <p className="font-semibold text-amber-900">Previous Balance</p>
+                                                  {previousBalanceRefs.length > 0 && (
+                                                    <p className="mt-1 text-xs text-amber-800">
+                                                      Carried from: {previousBalanceRefs.join(', ')}
+                                                    </p>
+                                                  )}
+                                                </div>
+                                                <Button
+                                                  type="button"
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  className="text-amber-900 hover:bg-amber-100 hover:text-amber-950"
+                                                  onClick={() =>
+                                                    setIsPreviousBalanceExpanded((previous) => !previous)
+                                                  }
+                                                >
+                                                  <ChevronDown
+                                                    className={`mr-2 h-4 w-4 transition-transform ${
+                                                      isPreviousBalanceExpanded ? 'rotate-180' : ''
+                                                    }`}
+                                                  />
+                                                  {isPreviousBalanceExpanded ? 'Hide' : 'Show'}
+                                                </Button>
+                                              </div>
+                                            </TableCell>
+                                          </TableRow>
+                                          {isPreviousBalanceExpanded && (
+                                            <>
+                                              {previousBalanceAdjustments.map((adjustment, index) => {
+                                                const currentRowNumber = rowNumber++;
+                                                return (
+                                                  <TableRow key={adjustment.id || `${adjustment.description}-${index}`}>
+                                                    <TableCell>{currentRowNumber}</TableCell>
+                                                    <TableCell>{adjustment.description}</TableCell>
+                                                    <TableCell className="text-right">1</TableCell>
+                                                    <TableCell className="text-right">
+                                                      {adjustment.valueType === 'percent'
+                                                        ? `${toNumber(adjustment.value)}%`
+                                                        : formatMoney(adjustment.value, currency)}
+                                                    </TableCell>
+                                                    <TableCell className="text-right">
+                                                      {formatMoney(adjustment.amount, currency)}
+                                                    </TableCell>
+                                                  </TableRow>
+                                                );
+                                              })}
+                                              <TableRow>
+                                                <TableCell colSpan={4} className="text-right font-semibold text-amber-900">
+                                                  Previous Balance Total
+                                                </TableCell>
+                                                <TableCell className="text-right font-semibold text-amber-900">
+                                                  {formatMoney(previousBalanceTotal, currency)}
+                                                </TableCell>
+                                              </TableRow>
+                                            </>
+                                          )}
+                                        </>
+                                      )}
+                                      {regularAdjustments.length > 0 && (
+                                        <TableRow>
+                                          <TableCell colSpan={5} className="bg-slate-50 font-semibold">
+                                            Adjustments
+                                          </TableCell>
+                                        </TableRow>
+                                      )}
+                                      {regularAdjustments.map((adjustment, index) => {
+                                        const currentRowNumber = rowNumber++;
+                                        return (
+                                          <TableRow key={adjustment.id || `${adjustment.description}-${index}-regular`}>
+                                            <TableCell>{currentRowNumber}</TableCell>
+                                            <TableCell>{adjustment.description}</TableCell>
+                                            <TableCell className="text-right">1</TableCell>
+                                            <TableCell className="text-right">
+                                              {adjustment.valueType === 'percent'
+                                                ? `${toNumber(adjustment.value)}%`
+                                                : formatMoney(adjustment.value, currency)}
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                              {adjustment.type === 'minus' ? '-' : ''}
+                                              {formatMoney(adjustment.amount, currency)}
+                                            </TableCell>
+                                          </TableRow>
+                                        );
+                                      })}
+                                    </>
+                                  );
+                                })()}
                                 {selectedInvoice.status !== 'paid' && !hasSystemMonthlyOffset && (
                                   <>
                                     {displaySubtotal > 0 && (
@@ -6326,6 +6827,16 @@ export default function BillingPage() {
                                         <TableCell colSpan={4} className="text-right font-semibold">Subtotal</TableCell>
                                         <TableCell className="text-right font-semibold">
                                           {formatMoney(displaySubtotal, currency)}
+                                        </TableCell>
+                                      </TableRow>
+                                    )}
+                                    {previousBalanceTotal > 0 && (
+                                      <TableRow>
+                                        <TableCell colSpan={4} className="text-right font-semibold text-amber-900">
+                                          Previous Balance
+                                        </TableCell>
+                                        <TableCell className="text-right font-semibold text-amber-900">
+                                          {formatMoney(previousBalanceTotal, currency)}
                                         </TableCell>
                                       </TableRow>
                                     )}
@@ -6379,6 +6890,47 @@ export default function BillingPage() {
                         {getAdminCollectionStatusLabelForInvoice(selectedInvoice, selectedCollectionStatus)}
                       </Badge>
 
+                      {(selectedCollectedPaymentSummary?.paymentMethod ||
+                        selectedCollectedPaymentSummary?.paymentAccount ||
+                        selectedCollectedPaymentEventDetails.paymentSlipUrl) && (
+                        <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                          <p className="font-medium text-slate-900">Collected Payment Details</p>
+                          {selectedCollectedPaymentSummary?.paymentMethod && (
+                            <p className="mt-1">
+                              Payment Method:{' '}
+                              <span className="font-medium">
+                                {selectedCollectedPaymentSummary.paymentMethod}
+                              </span>
+                            </p>
+                          )}
+                          {selectedCollectedPaymentSummary?.paymentAccount && (
+                            <p>
+                              Payment Account:{' '}
+                              <span className="font-medium">
+                                {selectedCollectedPaymentSummary.paymentAccount}
+                              </span>
+                            </p>
+                          )}
+                          {selectedCollectedPaymentEventDetails.paymentSlipUrl && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openPaymentSlipPreview(
+                                  selectedCollectedPaymentEventDetails.paymentSlipUrl || '',
+                                  `Payment Slip - ${formatInvoiceNo(
+                                    selectedInvoice.invoiceNo,
+                                    selectedInvoice.id,
+                                  )}`,
+                                )
+                              }
+                              className="mt-2 inline-flex font-medium text-blue-600 underline underline-offset-2"
+                            >
+                              View Payment Slip
+                            </button>
+                          )}
+                        </div>
+                      )}
+
                       {selectedCollectionTimeline.length === 0 ? (
                         <p className="text-sm text-slate-500">No collection events for this invoice yet.</p>
                       ) : (
@@ -6386,16 +6938,56 @@ export default function BillingPage() {
                           {selectedCollectionTimeline
                             .slice()
                             .reverse()
-                            .map((event) => (
-                              <div key={event.id} className="rounded border bg-slate-50 p-2">
-                                <p className="text-sm font-medium text-slate-800">{event.label}</p>
-                                {event.note && <p className="text-xs text-slate-600">Note: {event.note}</p>}
-                                <p className="text-xs text-slate-500">
-                                  {formatDateTime(event.timestamp)}
-                                  {event.actorName ? ` • ${event.actorName}` : ''}
-                                </p>
-                              </div>
-                            ))}
+                            .map((event) => {
+                              const paymentDetails = getCollectionEventPaymentDetails(selectedInvoice.id, event);
+                              return (
+                                <div key={event.id} className="rounded border bg-slate-50 p-2">
+                                  <p className="text-sm font-medium text-slate-800">{event.label}</p>
+                                  {event.note && <p className="text-xs text-slate-600">Note: {event.note}</p>}
+                                  {(paymentDetails.paymentMethod || paymentDetails.paymentAccount) && (
+                                    <div className="mt-2 space-y-1 text-xs text-slate-600">
+                                      {paymentDetails.paymentMethod && (
+                                        <p>
+                                          Payment Method:{' '}
+                                          <span className="font-medium text-slate-800">
+                                            {paymentDetails.paymentMethod}
+                                          </span>
+                                        </p>
+                                      )}
+                                      {paymentDetails.paymentAccount && (
+                                        <p>
+                                          Payment Account:{' '}
+                                          <span className="font-medium text-slate-800">
+                                            {paymentDetails.paymentAccount}
+                                          </span>
+                                        </p>
+                                      )}
+                                    </div>
+                                  )}
+                                  {paymentDetails.paymentSlipUrl && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        openPaymentSlipPreview(
+                                          paymentDetails.paymentSlipUrl || '',
+                                          `Payment Slip - ${formatInvoiceNo(
+                                            selectedInvoice.invoiceNo,
+                                            selectedInvoice.id,
+                                          )}`,
+                                        )
+                                      }
+                                      className="mt-2 inline-flex text-xs font-medium text-blue-600 underline underline-offset-2"
+                                    >
+                                      View Payment Slip
+                                    </button>
+                                  )}
+                                  <p className="mt-2 text-xs text-slate-500">
+                                    {formatDateTime(event.timestamp)}
+                                    {event.actorName ? ` • ${event.actorName}` : ''}
+                                  </p>
+                                </div>
+                              );
+                            })}
                         </div>
                       )}
                     </div>
