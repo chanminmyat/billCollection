@@ -34,6 +34,7 @@ type InvoiceRecord = {
   id: string;
   invoiceNo?: string | null;
   invoiceDate?: string | null;
+  releaseDate?: string | null;
   billingPeriodFrom?: string | null;
   billingPeriodTo?: string | null;
   dueDate?: string | null;

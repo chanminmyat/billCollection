@@ -107,6 +107,7 @@ type GeneratedInvoice = {
   monthlyFee?: string | number | null;
   installationFee?: string | number | null;
   additionalFees?: string | number | null;
+  collectionFee?: string | number | null;
   subtotalAmount?: string | number | null;
   plusAmount?: string | number | null;
   minusAmount?: string | number | null;
@@ -7525,6 +7526,7 @@ export default function CustomersPage({
                             const monthlyFeeAmount = toNumber(invoice.monthlyFee);
                             const installationFeeAmount = toNumber(invoice.installationFee);
                             const additionalFeeAmount = toNumber(invoice.additionalFees);
+                            const collectionFeeAmount = toNumber(invoice.collectionFee);
                             const allAdjustments = invoice.adjustments || [];
                             const isSystemMonthlyOffset = (adjustment: (typeof allAdjustments)[number]) => {
                               const description = String(adjustment.description || '').trim().toLowerCase();
@@ -7559,6 +7561,14 @@ export default function CustomersPage({
                                 qty: 1,
                                 unitPrice: additionalFeeAmount,
                                 amount: additionalFeeAmount
+                              });
+                            }
+                            if (collectionFeeAmount > 0) {
+                              visibleChargeRows.push({
+                                description: 'Collection Fee',
+                                qty: 1,
+                                unitPrice: collectionFeeAmount,
+                                amount: collectionFeeAmount
                               });
                             }
                             const displaySubtotal = visibleChargeRows.reduce((sum, row) => sum + row.amount, 0);

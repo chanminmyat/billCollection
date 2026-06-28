@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -48,7 +48,7 @@ import {
   FixedBillingWindow,
   getFixedBillingWindow,
 } from '@/lib/billing-config';
-import { getInvoiceReleaseDate, isInvoiceReleased } from '@/lib/invoice-visibility';
+import { isInvoiceReleased } from '@/lib/invoice-visibility';
 import { formatDisplayDate, formatDisplayDateRange } from '@/lib/date-format';
 import {
   ACTIVITY_LOG_STORAGE_KEY,
@@ -76,6 +76,7 @@ import {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 const BILLING_ENGINE_SCHEDULE_STORAGE_KEY = 'billing_next_invoice_manual_schedule_v1';
+const BILLING_ENGINE_AUTO_RELEASE_STORAGE_KEY = 'billing_next_invoice_auto_release_enabled_v1';
 const INVOICE_LOCAL_CANCELLED_STORAGE_KEY = 'billing_local_cancelled_invoice_ids_v1';
 const INVOICE_FORCE_RELEASED_STORAGE_KEY = 'billing_force_released_invoice_ids_v1';
 const INVOICE_RULE_NONE_VALUE = '__none__';
@@ -113,6 +114,7 @@ type InvoiceRecord = {
     name?: string | null;
   } | null;
   invoiceDate?: string | null;
+  releaseDate?: string | null;
   issuedAt?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
@@ -236,7 +238,15 @@ type NextInvoiceEngineRow = {
   status: EngineRowStatus;
 };
 
-type TransactionAction = 'created' | 'edited' | 'paid' | 'collection';
+type TransactionAction =
+  | 'created'
+  | 'edited'
+  | 'paid'
+  | 'collection'
+  | 'receipt'
+  | 'cancelled'
+  | 'carry_forward'
+  | 'engine';
 
 type TransactionLog = {
   id: string;
@@ -266,6 +276,17 @@ type TransactionGroup = {
   latestActionAt: string;
   latestReason: string;
   logs: TransactionLog[];
+};
+
+type BillingActivityListItem = {
+  id: string;
+  timestamp: string;
+  action: string;
+  description: string;
+  targetId?: string;
+  targetName?: string;
+  actorName?: string;
+  metadata?: Record<string, unknown>;
 };
 
 type AdjustmentFormRow = {
@@ -514,7 +535,11 @@ const statusBadgeVariant = (status: InvoiceStatus | string) => {
 const transactionActionClass = (action: TransactionAction) => {
   if (action === 'created') return 'bg-blue-50 text-blue-700 border border-blue-200';
   if (action === 'edited') return 'bg-amber-50 text-amber-700 border border-amber-200';
+  if (action === 'receipt') return 'bg-cyan-50 text-cyan-700 border border-cyan-200';
+  if (action === 'cancelled') return 'bg-rose-50 text-rose-700 border border-rose-200';
+  if (action === 'carry_forward') return 'bg-orange-50 text-orange-700 border border-orange-200';
   if (action === 'collection') return 'bg-indigo-50 text-indigo-700 border border-indigo-200';
+  if (action === 'engine') return 'bg-slate-100 text-slate-700 border border-slate-200';
   return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
 };
 
@@ -522,10 +547,65 @@ const toTransactionActionFromBillingActivity = (action?: string | null): Transac
   const normalized = String(action ?? '')
     .trim()
     .toLowerCase();
+  if (normalized.includes('collection')) return 'collection';
   if (normalized.includes('paid')) return 'paid';
+  if (normalized.includes('receipt')) return 'receipt';
+  if (normalized.includes('cancel')) return 'cancelled';
+  if (normalized.includes('carry') || normalized.includes('forward')) return 'carry_forward';
+  if (normalized.includes('overdue') || normalized.includes('late_fee') || normalized.includes('status')) {
+    return 'engine';
+  }
   if (normalized.includes('edit')) return 'edited';
   if (normalized.includes('release') || normalized.includes('create')) return 'created';
-  return 'edited';
+  return 'engine';
+};
+
+const formatTransactionActionLabel = (action: TransactionAction) => {
+  if (action === 'created') return 'Created';
+  if (action === 'edited') return 'Edited';
+  if (action === 'paid') return 'Paid';
+  if (action === 'collection') return 'Collection';
+  if (action === 'receipt') return 'Receipt';
+  if (action === 'cancelled') return 'Cancelled';
+  if (action === 'carry_forward') return 'Carry Forward';
+  return 'Billing Engine';
+};
+
+const doesActivityMatchInvoice = (
+  activity: Pick<BillingActivityListItem, 'targetId' | 'targetName'>,
+  invoiceId: string,
+  invoiceNo: string,
+) => {
+  const targetId = String(activity.targetId ?? '').trim();
+  if (targetId) {
+    return targetId === invoiceId;
+  }
+
+  const targetName = String(activity.targetName ?? '').trim();
+  if (!targetName) return false;
+  return targetName === invoiceNo || targetName === invoiceId;
+};
+
+const toTransactionActionFromCollectionEvent = (
+  event: {
+    label?: string | null;
+    note?: string | null;
+    actorRole?: string | null;
+    actorName?: string | null;
+  } | null | undefined,
+): TransactionAction => {
+  const combined = `${String(event?.label ?? '')} ${String(event?.note ?? '')}`.trim().toLowerCase();
+  const actorRole = String(event?.actorRole ?? '').trim().toLowerCase();
+  const actorName = String(event?.actorName ?? '').trim().toLowerCase();
+  if (
+    combined.includes('carry') ||
+    combined.includes('carried forward') ||
+    (actorRole === 'system' && combined.includes('balance')) ||
+    actorName === 'system'
+  ) {
+    return 'carry_forward';
+  }
+  return 'collection';
 };
 
 const isCollectionActionRequired = (status: CollectionWorkflowStatus) =>
@@ -881,11 +961,20 @@ export default function BillingPage() {
   const [customersLoading, setCustomersLoading] = useState(false);
   const [customersError, setCustomersError] = useState('');
   const [collectorNameByCode, setCollectorNameByCode] = useState<Record<string, string>>({});
+  const [engineRows, setEngineRows] = useState<NextInvoiceEngineRow[]>([]);
+  const [engineLoading, setEngineLoading] = useState(false);
+  const [engineError, setEngineError] = useState('');
 
   const [activeTab, setActiveTab] = useState<'invoice-list' | 'next-engine' | 'rule-config' | 'transactions'>(
     'invoice-list',
   );
-  const [autoReleaseEnabled, setAutoReleaseEnabled] = useState(true);
+  const [autoReleaseEnabled, setAutoReleaseEnabled] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    const storedValue = window.localStorage.getItem(BILLING_ENGINE_AUTO_RELEASE_STORAGE_KEY);
+    if (storedValue === 'false') return false;
+    if (storedValue === 'true') return true;
+    return true;
+  });
   const [isRunningAutoRelease, setIsRunningAutoRelease] = useState(false);
   const [isReleasingByCustomer, setIsReleasingByCustomer] = useState<Record<string, boolean>>({});
   const [isEditingScheduleByCustomer, setIsEditingScheduleByCustomer] = useState<Record<string, boolean>>({});
@@ -955,6 +1044,9 @@ export default function BillingPage() {
   const [isAssigningRuleToCustomers, setIsAssigningRuleToCustomers] = useState(false);
   const [isAssigningRuleToInvoices, setIsAssigningRuleToInvoices] = useState(false);
   const [isApplyingLateFees, setIsApplyingLateFees] = useState(false);
+  const autoReleaseActionRef = useRef<(() => void) | null>(null);
+  const invoiceSnapshotRef = useRef<InvoiceRecord[]>([]);
+  const hasInvoiceSnapshotRef = useRef(false);
 
   useEffect(() => {
     const tab = searchParams.get('tab');
@@ -1122,6 +1214,164 @@ export default function BillingPage() {
     });
   };
 
+  const logSystemInvoiceActivity = useCallback(
+    (
+      action: string,
+      description: string,
+      invoice: Pick<InvoiceRecord, 'id' | 'invoiceNo'>,
+      metadata?: Record<string, unknown>,
+    ) => {
+      appendActivityLog({
+        module: 'billing',
+        action,
+        description,
+        actorId: 'system',
+        actorName: 'System',
+        actorRole: 'system',
+        targetType: 'invoice',
+        targetId: invoice.id,
+        targetName: invoice.invoiceNo || invoice.id,
+        metadata,
+      });
+    },
+    [],
+  );
+
+  const hasMatchingInvoiceSystemLog = useCallback(
+    (
+      logs: BillingActivityListItem[],
+      invoiceId: string,
+      action: string,
+      matcher?: (log: BillingActivityListItem) => boolean,
+    ) =>
+      logs.some(
+        (log) =>
+          log.targetId === invoiceId &&
+          log.action === action &&
+          (matcher ? matcher(log) : true),
+      ),
+    [],
+  );
+
+  const reconcileFetchedInvoiceSystemLogs = useCallback(
+    (previousInvoices: InvoiceRecord[], nextInvoices: InvoiceRecord[]) => {
+      if (previousInvoices.length === 0 || nextInvoices.length === 0) return;
+
+      const previousById = new Map(previousInvoices.map((invoice) => [invoice.id, invoice]));
+      const existingLogs = readActivityLogs()
+        .filter((log) => log.module === 'billing' && log.targetType === 'invoice')
+        .map((log) => ({
+          id: log.id,
+          timestamp: log.timestamp,
+          action: log.action,
+          description: log.description,
+          targetId: log.targetId,
+          targetName: log.targetName,
+          actorName: log.actorName,
+          metadata: log.metadata,
+        })) as BillingActivityListItem[];
+
+      for (const invoice of nextInvoices) {
+        const previousInvoice = previousById.get(invoice.id);
+        if (!previousInvoice) continue;
+
+        const previousStatus = normalizeInvoiceStatusLabel(previousInvoice.status);
+        const nextStatus = normalizeInvoiceStatusLabel(invoice.status);
+        if (previousStatus !== nextStatus) {
+          if (nextStatus === 'carried_forward') {
+            const carriedIntoInvoiceNo = nextInvoices.find(
+              (candidate) =>
+                candidate.id !== invoice.id &&
+                candidate.customer?.id === invoice.customer?.id &&
+                (candidate.adjustments ?? []).some(
+                  (adjustment) =>
+                    isPreviousBalanceAdjustment(adjustment.description) &&
+                    extractCarriedInvoiceRef(adjustment.description) === (invoice.invoiceNo || invoice.id),
+                ),
+            )?.invoiceNo;
+
+            if (
+              !hasMatchingInvoiceSystemLog(
+                existingLogs,
+                invoice.id,
+                'invoice_carried_forward_system',
+                (log) =>
+                  String(log.metadata?.status ?? '') === 'carried_forward' &&
+                  String(log.metadata?.carriedIntoInvoiceNo ?? '') === String(carriedIntoInvoiceNo ?? ''),
+              )
+            ) {
+              logSystemInvoiceActivity(
+                'invoice_carried_forward_system',
+                carriedIntoInvoiceNo
+                  ? `Invoice carried forward into ${carriedIntoInvoiceNo}.`
+                  : 'Invoice carried forward into next invoice.',
+                invoice,
+                {
+                  previousStatus,
+                  status: 'carried_forward',
+                  carriedIntoInvoiceNo: carriedIntoInvoiceNo ?? null,
+                },
+              );
+            }
+          } else if (nextStatus === 'overdue') {
+            if (
+              !hasMatchingInvoiceSystemLog(
+                existingLogs,
+                invoice.id,
+                'invoice_overdue_system',
+                (log) => String(log.metadata?.status ?? '') === 'overdue',
+              )
+            ) {
+              logSystemInvoiceActivity(
+                'invoice_overdue_system',
+                'Invoice became overdue by billing engine.',
+                invoice,
+                {
+                  previousStatus,
+                  status: 'overdue',
+                },
+              );
+            }
+          }
+        }
+
+        const previousHadBalance = invoiceHasPreviousBalance(previousInvoice);
+        const nextHasBalance = invoiceHasPreviousBalance(invoice);
+        if (!previousHadBalance && nextHasBalance) {
+          const previousBalanceRefs = Array.from(
+            new Set(
+              (invoice.adjustments ?? [])
+                .filter((adjustment) => isPreviousBalanceAdjustment(adjustment.description))
+                .map((adjustment) => extractCarriedInvoiceRef(adjustment.description))
+                .filter(Boolean),
+            ),
+          );
+          const refsKey = previousBalanceRefs.join('|');
+          if (
+            !hasMatchingInvoiceSystemLog(
+              existingLogs,
+              invoice.id,
+              'invoice_previous_balance_added_system',
+              (log) => String(log.metadata?.previousBalanceRefs ?? '') === refsKey,
+            )
+          ) {
+            logSystemInvoiceActivity(
+              'invoice_previous_balance_added_system',
+              previousBalanceRefs.length > 0
+                ? `Previous balance added from ${previousBalanceRefs.join(', ')}.`
+                : 'Previous balance added to invoice.',
+              invoice,
+              {
+                previousBalanceRefs: refsKey,
+              },
+            );
+          }
+        }
+      }
+    },
+    [hasMatchingInvoiceSystemLog, logSystemInvoiceActivity],
+  );
+
   const cancelInvoiceInBackend = async (invoiceId: string) => {
     const cancelCandidates: Array<{ method: 'PATCH' | 'POST'; path: string; body?: Record<string, unknown> }> = [
       { method: 'POST', path: `${API_BASE_URL}/billing/invoices/${invoiceId}/cancel` },
@@ -1250,18 +1500,81 @@ export default function BillingPage() {
           billingRuleId: ruleIdFromServer ?? invoiceRuleId ?? customerRuleId ?? null,
         };
       });
-      setInvoices(
-        applyLocalCancelledStatuses(
-          normalized as InvoiceRecord[],
-          cancelledOverrides ?? localCancelledInvoiceIds,
-        ),
+      const nextInvoices = applyLocalCancelledStatuses(
+        normalized as InvoiceRecord[],
+        cancelledOverrides ?? localCancelledInvoiceIds,
       );
+      setInvoices(nextInvoices);
+      if (hasInvoiceSnapshotRef.current) {
+        reconcileFetchedInvoiceSystemLogs(invoiceSnapshotRef.current, nextInvoices);
+      } else {
+        hasInvoiceSnapshotRef.current = true;
+      }
+      invoiceSnapshotRef.current = nextInvoices;
+      await fetchEngineRows();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load invoices';
       setLoadError(message);
       setInvoices([]);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const fetchEngineRows = async () => {
+    setEngineLoading(true);
+    setEngineError('');
+    try {
+      const response = await fetch(`${API_BASE_URL}/billing/engine`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.message ?? 'Failed to load billing engine');
+      }
+
+      const data = await response.json().catch(() => []);
+      const list = Array.isArray(data) ? data : [];
+      const normalized = (list as any[]).map((item) => ({
+        customerId: String(item?.customerId ?? ''),
+        customerCode: String(item?.customerCode ?? '—'),
+        customerName: String(item?.customerName ?? 'Unknown Customer'),
+        currentInvoiceId: item?.currentInvoiceId ? String(item.currentInvoiceId) : undefined,
+        queuedInvoiceId: item?.queuedInvoiceId ? String(item.queuedInvoiceId) : undefined,
+        currentInvoiceNo: String(item?.currentInvoiceNo ?? '—'),
+        currentInvoiceStatus: normalizeInvoiceStatusLabel(item?.currentInvoiceStatus ?? 'none') as
+          | InvoiceStatus
+          | 'none',
+        billingMode:
+          String(item?.billingMode ?? '').trim().toLowerCase() === 'anniversary'
+            ? 'anniversary'
+            : 'fixed',
+        billingCycleMode: item?.billingCycleMode ? String(item.billingCycleMode) : null,
+        customMonths: parsePositiveInt(item?.customMonths),
+        fixedBillingDay: parsePositiveInt(item?.fixedBillingDay),
+        dueAfterDays: parseNonNegativeInt(item?.dueAfterDays),
+        ruleId: item?.ruleId ? String(item.ruleId) : null,
+        ruleName: item?.ruleName ? String(item.ruleName) : null,
+        releaseDate: item?.releaseDate ? String(item.releaseDate) : null,
+        nextPaymentDate: item?.nextPaymentDate ? String(item.nextPaymentDate) : null,
+        status:
+          item?.status === 'ready_to_release' ||
+          item?.status === 'releasing' ||
+          item?.status === 'no_invoice'
+            ? item.status
+            : 'scheduled',
+      })) as NextInvoiceEngineRow[];
+
+      setEngineRows(normalized);
+    } catch (error) {
+      setEngineRows([]);
+      setEngineError(error instanceof Error ? error.message : 'Failed to load billing engine');
+    } finally {
+      setEngineLoading(false);
     }
   };
 
@@ -1629,6 +1942,7 @@ export default function BillingPage() {
         targetId: log.targetId,
         targetName: log.targetName,
         actorName: log.actorName,
+        metadata: log.metadata,
       }));
     setInvoiceEditActivityLogs(logs);
   }, []);
@@ -1752,6 +2066,14 @@ export default function BillingPage() {
       window.removeEventListener(BILLING_RULE_ASSIGNMENTS_UPDATED_EVENT, refreshRuleAssignments);
     };
   }, [refreshCollectionMap, refreshCollectorActivityLogs, refreshInvoiceEditActivityLogs]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(
+      BILLING_ENGINE_AUTO_RELEASE_STORAGE_KEY,
+      autoReleaseEnabled ? 'true' : 'false',
+    );
+  }, [autoReleaseEnabled]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -2008,346 +2330,6 @@ export default function BillingPage() {
     };
   }, [releasedInvoices]);
 
-  const engineRows = useMemo<NextInvoiceEngineRow[]>(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const startOfToday = today.getTime();
-
-    const byCustomerId = new Map<string, InvoiceRecord[]>();
-    const byCustomerCode = new Map<string, InvoiceRecord[]>();
-
-    for (const invoice of invoices) {
-      const customerId = invoice.customer?.id;
-      const customerCode = invoice.customer?.customerCode;
-      if (customerId) {
-        const items = byCustomerId.get(customerId) ?? [];
-        items.push(invoice);
-        byCustomerId.set(customerId, items);
-      }
-      if (customerCode) {
-        const items = byCustomerCode.get(customerCode) ?? [];
-        items.push(invoice);
-        byCustomerCode.set(customerCode, items);
-      }
-    }
-
-    const getInvoiceTimelineDate = (invoice: InvoiceRecord) =>
-      parseDateSafe(invoice.billingPeriodTo) ||
-      parseDateSafe(invoice.dueDate) ||
-      parseDateSafe(invoice.invoiceDate) ||
-      parseDateSafe(invoice.paidAt) ||
-      new Date(0);
-
-    const getQueuedReleaseDate = (invoice: InvoiceRecord) =>
-      getInvoiceReleaseDate(invoice) ||
-      parseDateSafe(invoice.billingPeriodFrom) ||
-      parseDateSafe(invoice.invoiceDate) ||
-      null;
-
-    const descByTimeline = (a: InvoiceRecord, b: InvoiceRecord) =>
-      getInvoiceTimelineDate(b).getTime() - getInvoiceTimelineDate(a).getTime();
-
-    const ascByRelease = (a: InvoiceRecord, b: InvoiceRecord) => {
-      const aDate = getQueuedReleaseDate(a);
-      const bDate = getQueuedReleaseDate(b);
-      if (aDate && bDate) return aDate.getTime() - bDate.getTime();
-      if (aDate) return -1;
-      if (bDate) return 1;
-      return getInvoiceTimelineDate(a).getTime() - getInvoiceTimelineDate(b).getTime();
-    };
-
-    const localAssignments = readBillingRuleAssignments();
-    const rulesById = new Map(billingRules.map((rule) => [rule.id, rule]));
-    const rulesByName = new Map(
-      billingRules.map((rule) => [rule.name.trim().toLowerCase(), rule]),
-    );
-
-    const findRuleByHints = (
-      ids: Array<string | null | undefined>,
-      names: Array<string | null | undefined>,
-    ): BillingRule | null => {
-      for (const rawId of ids) {
-        const id = typeof rawId === 'string' ? rawId.trim() : '';
-        if (!id) continue;
-        const found = rulesById.get(id);
-        if (found) return found;
-      }
-      for (const rawName of names) {
-        const name = typeof rawName === 'string' ? rawName.trim().toLowerCase() : '';
-        if (!name) continue;
-        const found = rulesByName.get(name);
-        if (found) return found;
-      }
-      return null;
-    };
-
-    const getNextFixedReleaseDate = (afterDate: Date, fixedDay: number, cycleMonths: number) => {
-      const normalizedAfter = startOfDay(afterDate);
-      const currentMonthDay = Math.min(
-        fixedDay,
-        daysInMonth(normalizedAfter.getFullYear(), normalizedAfter.getMonth()),
-      );
-      let candidate = new Date(
-        normalizedAfter.getFullYear(),
-        normalizedAfter.getMonth(),
-        currentMonthDay,
-      );
-      if (candidate <= normalizedAfter) {
-        const stepped = addMonthsSafe(
-          new Date(normalizedAfter.getFullYear(), normalizedAfter.getMonth(), 1),
-          Math.max(1, cycleMonths),
-        );
-        const steppedDay = Math.min(
-          fixedDay,
-          daysInMonth(stepped.getFullYear(), stepped.getMonth()),
-        );
-        candidate = new Date(stepped.getFullYear(), stepped.getMonth(), steppedDay);
-      }
-      return candidate;
-    };
-
-    const getNextAnniversaryReleaseDate = (afterDate: Date, cycleMonths: number) => {
-      const normalizedAfter = startOfDay(afterDate);
-      let candidate = addMonthsSafe(
-        new Date(normalizedAfter.getFullYear(), normalizedAfter.getMonth(), 1),
-        Math.max(1, cycleMonths),
-      );
-      candidate = new Date(candidate.getFullYear(), candidate.getMonth(), 1);
-      if (candidate <= normalizedAfter) {
-        const stepped = addMonthsSafe(candidate, Math.max(1, cycleMonths));
-        candidate = new Date(stepped.getFullYear(), stepped.getMonth(), 1);
-      }
-      return candidate;
-    };
-
-    const getDueDate = (
-      releaseDate: Date,
-      billingType: BillingMode,
-      dueAfterDays: number | null,
-    ) => {
-      if (dueAfterDays !== null) {
-        return addDays(releaseDate, dueAfterDays);
-      }
-      if (billingType === 'fixed') {
-        return resolveFixedDueDate(releaseDate, fixedBillingWindow.dueDay);
-      }
-      return addDays(releaseDate, 14);
-    };
-
-    const isReleasedForEngine = (invoice: InvoiceRecord) =>
-      Boolean(invoice.id && forceReleasedInvoiceIds[invoice.id]) || isInvoiceReleased(invoice, today);
-
-    return customers
-      .map((customer) => {
-        const customerInvoices = [
-          ...(byCustomerId.get(customer.id) ?? []),
-          ...(byCustomerCode.get(customer.customerCode) ?? []),
-        ];
-        const uniqueCustomerInvoices = Array.from(
-          new Map(customerInvoices.map((invoice) => [invoice.id, invoice])).values(),
-        );
-
-        const releasedCustomerInvoices = uniqueCustomerInvoices
-          .filter((invoice) => isReleasedForEngine(invoice))
-          .sort(descByTimeline);
-        const queuedCustomerInvoices = uniqueCustomerInvoices
-          .filter((invoice) => !isReleasedForEngine(invoice))
-          .sort(ascByRelease);
-
-        const currentInvoice = releasedCustomerInvoices[0];
-        const queuedInvoice = queuedCustomerInvoices[0];
-        const localCustomerRuleId =
-          customer.id && localAssignments.customers[customer.id]
-            ? localAssignments.customers[customer.id]
-            : null;
-        const localQueuedRuleId =
-          queuedInvoice?.id && localAssignments.invoices[queuedInvoice.id]
-            ? localAssignments.invoices[queuedInvoice.id]
-            : null;
-        const localCurrentRuleId =
-          currentInvoice?.id && localAssignments.invoices[currentInvoice.id]
-            ? localAssignments.invoices[currentInvoice.id]
-            : null;
-
-        const resolvedRule =
-          findRuleByHints(
-            [
-              queuedInvoice?.billingRuleId,
-              queuedInvoice?.ruleId,
-              queuedInvoice?.billingRule?.id ?? null,
-              queuedInvoice?.rule?.id ?? null,
-              currentInvoice?.billingRuleId,
-              currentInvoice?.ruleId,
-              currentInvoice?.billingRule?.id ?? null,
-              currentInvoice?.rule?.id ?? null,
-              customer.billingRuleId,
-              localQueuedRuleId,
-              localCurrentRuleId,
-              localCustomerRuleId,
-            ],
-            [
-              queuedInvoice?.billingRuleName,
-              queuedInvoice?.ruleName,
-              queuedInvoice?.billingRule?.name ?? null,
-              queuedInvoice?.rule?.name ?? null,
-              currentInvoice?.billingRuleName,
-              currentInvoice?.ruleName,
-              currentInvoice?.billingRule?.name ?? null,
-              currentInvoice?.rule?.name ?? null,
-              customer.billingRuleName,
-            ],
-          ) ?? null;
-
-        const modeSeedInvoice = currentInvoice || queuedInvoice;
-        const inferredBillingMode: BillingMode = resolvedRule
-          ? resolvedRule.billingType === 'anniversary'
-            ? 'anniversary'
-            : 'fixed'
-          : modeSeedInvoice
-            ? inferBillingMode(customer, modeSeedInvoice, fixedBillingWindow)
-            : ((customer.billingCycle.toLowerCase().includes('anniversary')
-                ? 'anniversary'
-                : 'fixed') as BillingMode);
-
-        const cycleMonths = resolvedRule
-          ? getBillingCycleMonths(resolvedRule.billingMode, resolvedRule.customMonths ?? null)
-          : getBillingCycleMonths(customer.billingCycle, null);
-        const fixedBillingDay = resolvedRule
-          ? parsePositiveInt(resolvedRule.fixedBillingDay) ?? fixedBillingWindow.startDay
-          : fixedBillingWindow.startDay;
-        const dueAfterDays = resolvedRule
-          ? parseNonNegativeInt(resolvedRule.dueAfterDays)
-          : null;
-
-        if (queuedInvoice) {
-          const queuedReleaseDate = getQueuedReleaseDate(queuedInvoice);
-          let nextPaymentDate = parseDateSafe(queuedInvoice.dueDate);
-
-          if (!nextPaymentDate && queuedReleaseDate) {
-            nextPaymentDate = getDueDate(queuedReleaseDate, inferredBillingMode, dueAfterDays);
-          }
-
-          let queuedStatus: EngineRowStatus = 'scheduled';
-          if (isReleasingByCustomer[customer.id]) {
-            queuedStatus = 'releasing';
-          } else if (queuedReleaseDate && queuedReleaseDate.getTime() <= startOfToday) {
-            queuedStatus = 'ready_to_release';
-          }
-
-          return {
-            customerId: customer.id,
-            customerCode: customer.customerCode || '—',
-            customerName: customer.name,
-            currentInvoiceId: currentInvoice?.id,
-            queuedInvoiceId: queuedInvoice.id,
-            currentInvoiceNo: formatInvoiceNo(currentInvoice?.invoiceNo, currentInvoice?.id),
-            currentInvoiceStatus: currentInvoice?.status ?? ('none' as const),
-            billingMode: inferredBillingMode,
-            billingCycleMode: resolvedRule?.billingMode ?? null,
-            customMonths: parsePositiveInt(resolvedRule?.customMonths),
-            fixedBillingDay,
-            dueAfterDays,
-            ruleId: resolvedRule?.id ?? customer.billingRuleId ?? localCustomerRuleId ?? null,
-            ruleName: resolvedRule?.name ?? customer.billingRuleName ?? null,
-            releaseDate: queuedReleaseDate ? formatDateYmd(queuedReleaseDate) : null,
-            nextPaymentDate: nextPaymentDate ? formatDateYmd(nextPaymentDate) : null,
-            status: queuedStatus,
-          };
-        }
-
-        if (!currentInvoice) {
-          return {
-            customerId: customer.id,
-            customerCode: customer.customerCode || '—',
-            customerName: customer.name,
-            currentInvoiceNo: '—',
-            currentInvoiceStatus: 'none' as const,
-            billingMode: inferredBillingMode,
-            billingCycleMode: resolvedRule?.billingMode ?? null,
-            customMonths: parsePositiveInt(resolvedRule?.customMonths),
-            fixedBillingDay,
-            dueAfterDays,
-            ruleId: resolvedRule?.id ?? customer.billingRuleId ?? localCustomerRuleId ?? null,
-            ruleName: resolvedRule?.name ?? customer.billingRuleName ?? null,
-            releaseDate: null,
-            nextPaymentDate: null,
-            status: 'no_invoice' as const,
-          };
-        }
-
-        const referenceDate =
-          parseDateSafe(currentInvoice.billingPeriodTo) ||
-          parseDateSafe(currentInvoice.dueDate) ||
-          parseDateSafe(currentInvoice.invoiceDate) ||
-          parseDateSafe(currentInvoice.paidAt) ||
-          new Date();
-        const currentPeriodEndDate = parseDateSafe(currentInvoice.billingPeriodTo);
-
-        let releaseDate: Date | null = null;
-        let nextPaymentDate: Date | null = null;
-
-        // Billing release policy:
-        // If current invoice has an explicit billingPeriodTo, queue next invoice release
-        // X days before that period end (X = rule dueAfterDays, default 15).
-        // This matches expectation like:
-        // current 21-03 to 20-06 -> next invoice release on 05-06 (lead 15 days).
-        if (currentPeriodEndDate) {
-          const releaseLeadDays = Math.max(0, dueAfterDays ?? 15);
-          releaseDate = addDays(startOfDay(currentPeriodEndDate), -releaseLeadDays);
-          nextPaymentDate = startOfDay(currentPeriodEndDate);
-        } else if (inferredBillingMode === 'fixed') {
-          releaseDate = getNextFixedReleaseDate(referenceDate, fixedBillingDay, cycleMonths);
-          nextPaymentDate = getDueDate(releaseDate, inferredBillingMode, dueAfterDays);
-        } else {
-          releaseDate = getNextAnniversaryReleaseDate(referenceDate, cycleMonths);
-          nextPaymentDate = getDueDate(releaseDate, inferredBillingMode, dueAfterDays);
-        }
-
-        const manualReleaseDate = parseDateSafe(
-          manualReleaseDateByCustomer[customer.id] || null,
-        );
-        if (manualReleaseDate) {
-          releaseDate = manualReleaseDate;
-          nextPaymentDate = getDueDate(releaseDate, inferredBillingMode, dueAfterDays);
-        }
-
-        let rowStatus: EngineRowStatus = 'scheduled';
-        if (isReleasingByCustomer[customer.id]) {
-          rowStatus = 'releasing';
-        } else if (releaseDate && releaseDate <= today) {
-          rowStatus = 'ready_to_release';
-        }
-
-        return {
-          customerId: customer.id,
-          customerCode: customer.customerCode || '—',
-          customerName: customer.name,
-          currentInvoiceId: currentInvoice.id,
-          currentInvoiceNo: formatInvoiceNo(currentInvoice.invoiceNo, currentInvoice.id),
-          currentInvoiceStatus: currentInvoice.status,
-          billingMode: inferredBillingMode,
-          billingCycleMode: resolvedRule?.billingMode ?? null,
-          customMonths: parsePositiveInt(resolvedRule?.customMonths),
-          fixedBillingDay,
-          dueAfterDays,
-          ruleId: resolvedRule?.id ?? customer.billingRuleId ?? localCustomerRuleId ?? null,
-          ruleName: resolvedRule?.name ?? customer.billingRuleName ?? null,
-          releaseDate: releaseDate ? formatDateYmd(releaseDate) : null,
-          nextPaymentDate: nextPaymentDate ? formatDateYmd(nextPaymentDate) : null,
-          status: rowStatus,
-        };
-      })
-      .sort((a, b) => a.customerName.localeCompare(b.customerName));
-  }, [
-    customers,
-    invoices,
-    billingRules,
-    fixedBillingWindow,
-    isReleasingByCustomer,
-    manualReleaseDateByCustomer,
-    forceReleasedInvoiceIds,
-  ]);
-
   const readyToReleaseRows = useMemo(
     () => engineRows.filter((row) => row.status === 'ready_to_release'),
     [engineRows],
@@ -2374,7 +2356,6 @@ export default function BillingPage() {
 
   const transactionLogs = useMemo<TransactionLog[]>(() => {
     const logs: TransactionLog[] = [];
-    const actionThresholdMs = 60_000;
 
     for (const invoice of invoices) {
       const customerName =
@@ -2388,10 +2369,7 @@ export default function BillingPage() {
       const updatedAt = parseDateSafe(invoice.updatedAt);
       const paidAt = parseDateSafe(invoice.paidAt);
       const editActivityForInvoice = invoiceEditActivityLogs.filter(
-        (activity) =>
-          activity.targetId === invoice.id ||
-          (activity.targetName &&
-            (activity.targetName === invoiceNo || activity.targetName === invoice.id)),
+        (activity) => doesActivityMatchInvoice(activity, invoice.id, invoiceNo),
       );
       const hasBillingCreatedActivity = editActivityForInvoice.some(
         (activity) => toTransactionActionFromBillingActivity(activity.action) === 'created',
@@ -2402,6 +2380,69 @@ export default function BillingPage() {
       const hasBillingPaidActivity = editActivityForInvoice.some(
         (activity) => toTransactionActionFromBillingActivity(activity.action) === 'paid',
       );
+      const hasBillingCarryForwardActivity = editActivityForInvoice.some(
+        (activity) => toTransactionActionFromBillingActivity(activity.action) === 'carry_forward',
+      );
+      const hasBillingEngineActivity = editActivityForInvoice.some(
+        (activity) => toTransactionActionFromBillingActivity(activity.action) === 'engine',
+      );
+      const previousBalanceRefs = Array.from(
+        new Set(
+          (invoice.adjustments ?? [])
+            .filter((adjustment) => isPreviousBalanceAdjustment(adjustment.description))
+            .map((adjustment) => extractCarriedInvoiceRef(adjustment.description))
+            .filter(Boolean),
+        ),
+      );
+      const hasPreviousBalance = previousBalanceRefs.length > 0;
+      const displayStatus = resolveDisplayedInvoiceStatus(invoice);
+      const workflow = collectionMap[invoice.id];
+      const backendCollectionEvents = Array.isArray(invoice.collectionEvents)
+        ? invoice.collectionEvents
+        : [];
+      const localWorkflowEvents = Array.isArray(workflow?.events) ? workflow.events : [];
+      const primaryCollectionEvents =
+        backendCollectionEvents.length > 0
+          ? backendCollectionEvents
+          : localWorkflowEvents;
+      const hasCarryForwardCollectionEvent = primaryCollectionEvents.some(
+        (event) => toTransactionActionFromCollectionEvent(event) === 'carry_forward',
+      );
+
+      if (hasPreviousBalance && !hasBillingCarryForwardActivity && !hasCarryForwardCollectionEvent) {
+        const carryForwardAt = (updatedAt ?? createdAt ?? new Date()).toISOString();
+        logs.push({
+          id: `${invoice.id}-carry-forward-derived`,
+          action: 'carry_forward',
+          actionAt: carryForwardAt,
+          invoiceId: invoice.id,
+          invoiceNo,
+          customerName,
+          customerCode,
+          amount: invoice.totalAmount,
+          currency: invoice.currency,
+          note:
+            previousBalanceRefs.length > 0
+              ? `Previous balance added from ${previousBalanceRefs.join(', ')}`
+              : 'Previous balance added to invoice',
+        });
+      }
+
+      if (displayStatus === 'overdue' && !hasBillingEngineActivity) {
+        const overdueAt = (parseDateSafe(invoice.dueDate) ?? updatedAt ?? createdAt ?? new Date()).toISOString();
+        logs.push({
+          id: `${invoice.id}-overdue-derived`,
+          action: 'engine',
+          actionAt: overdueAt,
+          invoiceId: invoice.id,
+          invoiceNo,
+          customerName,
+          customerCode,
+          amount: invoice.totalAmount,
+          currency: invoice.currency,
+          note: 'Invoice became overdue',
+        });
+      }
 
       if (createdAt && !hasBillingCreatedActivity) {
         logs.push({
@@ -2418,34 +2459,6 @@ export default function BillingPage() {
         });
       }
 
-      if (updatedAt) {
-        const createdMs = createdAt?.getTime() ?? 0;
-        const paidMs = paidAt?.getTime() ?? 0;
-        const updatedMs = updatedAt.getTime();
-        const differentFromCreated = !createdAt || Math.abs(updatedMs - createdMs) > actionThresholdMs;
-        const differentFromPaid = !paidAt || Math.abs(updatedMs - paidMs) > actionThresholdMs;
-
-        if (
-          differentFromCreated &&
-          differentFromPaid &&
-          editActivityForInvoice.length === 0 &&
-          !hasBillingEditedActivity
-        ) {
-          logs.push({
-            id: `${invoice.id}-edited`,
-            action: 'edited',
-            actionAt: updatedAt.toISOString(),
-            invoiceId: invoice.id,
-            invoiceNo,
-            customerName,
-            customerCode,
-            amount: invoice.totalAmount,
-            currency: invoice.currency,
-            note: 'Invoice edited',
-          });
-        }
-      }
-
       if (editActivityForInvoice.length > 0) {
         for (const activity of editActivityForInvoice) {
           logs.push({
@@ -2458,7 +2471,7 @@ export default function BillingPage() {
             customerCode,
             amount: invoice.totalAmount,
             currency: invoice.currency,
-            note: activity.actorName
+            note: activity.actorName && activity.actorName.trim().toLowerCase() !== 'system'
               ? `${activity.description} • ${activity.actorName}`
               : activity.description,
           });
@@ -2484,22 +2497,38 @@ export default function BillingPage() {
         }
       }
 
-      const workflow = collectionMap[invoice.id];
-      const backendCollectionEvents = Array.isArray(invoice.collectionEvents)
-        ? invoice.collectionEvents
-        : [];
-      const collectorInvoiceLogs = collectorActivityLogs.filter(
-        (activity) =>
-          activity.targetId === invoice.id ||
-          (activity.targetName &&
-            (activity.targetName === invoiceNo || activity.targetName === invoice.id)),
-      );
+      if (primaryCollectionEvents.length > 0) {
+        for (const event of primaryCollectionEvents) {
+          const paymentDetails = getCollectionEventPaymentDetails(invoice.id, event);
+          const eventAction = toTransactionActionFromCollectionEvent(event);
+          logs.push({
+            id: `${invoice.id}-collection-backend-${event.id}`,
+            action: eventAction,
+            actionAt: event.timestamp,
+            invoiceId: invoice.id,
+            invoiceNo,
+            customerName,
+            customerCode,
+            amount: invoice.totalAmount,
+            currency: invoice.currency,
+            note: event.note ? `${event.label} (${event.note})` : event.label,
+            paymentMethod: paymentDetails.paymentMethod,
+            paymentAccount: paymentDetails.paymentAccount,
+            paymentSlipUrl: paymentDetails.paymentSlipUrl,
+          });
+        }
+      } else {
+        const collectorInvoiceLogs = collectorActivityLogs.filter(
+          (activity) => doesActivityMatchInvoice(activity, invoice.id, invoiceNo),
+        );
 
-      if (collectorInvoiceLogs.length > 0) {
         for (const activity of collectorInvoiceLogs) {
           logs.push({
             id: `${invoice.id}-collection-activity-${activity.id}`,
-            action: 'collection',
+            action: toTransactionActionFromCollectionEvent({
+              label: activity.description,
+              actorName: activity.actorName,
+            }),
             actionAt: activity.timestamp,
             invoiceId: invoice.id,
             invoiceNo,
@@ -2507,61 +2536,9 @@ export default function BillingPage() {
             customerCode,
             amount: invoice.totalAmount,
             currency: invoice.currency,
-            note: activity.actorName
+            note: activity.actorName && activity.actorName.trim().toLowerCase() !== 'system'
               ? `${activity.description} • ${activity.actorName}`
               : activity.description,
-          });
-        }
-      }
-
-      if (backendCollectionEvents.length > 0) {
-        for (const event of backendCollectionEvents) {
-          const paymentDetails = getCollectionEventPaymentDetails(invoice.id, event);
-          logs.push({
-            id: `${invoice.id}-collection-backend-${event.id}`,
-            action: 'collection',
-            actionAt: event.timestamp,
-            invoiceId: invoice.id,
-            invoiceNo,
-            customerName,
-            customerCode,
-            amount: invoice.totalAmount,
-            currency: invoice.currency,
-            note: event.note ? `${event.label} (${event.note})` : event.label,
-            paymentMethod: paymentDetails.paymentMethod,
-            paymentAccount: paymentDetails.paymentAccount,
-            paymentSlipUrl: paymentDetails.paymentSlipUrl,
-          });
-        }
-      }
-
-      if (workflow?.events?.length) {
-        const existingKeys = new Set(
-          [
-            ...collectorInvoiceLogs.map((activity) => `${activity.timestamp}::${activity.description}`),
-            ...backendCollectionEvents.map((event) => `${event.timestamp}::${event.label}`),
-          ],
-        );
-        for (const event of workflow.events) {
-          const dedupeKey = `${event.timestamp}::${event.label}`;
-          if (existingKeys.has(dedupeKey)) {
-            continue;
-          }
-          const paymentDetails = getCollectionEventPaymentDetails(invoice.id, event);
-          logs.push({
-            id: `${invoice.id}-collection-${event.id}`,
-            action: 'collection',
-            actionAt: event.timestamp,
-            invoiceId: invoice.id,
-            invoiceNo,
-            customerName,
-            customerCode,
-            amount: invoice.totalAmount,
-            currency: invoice.currency,
-            note: event.note ? `${event.label} (${event.note})` : event.label,
-            paymentMethod: paymentDetails.paymentMethod,
-            paymentAccount: paymentDetails.paymentAccount,
-            paymentSlipUrl: paymentDetails.paymentSlipUrl,
           });
         }
       }
@@ -3263,6 +3240,7 @@ export default function BillingPage() {
             firstInvoiceMode: billingMode,
             fixedStartDay: resolvedFixedBillingDay,
             fixedDueDay: fixedBillingWindow.dueDay,
+            releaseDate: formatDateYmd(new Date()),
               billingCycle: derivedBillingCycle,
               replaceInvoiceId: selectedInvoice.id,
               billingRuleId: effectiveRuleId ?? undefined,
@@ -3931,9 +3909,28 @@ export default function BillingPage() {
             if (patched) {
               overdueUpdated += 1;
               changedInBackend = true;
+              logSystemInvoiceActivity(
+                'invoice_overdue_system',
+                'Invoice became overdue by billing engine.',
+                invoice,
+                {
+                  previousStatus: 'unpaid',
+                  status: 'overdue',
+                },
+              );
             } else {
               locallyUpdatedOverdueIds.push(invoice.id);
               overdueUpdated += 1;
+              logSystemInvoiceActivity(
+                'invoice_overdue_system',
+                'Invoice became overdue by billing engine.',
+                invoice,
+                {
+                  previousStatus: 'unpaid',
+                  status: 'overdue',
+                  localOnly: true,
+                },
+              );
             }
           }
 
@@ -4031,6 +4028,17 @@ export default function BillingPage() {
 
             lateFeeApplied += 1;
             changedInBackend = true;
+            logSystemInvoiceActivity(
+              'invoice_late_fee_applied_system',
+              `Late fee applied automatically: ${lateFeeDescription}.`,
+              invoice,
+              {
+                lateFeeDescription,
+                lateFeeType,
+                lateFeeValue: effectiveLateFeeValue,
+                lateFeeApplyMode,
+              },
+            );
           } catch (error) {
             const invoiceNo = invoice.invoiceNo || invoice.id;
             const reason = error instanceof Error ? error.message : 'Failed to apply late fee';
@@ -4129,6 +4137,8 @@ export default function BillingPage() {
               firstInvoiceMode: row.billingMode,
               fixedStartDay: row.fixedBillingDay ?? fixedBillingWindow.startDay,
               fixedDueDay: fixedBillingWindow.dueDay,
+              releaseDate:
+                manualReleaseDateByCustomer[row.customerId] ?? row.releaseDate ?? formatDateYmd(new Date()),
               billingCycle: derivedBillingCycle,
               billingRuleId: row.ruleId ?? undefined,
               billingRuleName: row.ruleName ?? undefined,
@@ -4179,7 +4189,7 @@ export default function BillingPage() {
             customerId: row.customerId,
             customerCode: row.customerCode,
             billingMode: row.billingMode,
-            releaseDate: row.releaseDate
+            releaseDate: manualReleaseDateByCustomer[row.customerId] ?? row.releaseDate
           }
         );
 
@@ -4255,11 +4265,17 @@ export default function BillingPage() {
   );
 
   useEffect(() => {
+    autoReleaseActionRef.current = () => {
+      applyLateFeesAndOverdueStatuses(true);
+      void runAutoReleaseNow(true);
+    };
+  }, [applyLateFeesAndOverdueStatuses, runAutoReleaseNow]);
+
+  useEffect(() => {
     if (!autoReleaseEnabled || user?.role !== 'admin') return;
 
     const run = () => {
-      applyLateFeesAndOverdueStatuses(true);
-      runAutoReleaseNow(true);
+      autoReleaseActionRef.current?.();
     };
 
     run();
@@ -4267,7 +4283,7 @@ export default function BillingPage() {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [autoReleaseEnabled, applyLateFeesAndOverdueStatuses, runAutoReleaseNow, user?.role]);
+  }, [autoReleaseEnabled, user?.role]);
 
   const exportInvoicePdf = () => {
     if (!selectedInvoice) return;
@@ -5158,15 +5174,15 @@ export default function BillingPage() {
                 <CardTitle>Next Invoice Schedule ({visibleEngineRows.length})</CardTitle>
               </CardHeader>
               <CardContent>
-                {(customersLoading || isLoading) && (
+                {(engineLoading || isLoading) && (
                   <p className="mb-4 text-sm text-slate-500">Loading schedule data...</p>
                 )}
-                {(customersError || loadError) && (
+                {(engineError || loadError) && (
                   <p className="mb-4 text-sm text-rose-600">
-                    {[customersError, loadError].filter(Boolean).join(' | ')}
+                    {[engineError, loadError].filter(Boolean).join(' | ')}
                   </p>
                 )}
-                {!customersLoading && !isLoading && visibleEngineRows.length === 0 && (
+                {!engineLoading && !isLoading && visibleEngineRows.length === 0 && (
                   <p className="mb-4 text-sm text-slate-500">
                     No scheduled invoices yet. Mark current invoice as paid first.
                   </p>
@@ -5211,25 +5227,31 @@ export default function BillingPage() {
                               )}
                             </TableCell>
                             <TableCell>
-                              <Input
-                                type="date"
-                                value={releaseValue}
-                                onChange={(event) =>
-                                  setManualReleaseDateByCustomer((prev) => {
-                                    const nextValue = event.target.value;
-                                    if (!nextValue) {
-                                      const next = { ...prev };
-                                      delete next[row.customerId];
-                                      return next;
-                                    }
-                                    return {
-                                      ...prev,
-                                      [row.customerId]: nextValue,
-                                    };
-                                  })
-                                }
-                                disabled={!canEditSchedule || !isEditingSchedule}
-                              />
+                              {isEditingSchedule ? (
+                                <Input
+                                  type="date"
+                                  value={releaseValue}
+                                  onChange={(event) =>
+                                    setManualReleaseDateByCustomer((prev) => {
+                                      const nextValue = event.target.value;
+                                      if (!nextValue) {
+                                        const next = { ...prev };
+                                        delete next[row.customerId];
+                                        return next;
+                                      }
+                                      return {
+                                        ...prev,
+                                        [row.customerId]: nextValue,
+                                      };
+                                    })
+                                  }
+                                  disabled={!canEditSchedule}
+                                />
+                              ) : (
+                                <div className="flex min-h-[40px] items-center rounded-md border border-input bg-muted/30 px-3 text-sm text-slate-700">
+                                  {formatDisplayDate(releaseValue)}
+                                </div>
+                              )}
                             </TableCell>
                             <TableCell>{formatDisplayDate(row.nextPaymentDate)}</TableCell>
                             <TableCell>
@@ -5316,25 +5338,31 @@ export default function BillingPage() {
                             <p>Next Payment Date: {formatDisplayDate(row.nextPaymentDate)}</p>
                             <div>
                               <Label className="text-xs text-slate-500">Next Release Date</Label>
-                              <Input
-                                type="date"
-                                value={releaseValue}
-                                onChange={(event) =>
-                                  setManualReleaseDateByCustomer((prev) => {
-                                    const nextValue = event.target.value;
-                                    if (!nextValue) {
-                                      const next = { ...prev };
-                                      delete next[row.customerId];
-                                      return next;
-                                    }
-                                    return {
-                                      ...prev,
-                                      [row.customerId]: nextValue,
-                                    };
-                                  })
-                                }
-                                disabled={!canEditSchedule || !isEditingSchedule}
-                              />
+                              {isEditingSchedule ? (
+                                <Input
+                                  type="date"
+                                  value={releaseValue}
+                                  onChange={(event) =>
+                                    setManualReleaseDateByCustomer((prev) => {
+                                      const nextValue = event.target.value;
+                                      if (!nextValue) {
+                                        const next = { ...prev };
+                                        delete next[row.customerId];
+                                        return next;
+                                      }
+                                      return {
+                                        ...prev,
+                                        [row.customerId]: nextValue,
+                                      };
+                                    })
+                                  }
+                                  disabled={!canEditSchedule}
+                                />
+                              ) : (
+                                <div className="flex min-h-[40px] items-center rounded-md border border-input bg-muted/30 px-3 text-sm text-slate-700">
+                                  {formatDisplayDate(releaseValue)}
+                                </div>
+                              )}
                             </div>
                           </div>
 
@@ -5813,7 +5841,7 @@ export default function BillingPage() {
                                 group.latestAction,
                               )}`}
                             >
-                              {group.latestAction}
+                              {formatTransactionActionLabel(group.latestAction)}
                             </span>
                           </TableCell>
                           <TableCell>{formatMoney(group.amount, group.currency || 'MMK')}</TableCell>
@@ -5859,7 +5887,7 @@ export default function BillingPage() {
                               group.latestAction,
                             )}`}
                           >
-                            {group.latestAction}
+                            {formatTransactionActionLabel(group.latestAction)}
                           </span>
                         </div>
                         <div className="space-y-1 text-sm text-slate-700">
@@ -5904,7 +5932,7 @@ export default function BillingPage() {
                   </p>
                   <p>
                     Latest: {formatDateTime(selectedTransactionGroup.latestActionAt)} (
-                    {selectedTransactionGroup.latestAction})
+                    {formatTransactionActionLabel(selectedTransactionGroup.latestAction)})
                   </p>
                   <p>
                     Current Amount: {formatMoney(selectedTransactionGroup.amount, selectedTransactionGroup.currency || 'MMK')}
@@ -5920,7 +5948,7 @@ export default function BillingPage() {
                             log.action,
                           )}`}
                         >
-                          {log.action}
+                          {formatTransactionActionLabel(log.action)}
                         </span>
                         <span className="text-xs text-slate-500">{formatDateTime(log.actionAt)}</span>
                       </div>

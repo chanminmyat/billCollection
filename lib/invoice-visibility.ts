@@ -1,11 +1,3 @@
-const RELEASE_DATE_KEYS = [
-  'scheduledReleaseDate',
-  'releaseDate',
-  'availableAt',
-  'publishAt',
-  'releaseAt',
-] as const;
-
 const HIDDEN_STATUS_SET = new Set(['scheduled', 'pending_release', 'queued', 'draft']);
 
 const parseDateSafe = (value: unknown): Date | null => {
@@ -22,14 +14,8 @@ const atStartOfDay = (date: Date) => {
 
 export const getInvoiceReleaseDate = (invoice: unknown): Date | null => {
   if (!invoice || typeof invoice !== 'object') return null;
-
-  for (const key of RELEASE_DATE_KEYS) {
-    const value = (invoice as Record<string, unknown>)[key];
-    const parsed = parseDateSafe(value);
-    if (parsed) return parsed;
-  }
-
-  return null;
+  const record = invoice as Record<string, unknown>;
+  return parseDateSafe(record.releaseDate) || parseDateSafe(record.invoiceDate);
 };
 
 export const isInvoiceReleased = (invoice: unknown, now: Date = new Date()) => {

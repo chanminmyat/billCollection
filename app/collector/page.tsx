@@ -122,6 +122,7 @@ type InvoiceRecord = {
   customerId?: string | null;
   customerCode?: string | null;
   invoiceDate?: string | null;
+  releaseDate?: string | null;
   issuedAt?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
