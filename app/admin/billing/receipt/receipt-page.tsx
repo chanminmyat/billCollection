@@ -7,6 +7,13 @@ import Layout from '@/app/components/layout';
 import { useAuth } from '@/app/contexts/auth-context';
 import { appendActivityLog } from '@/lib/activity-log';
 import { formatDisplayDate, formatDisplayDateRange } from '@/lib/date-format';
+import {
+  fetchSystemBranding,
+  readSystemBranding,
+  SYSTEM_BRANDING_STORAGE_KEY,
+  SYSTEM_BRANDING_UPDATED_EVENT,
+} from '@/lib/system-branding';
+import type { SystemBranding } from '@/lib/system-branding';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -270,6 +277,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
   const [isPaymentDetailsOpen, setIsPaymentDetailsOpen] = useState(false);
   const [isCancellingReceiptById, setIsCancellingReceiptById] = useState<Record<string, boolean>>({});
   const [pendingCancelReceipt, setPendingCancelReceipt] = useState<ReceiptInvoice | null>(null);
+  const [branding, setBranding] = useState<SystemBranding>(() => readSystemBranding());
   const listInvoiceFilterId = searchParams.get('invoiceId')?.trim() ?? '';
   const confirmCollected = searchParams.get('confirmCollected') === '1';
   const prefilledCollectedPaymentMethod = searchParams.get('paymentMethod')?.trim() ?? '';
@@ -533,6 +541,28 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
   useEffect(() => {
     void refreshAll();
   }, [refreshAll]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const syncBranding = () => setBranding(readSystemBranding());
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === SYSTEM_BRANDING_STORAGE_KEY) syncBranding();
+    };
+
+    fetchSystemBranding()
+      .then(setBranding)
+      .catch(() => {
+        syncBranding();
+      });
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener(SYSTEM_BRANDING_UPDATED_EVENT, syncBranding as EventListener);
+
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener(SYSTEM_BRANDING_UPDATED_EVENT, syncBranding as EventListener);
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -941,6 +971,16 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
       const collectionPaymentSummary = getLatestCollectionPaymentSummary(detail);
       const resolvedPaymentMethod = detail.paymentMethod || collectionPaymentSummary?.paymentMethod || '—';
       const resolvedPaymentAccount = collectionPaymentSummary?.paymentAccount || '—';
+      const receiptCompanyName = branding.receiptCompanyName || branding.systemName;
+      const receiptAddress = branding.receiptAddress || '—';
+      const receiptPhone = branding.receiptPhone || '—';
+      const receiptEmail = branding.receiptEmail;
+      const receiptFooterText = branding.footerText;
+      const receiptLogoHtml = branding.logoDataUrl
+        ? `<img class="company-logo" src="${escapeHtml(branding.logoDataUrl)}" alt="${escapeHtml(
+            receiptCompanyName,
+          )} logo" />`
+        : '';
 
       let rowNo = 1;
       const rows: string[] = [];
@@ -1036,6 +1076,9 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
               .right { text-align: right; }
               .bold { font-weight: 700; }
               .total { font-size: 16px; font-weight: 700; }
+              .company-header { display: flex; gap: 12px; align-items: flex-start; }
+              .company-logo { width: 56px; height: 56px; object-fit: contain; border: 1px solid #e5e7eb; border-radius: 8px; padding: 4px; }
+              .footer { text-align: center; color: #4b5563; }
               @media print { .page { margin: 0; border-width: 1px; } }
             </style>
           </head>
@@ -1043,10 +1086,14 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
             <div class="page">
               <h1>Receipt</h1>
 
-              <div class="section">
-                <div>Company Name: ABC Internet Service Provider</div>
-                <div>Address: No. 123, Main Road, Yangon</div>
-                <div>Phone: 09-xxxxxxx</div>
+              <div class="section company-header">
+                ${receiptLogoHtml}
+                <div>
+                  <div class="bold">${escapeHtml(receiptCompanyName)}</div>
+                  <div>${escapeHtml(receiptAddress)}</div>
+                  <div>${escapeHtml(receiptPhone)}</div>
+                  ${receiptEmail ? `<div>${escapeHtml(receiptEmail)}</div>` : ''}
+                </div>
               </div>
 
               <div class="section grid">
@@ -1100,6 +1147,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                 <div>Payment Date: ${escapeHtml(formatDisplayDate(detail.paidAt))}</div>
                 <div>Receipt No: ${escapeHtml(receiptNo)}</div>
               </div>
+              ${receiptFooterText ? `<div class="section footer">${escapeHtml(receiptFooterText)}</div>` : ''}
             </div>
           </body>
         </html>
@@ -1755,10 +1803,20 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
 
                 <h2 className="text-center text-3xl font-semibold">Receipt</h2>
 
-                <div className="mt-4 space-y-1 text-sm">
-                  <p>Company Name: ABC Internet Service Provider</p>
-                  <p>Address: No. 123, Main Road, Yangon</p>
-                  <p>Phone: 09-xxxxxxx</p>
+                <div className="mt-4 flex flex-col gap-3 text-sm sm:flex-row sm:items-start">
+                  {branding.logoDataUrl && (
+                    <img
+                      src={branding.logoDataUrl}
+                      alt={`${branding.receiptCompanyName || branding.systemName} logo`}
+                      className="h-16 w-16 rounded-md border border-slate-200 object-contain p-1"
+                    />
+                  )}
+                  <div className="space-y-1">
+                    <p className="font-semibold">{branding.receiptCompanyName || branding.systemName}</p>
+                    <p>{branding.receiptAddress || '—'}</p>
+                    <p>{branding.receiptPhone || '—'}</p>
+                    {branding.receiptEmail && <p>{branding.receiptEmail}</p>}
+                  </div>
                 </div>
 
                 <div className="mt-6 grid gap-6 md:grid-cols-2">
@@ -1930,6 +1988,10 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                     </Button>
                   </div>
                 </div>
+
+                {branding.footerText && (
+                  <p className="text-center text-sm text-slate-500">{branding.footerText}</p>
+                )}
               </div>
             )}
           </DialogContent>

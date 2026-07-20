@@ -19,6 +19,13 @@ import {
   Wifi
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  fetchSystemBranding,
+  readSystemBranding,
+  SYSTEM_BRANDING_STORAGE_KEY,
+  SYSTEM_BRANDING_UPDATED_EVENT,
+} from '@/lib/system-branding';
+import type { SystemBranding } from '@/lib/system-branding';
 
 const navItems = [
   { href: '/super-admin/dashboard', label: 'Overview', icon: LayoutDashboard },
@@ -40,6 +47,7 @@ export default function SuperAdminLayout({ children }: { children: React.ReactNo
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isAuthed, setIsAuthed] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [branding, setBranding] = useState<SystemBranding>(() => readSystemBranding());
 
   const readCookieFlag = (name: string) => {
     if (typeof document === 'undefined') return '';
@@ -60,6 +68,29 @@ export default function SuperAdminLayout({ children }: { children: React.ReactNo
     if (currentPath.startsWith('/super-admin/settings')) return 'System Settings';
     return 'Overview';
   }, [currentPath]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const syncBranding = () => {
+      setBranding(readSystemBranding());
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === SYSTEM_BRANDING_STORAGE_KEY) {
+        syncBranding();
+      }
+    };
+    fetchSystemBranding()
+      .then(setBranding)
+      .catch(() => {
+        syncBranding();
+      });
+    window.addEventListener('storage', onStorage);
+    window.addEventListener(SYSTEM_BRANDING_UPDATED_EVENT, syncBranding as EventListener);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener(SYSTEM_BRANDING_UPDATED_EVENT, syncBranding as EventListener);
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -153,11 +184,19 @@ export default function SuperAdminLayout({ children }: { children: React.ReactNo
         <div className="flex items-center justify-between border-b border-slate-800 px-4 py-4">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800">
-              <Shield className="h-5 w-5 text-amber-300" />
+              {branding.logoDataUrl ? (
+                <img
+                  src={branding.logoDataUrl}
+                  alt={`${branding.systemName} logo`}
+                  className="h-7 w-7 object-contain"
+                />
+              ) : (
+                <Shield className="h-5 w-5 text-amber-300" />
+              )}
             </div>
             <div>
               <p className="text-sm uppercase tracking-[0.2em] text-slate-400">Super Admin</p>
-              <p className="text-lg font-semibold">Control Room</p>
+              <p className="max-w-36 truncate text-lg font-semibold">{branding.systemName}</p>
             </div>
           </div>
           <Button

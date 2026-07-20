@@ -29,6 +29,13 @@ import {
   DEFAULT_COLLECTOR_DASHBOARD_COPY,
   normalizeCollectorDashboardCopy,
 } from '@/lib/collector-dashboard-copy';
+import {
+  fetchSystemBranding,
+  readSystemBranding,
+  SYSTEM_BRANDING_STORAGE_KEY,
+  SYSTEM_BRANDING_UPDATED_EVENT,
+} from '@/lib/system-branding';
+import type { SystemBranding } from '@/lib/system-branding';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -59,6 +66,7 @@ export default function Layout({ children }: LayoutProps) {
     en: { ...DEFAULT_COLLECTOR_DASHBOARD_COPY.en },
     mm: { ...DEFAULT_COLLECTOR_DASHBOARD_COPY.mm },
   }));
+  const [branding, setBranding] = useState<SystemBranding>(() => readSystemBranding());
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -239,6 +247,29 @@ export default function Layout({ children }: LayoutProps) {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    const syncBranding = () => {
+      setBranding(readSystemBranding());
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === SYSTEM_BRANDING_STORAGE_KEY) {
+        syncBranding();
+      }
+    };
+    fetchSystemBranding()
+      .then(setBranding)
+      .catch(() => {
+        syncBranding();
+      });
+    window.addEventListener('storage', onStorage);
+    window.addEventListener(SYSTEM_BRANDING_UPDATED_EVENT, syncBranding as EventListener);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener(SYSTEM_BRANDING_UPDATED_EVENT, syncBranding as EventListener);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
     if (window.innerWidth >= 1024) {
       window.localStorage.setItem('sidebarOpen', String(sidebarOpen));
     }
@@ -289,8 +320,16 @@ export default function Layout({ children }: LayoutProps) {
       >
         <div className="flex items-center justify-between p-4 border-b">
           <div className="flex items-center space-x-2">
-            <Building2 className="h-8 w-8 text-blue-600" />
-            {sidebarOpen && <h1 className="text-xl font-bold text-gray-800">Bill Pro</h1>}
+            {branding.logoDataUrl ? (
+              <img
+                src={branding.logoDataUrl}
+                alt={`${branding.systemName} logo`}
+                className="h-8 w-8 rounded object-contain"
+              />
+            ) : (
+              <Building2 className="h-8 w-8 text-blue-600" />
+            )}
+            {sidebarOpen && <h1 className="truncate text-xl font-bold text-gray-800">{branding.systemName}</h1>}
           </div>
           {sidebarOpen && (
             <Button

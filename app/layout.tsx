@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import { AuthProvider } from './contexts/auth-context';
 import { DataProvider } from './contexts/data-context';
 import { Toaster } from '@/components/ui/toaster';
+import SystemTitle from './components/system-title';
 
 export const metadata: Metadata = {
   title: 'Bill Pro - Billing Management System',
@@ -19,6 +20,7 @@ export default function RootLayout({
       <body className="font-sans antialiased">
         <AuthProvider>
           <DataProvider>
+            <SystemTitle />
             {children}
             <Toaster />
           </DataProvider>

@@ -17,6 +17,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "./contexts/auth-context";
 import { useRouter } from "next/navigation";
 import { Building2, Eye, EyeOff } from "lucide-react";
+import {
+  fetchSystemBranding,
+  readSystemBranding,
+  SYSTEM_BRANDING_STORAGE_KEY,
+  SYSTEM_BRANDING_UPDATED_EVENT,
+} from "@/lib/system-branding";
+import type { SystemBranding } from "@/lib/system-branding";
 
 export default function LoginPage() {
   const [credentials, setCredentials] = useState({
@@ -46,12 +53,36 @@ export default function LoginPage() {
   const { login } = useAuth();
   const router = useRouter();
   const resetCloseTimer = useRef<NodeJS.Timeout | null>(null);
+  const [branding, setBranding] = useState<SystemBranding>(() => readSystemBranding());
 
   const [passwordVisible, setPasswordVisible] = useState({
     login: false,
   });
   const API_BASE_URL =
     process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const syncBranding = () => {
+      setBranding(readSystemBranding());
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === SYSTEM_BRANDING_STORAGE_KEY) {
+        syncBranding();
+      }
+    };
+    fetchSystemBranding()
+      .then(setBranding)
+      .catch(() => {
+        syncBranding();
+      });
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(SYSTEM_BRANDING_UPDATED_EVENT, syncBranding as EventListener);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(SYSTEM_BRANDING_UPDATED_EVENT, syncBranding as EventListener);
+    };
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -264,12 +295,20 @@ export default function LoginPage() {
       <Card className='w-full max-w-md'>
         <CardHeader className='text-center'>
           <div className='flex justify-center mb-4'>
-            <Building2 className='h-12 w-12 text-blue-600' />
+            {branding.logoDataUrl ? (
+              <img
+                src={branding.logoDataUrl}
+                alt={`${branding.systemName} logo`}
+                className="h-12 w-12 rounded object-contain"
+              />
+            ) : (
+              <Building2 className='h-12 w-12 text-blue-600' />
+            )}
           </div>
           <CardTitle className='text-2xl font-bold text-gray-800'>
-            Bill Pro
+            {branding.systemName}
           </CardTitle>
-          <p className='text-gray-600'>Billing Management System</p>
+          <p className='text-gray-600'>{branding.systemTagline}</p>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin} className='space-y-4'>

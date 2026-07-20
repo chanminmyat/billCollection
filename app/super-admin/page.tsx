@@ -7,6 +7,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Shield } from 'lucide-react';
+import {
+  fetchSystemBranding,
+  readSystemBranding,
+  SYSTEM_BRANDING_STORAGE_KEY,
+  SYSTEM_BRANDING_UPDATED_EVENT,
+} from '@/lib/system-branding';
+import type { SystemBranding } from '@/lib/system-branding';
 
 export default function SuperAdminLoginPage() {
   const router = useRouter();
@@ -14,6 +21,7 @@ export default function SuperAdminLoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [branding, setBranding] = useState<SystemBranding>(() => readSystemBranding());
 
   const superAdminUser = process.env.NEXT_PUBLIC_SUPER_ADMIN_USERNAME ?? '';
   const superAdminPass = process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD ?? '';
@@ -25,6 +33,29 @@ export default function SuperAdminLoginPage() {
       .find((item) => item.startsWith(`${name}=`));
     return matched ? decodeURIComponent(matched.split('=').slice(1).join('=')) : '';
   };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const syncBranding = () => {
+      setBranding(readSystemBranding());
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === SYSTEM_BRANDING_STORAGE_KEY) {
+        syncBranding();
+      }
+    };
+    fetchSystemBranding()
+      .then(setBranding)
+      .catch(() => {
+        syncBranding();
+      });
+    window.addEventListener('storage', onStorage);
+    window.addEventListener(SYSTEM_BRANDING_UPDATED_EVENT, syncBranding as EventListener);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener(SYSTEM_BRANDING_UPDATED_EVENT, syncBranding as EventListener);
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -76,15 +107,18 @@ export default function SuperAdminLoginPage() {
         <div className="flex flex-col gap-10 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-6 lg:max-w-lg">
             <div className="inline-flex items-center gap-3 rounded-full border border-slate-700 bg-slate-900 px-4 py-2 text-xs uppercase tracking-[0.3em] text-slate-300">
-              <Shield className="h-4 w-4 text-amber-300" />
-              Super Admin Console
+              {branding.logoDataUrl ? (
+                <img src={branding.logoDataUrl} alt={`${branding.systemName} logo`} className="h-4 w-4 object-contain" />
+              ) : (
+                <Shield className="h-4 w-4 text-amber-300" />
+              )}
+              {branding.systemName}
             </div>
             <h1 className="text-4xl font-semibold leading-tight">
-              Secure control for admins, packages, and content.
+              Secure control for {branding.systemName}.
             </h1>
             <p className="text-sm text-slate-400">
-              This area is restricted to the system owner. Manage platform admins, WiFi packages,
-              system branding, and content flows for every role.
+              {branding.systemTagline}
             </p>
           </div>
 
