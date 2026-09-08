@@ -58,9 +58,6 @@ export default function Layout({ children }: LayoutProps) {
   const [collectorsMenuOpen, setCollectorsMenuOpen] = useState(false);
   const [billingMenuOpen, setBillingMenuOpen] = useState(false);
   const [paymentConfigMenuOpen, setPaymentConfigMenuOpen] = useState(false);
-  const [hoveredMenu, setHoveredMenu] = useState<
-    'customers' | 'collectors' | 'billing' | 'paymentConfig' | null
-  >(null);
   const [collectorViewHash, setCollectorViewHash] = useState<string>('dashboard');
   const [collectorDashboardCopy, setCollectorDashboardCopy] = useState(() => ({
     en: { ...DEFAULT_COLLECTOR_DASHBOARD_COPY.en },
@@ -293,6 +290,10 @@ export default function Layout({ children }: LayoutProps) {
     if (typeof window === 'undefined') return;
     if (isDesktop) {
       setSidebarOpen(false);
+      setCustomersMenuOpen(false);
+      setCollectorsMenuOpen(false);
+      setBillingMenuOpen(false);
+      setPaymentConfigMenuOpen(false);
     }
   };
 
@@ -381,13 +382,13 @@ export default function Layout({ children }: LayoutProps) {
                       ? 'paymentConfig'
                     : 'customers';
               const isMenuOpen =
-                (menuKey === 'collectors'
+                menuKey === 'collectors'
                   ? collectorsMenuOpen
                   : menuKey === 'billing'
                     ? billingMenuOpen
                     : menuKey === 'paymentConfig'
                       ? paymentConfigMenuOpen
-                    : customersMenuOpen) || hoveredMenu === menuKey;
+                      : customersMenuOpen;
               const isMenuRoute =
                 menuKey === 'collectors'
                   ? isCollectorsRoute
@@ -411,32 +412,6 @@ export default function Layout({ children }: LayoutProps) {
                 <div
                   key={item.label}
                   className="relative px-2"
-                  onMouseEnter={() => {
-                    if (!isDesktop) return;
-                    setHoveredMenu(menuKey);
-                    if (menuKey === 'collectors') {
-                      setCollectorsMenuOpen(true);
-                    } else if (menuKey === 'billing') {
-                      setBillingMenuOpen(true);
-                    } else if (menuKey === 'paymentConfig') {
-                      setPaymentConfigMenuOpen(true);
-                    } else {
-                      setCustomersMenuOpen(true);
-                    }
-                  }}
-                  onMouseLeave={() => {
-                    if (!isDesktop) return;
-                    setHoveredMenu(null);
-                    if (menuKey === 'collectors') {
-                      setCollectorsMenuOpen(false);
-                    } else if (menuKey === 'billing') {
-                      setBillingMenuOpen(false);
-                    } else if (menuKey === 'paymentConfig') {
-                      setPaymentConfigMenuOpen(false);
-                    } else {
-                      setCustomersMenuOpen(false);
-                    }
-                  }}
                 >
                   <button
                     type="button"

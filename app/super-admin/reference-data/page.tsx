@@ -15,6 +15,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  CustomerCodeSettings,
+  EMPTY_CUSTOMER_CODE_SETTINGS,
+  fallbackLocationCode,
+  fetchCustomerCodeSettings,
+  saveCustomerCodeSettings,
+} from '@/lib/customer-code-settings';
 
 type EditorState = {
   content: string;
@@ -56,7 +63,7 @@ type NrcData = {
 type DeleteAction =
   | { kind: 'region'; region: string }
   | { kind: 'district'; region: string; district: string }
-  | { kind: 'township'; region: string; district: string; index: number; name: string }
+  | { kind: 'township'; region: string; district: string; name: string }
   | { kind: 'nrc-type'; index: number }
   | { kind: 'nrc-state'; index: number }
   | { kind: 'nrc-township'; id: string };
@@ -141,6 +148,12 @@ export default function ReferenceDataPage() {
   });
 
   const [townshipData, setTownshipData] = useState<TownshipData>({});
+  const [customerCodeSettings, setCustomerCodeSettings] = useState<CustomerCodeSettings>(
+    EMPTY_CUSTOMER_CODE_SETTINGS,
+  );
+  const [customerCodeSettingsError, setCustomerCodeSettingsError] = useState('');
+  const [customerCodeSettingsSuccess, setCustomerCodeSettingsSuccess] = useState('');
+  const [customerCodeSettingsSaving, setCustomerCodeSettingsSaving] = useState(false);
   const [selectedRegion, setSelectedRegion] = useState('');
   const [selectedDistrict, setSelectedDistrict] = useState('');
   const [newRegion, setNewRegion] = useState('');
@@ -163,9 +176,10 @@ export default function ReferenceDataPage() {
 
     const fetchData = async () => {
       try {
-        const [nrcResponse, townshipResponse] = await Promise.all([
+        const [nrcResponse, townshipResponse, codeSettings] = await Promise.all([
           fetch('/api/reference-data/nrc'),
-          fetch('/api/reference-data/township')
+          fetch('/api/reference-data/township'),
+          fetchCustomerCodeSettings().catch(() => null),
         ]);
 
         const nrcDataResponse = await nrcResponse.json().catch(() => ({}));
@@ -192,6 +206,14 @@ export default function ReferenceDataPage() {
 
         const parsedTownship = parseTownshipJson(townshipContent);
         setTownshipData(parsedTownship);
+        if (codeSettings) {
+          setCustomerCodeSettings(codeSettings);
+          setCustomerCodeSettingsError('');
+        } else {
+          setCustomerCodeSettingsError(
+            'Could not load saved customer code abbreviations. Fallback codes will still work.',
+          );
+        }
 
         const firstRegion = Object.keys(parsedTownship)[0] ?? '';
         const firstDistrict = firstRegion ? Object.keys(parsedTownship[firstRegion] ?? {})[0] ?? '' : '';
@@ -226,6 +248,25 @@ export default function ReferenceDataPage() {
     if (!selectedRegion || !selectedDistrict) return [] as string[];
     return [...(townshipData[selectedRegion]?.[selectedDistrict] ?? [])].sort((a, b) => a.localeCompare(b));
   }, [selectedDistrict, selectedRegion, townshipData]);
+
+  const customerCodePreview = useMemo(() => {
+    const previewTownship = townships[0] ?? 'Township';
+    const parts = [customerCodeSettings.customPrefix];
+    if (customerCodeSettings.includeRegion) {
+      parts.push(
+        customerCodeSettings.regionCodes[selectedRegion] ||
+          fallbackLocationCode(selectedRegion, 'REG'),
+      );
+    }
+    if (customerCodeSettings.includeTownship) {
+      parts.push(
+        customerCodeSettings.townshipCodes[selectedRegion]?.[previewTownship] ||
+          fallbackLocationCode(previewTownship, 'TWN'),
+      );
+    }
+    const prefix = parts.filter(Boolean).join('-') || 'C';
+    return `${prefix}-${String(1).padStart(customerCodeSettings.sequenceDigits, '0')}`;
+  }, [customerCodeSettings, selectedRegion, townships]);
 
   const filteredNrcTownships = useMemo(() => {
     const query = townshipSearch.trim().toLowerCase();
@@ -271,6 +312,54 @@ export default function ReferenceDataPage() {
   const syncTownshipData = (nextData: TownshipData) => {
     setTownshipData(nextData);
     setTownship((prev) => ({ ...prev, content: toPrettyJson(nextData), error: '' }));
+  };
+
+  const sanitizeLocationCode = (value: string) =>
+    value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+
+  const handleUpdateRegionCode = (value: string) => {
+    if (!selectedRegion) return;
+    const code = sanitizeLocationCode(value);
+    setCustomerCodeSettings((current) => {
+      const regionCodes = { ...current.regionCodes };
+      if (code) regionCodes[selectedRegion] = code;
+      else delete regionCodes[selectedRegion];
+      return { ...current, regionCodes };
+    });
+  };
+
+  const handleSaveCustomerCodeSettings = async () => {
+    setCustomerCodeSettingsSaving(true);
+    setCustomerCodeSettingsError('');
+    setCustomerCodeSettingsSuccess('');
+    try {
+      const saved = await saveCustomerCodeSettings(customerCodeSettings);
+      setCustomerCodeSettings(saved);
+      setCustomerCodeSettingsSuccess('Customer code settings saved successfully.');
+    } catch (error) {
+      setCustomerCodeSettingsError(
+        error instanceof Error ? error.message : 'Failed to save customer code settings.',
+      );
+    } finally {
+      setCustomerCodeSettingsSaving(false);
+    }
+  };
+
+  const handleUpdateTownshipCode = (name: string, value: string) => {
+    if (!selectedRegion) return;
+    const code = sanitizeLocationCode(value);
+    setCustomerCodeSettings((current) => {
+      const regionTownshipCodes = { ...(current.townshipCodes[selectedRegion] ?? {}) };
+      if (code) regionTownshipCodes[name] = code;
+      else delete regionTownshipCodes[name];
+      return {
+        ...current,
+        townshipCodes: {
+          ...current.townshipCodes,
+          [selectedRegion]: regionTownshipCodes,
+        },
+      };
+    });
   };
 
   const syncNrcData = (nextData: NrcData) => {
@@ -396,6 +485,19 @@ export default function ReferenceDataPage() {
     const { [selectedRegion]: currentValue, ...rest } = townshipData;
     const nextData: TownshipData = { ...rest, [nextName]: currentValue ?? {} };
     syncTownshipData(nextData);
+    setCustomerCodeSettings((current) => {
+      const regionCodes = { ...current.regionCodes };
+      const townshipCodes = { ...current.townshipCodes };
+      if (regionCodes[selectedRegion]) {
+        regionCodes[nextName] = regionCodes[selectedRegion];
+        delete regionCodes[selectedRegion];
+      }
+      if (townshipCodes[selectedRegion]) {
+        townshipCodes[nextName] = townshipCodes[selectedRegion];
+        delete townshipCodes[selectedRegion];
+      }
+      return { ...current, regionCodes, townshipCodes };
+    });
     setSelectedRegion(nextName);
     setStructuredTownshipSuccess('Region renamed.');
   };
@@ -443,11 +545,13 @@ export default function ReferenceDataPage() {
     });
   };
 
-  const handleUpdateTownshipName = (index: number, value: string) => {
+  const handleUpdateTownshipName = (currentName: string, value: string) => {
     if (!selectedRegion || !selectedDistrict) return;
     const trimmed = value.trim();
     const regionMap = townshipData[selectedRegion] ?? {};
     const list = [...(regionMap[selectedDistrict] ?? [])];
+    const index = list.indexOf(currentName);
+    if (index < 0) return;
     list[index] = trimmed;
     const nextData: TownshipData = {
       ...townshipData,
@@ -457,16 +561,30 @@ export default function ReferenceDataPage() {
       },
     };
     syncTownshipData(nextData);
+    if (trimmed && trimmed !== currentName) {
+      setCustomerCodeSettings((current) => {
+        const regionTownshipCodes = { ...(current.townshipCodes[selectedRegion] ?? {}) };
+        if (regionTownshipCodes[currentName]) {
+          regionTownshipCodes[trimmed] = regionTownshipCodes[currentName];
+          delete regionTownshipCodes[currentName];
+        }
+        return {
+          ...current,
+          townshipCodes: {
+            ...current.townshipCodes,
+            [selectedRegion]: regionTownshipCodes,
+          },
+        };
+      });
+    }
   };
 
-  const handleDeleteTownship = (index: number) => {
+  const handleDeleteTownship = (name: string) => {
     if (!selectedRegion || !selectedDistrict) return;
-    const name = townships[index] ?? '';
     setPendingDelete({
       kind: 'township',
       region: selectedRegion,
       district: selectedDistrict,
-      index,
       name,
     });
   };
@@ -560,6 +678,13 @@ export default function ReferenceDataPage() {
     if (pendingDelete.kind === 'region') {
       const { [pendingDelete.region]: _, ...rest } = townshipData;
       syncTownshipData(rest);
+      setCustomerCodeSettings((current) => {
+        const regionCodes = { ...current.regionCodes };
+        const townshipCodes = { ...current.townshipCodes };
+        delete regionCodes[pendingDelete.region];
+        delete townshipCodes[pendingDelete.region];
+        return { ...current, regionCodes, townshipCodes };
+      });
       const nextRegion = Object.keys(rest)[0] ?? '';
       const nextDistrict = nextRegion ? Object.keys(rest[nextRegion] ?? {})[0] ?? '' : '';
       setSelectedRegion(nextRegion);
@@ -569,12 +694,24 @@ export default function ReferenceDataPage() {
       setStructuredTownshipSuccess('Region deleted.');
     } else if (pendingDelete.kind === 'district') {
       const regionMap = townshipData[pendingDelete.region] ?? {};
+      const deletedTownships = regionMap[pendingDelete.district] ?? [];
       const { [pendingDelete.district]: _, ...restDistricts } = regionMap;
       const nextData: TownshipData = {
         ...townshipData,
         [pendingDelete.region]: restDistricts,
       };
       syncTownshipData(nextData);
+      setCustomerCodeSettings((current) => {
+        const regionTownshipCodes = { ...(current.townshipCodes[pendingDelete.region] ?? {}) };
+        deletedTownships.forEach((name) => delete regionTownshipCodes[name]);
+        return {
+          ...current,
+          townshipCodes: {
+            ...current.townshipCodes,
+            [pendingDelete.region]: regionTownshipCodes,
+          },
+        };
+      });
       const nextDistrict = Object.keys(restDistricts)[0] ?? '';
       setSelectedDistrict(nextDistrict);
       setRenameDistrict(nextDistrict);
@@ -582,7 +719,8 @@ export default function ReferenceDataPage() {
     } else if (pendingDelete.kind === 'township') {
       const regionMap = townshipData[pendingDelete.region] ?? {};
       const list = [...(regionMap[pendingDelete.district] ?? [])];
-      list.splice(pendingDelete.index, 1);
+      const index = list.indexOf(pendingDelete.name);
+      if (index >= 0) list.splice(index, 1);
       const nextData: TownshipData = {
         ...townshipData,
         [pendingDelete.region]: {
@@ -591,6 +729,17 @@ export default function ReferenceDataPage() {
         },
       };
       syncTownshipData(nextData);
+      setCustomerCodeSettings((current) => {
+        const regionTownshipCodes = { ...(current.townshipCodes[pendingDelete.region] ?? {}) };
+        delete regionTownshipCodes[pendingDelete.name];
+        return {
+          ...current,
+          townshipCodes: {
+            ...current.townshipCodes,
+            [pendingDelete.region]: regionTownshipCodes,
+          },
+        };
+      });
       setStructuredTownshipSuccess('Township deleted.');
     } else if (pendingDelete.kind === 'nrc-type') {
       const nextTypes = [...nrcData.nrcTypes];
@@ -641,13 +790,18 @@ export default function ReferenceDataPage() {
 
     setTownship((prev) => ({ ...prev, saving: true, error: '', success: '' }));
     try {
-      const response = await fetch('/api/reference-data/township', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: township.content }),
-      });
+      const [response, savedCodeSettings] = await Promise.all([
+        fetch('/api/reference-data/township', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: township.content }),
+        }),
+        saveCustomerCodeSettings(customerCodeSettings),
+      ]);
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data?.message ?? 'Failed to save township data.');
+      setCustomerCodeSettings(savedCodeSettings);
+      setCustomerCodeSettingsError('');
       setTownship((prev) => ({ ...prev, saving: false, success: 'Saved successfully.' }));
     } catch (error) {
       setTownship((prev) => ({
@@ -706,6 +860,120 @@ export default function ReferenceDataPage() {
             </div>
           </div>
 
+          <div className="space-y-4 rounded-md border border-indigo-200 bg-indigo-50 p-4">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Customer Code Format</p>
+              <p className="text-xs text-slate-600">
+                Choose which parts appear in newly generated customer codes.
+              </p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-700" htmlFor="customerCodePrefix">
+                  Custom prefix
+                </label>
+                <Input
+                  id="customerCodePrefix"
+                  value={customerCodeSettings.customPrefix}
+                  placeholder="C or CUS"
+                  className="bg-white font-mono uppercase"
+                  onChange={(event) =>
+                    setCustomerCodeSettings((current) => ({
+                      ...current,
+                      customPrefix: sanitizeLocationCode(event.target.value),
+                    }))
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-700" htmlFor="customerCodeDigits">
+                  Sequence digits
+                </label>
+                <Input
+                  id="customerCodeDigits"
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={customerCodeSettings.sequenceDigits}
+                  className="bg-white"
+                  onChange={(event) =>
+                    setCustomerCodeSettings((current) => ({
+                      ...current,
+                      sequenceDigits: Math.min(10, Math.max(1, Number(event.target.value) || 1)),
+                    }))
+                  }
+                />
+              </div>
+              <label className="flex h-10 items-center gap-2 self-end rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={customerCodeSettings.includeRegion}
+                  onChange={(event) =>
+                    setCustomerCodeSettings((current) => ({
+                      ...current,
+                      includeRegion: event.target.checked,
+                    }))
+                  }
+                />
+                Include region
+              </label>
+              <label className="flex h-10 items-center gap-2 self-end rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={customerCodeSettings.includeTownship}
+                  onChange={(event) =>
+                    setCustomerCodeSettings((current) => ({
+                      ...current,
+                      includeTownship: event.target.checked,
+                    }))
+                  }
+                />
+                Include township
+              </label>
+            </div>
+            <div className="flex flex-col gap-3 rounded-md bg-white px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-sm text-slate-700">
+                Preview: <span className="font-mono font-semibold text-indigo-700">{customerCodePreview}</span>
+              </div>
+              <Button
+                type="button"
+                onClick={handleSaveCustomerCodeSettings}
+                disabled={customerCodeSettingsSaving || township.loading}
+              >
+                {customerCodeSettingsSaving ? 'Saving...' : 'Save Customer Code Settings'}
+              </Button>
+            </div>
+            {customerCodeSettingsSuccess && (
+              <p className="text-sm text-emerald-700">{customerCodeSettingsSuccess}</p>
+            )}
+            {customerCodeSettingsError && (
+              <p className="text-sm text-rose-700">{customerCodeSettingsError}</p>
+            )}
+          </div>
+
+          {selectedRegion && (
+            <div className="space-y-2 rounded-md border border-blue-200 bg-blue-50 p-3">
+              <p className="text-sm font-medium text-slate-800">Customer Code Abbreviations</p>
+              <p className="text-xs text-slate-600">
+                Codes are optional. Empty fields automatically use the first three letters.
+              </p>
+              {customerCodeSettings.includeRegion ? (
+                <div className="grid items-center gap-2 md:grid-cols-[1fr_12rem]">
+                  <span className="text-sm text-slate-700">{selectedRegion}</span>
+                  <Input
+                    aria-label={`${selectedRegion} customer code abbreviation`}
+                    value={customerCodeSettings.regionCodes[selectedRegion] ?? ''}
+                    placeholder={`Fallback: ${fallbackLocationCode(selectedRegion, 'REG')}`}
+                    onChange={(event) => handleUpdateRegionCode(event.target.value)}
+                    className="bg-white font-mono uppercase"
+                  />
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500">Region is disabled in the customer code format.</p>
+              )}
+            </div>
+          )}
+
           <div className="grid gap-3 md:grid-cols-3">
             <Input placeholder="Add new region" value={newRegion} onChange={(event) => setNewRegion(event.target.value)} />
             <Input placeholder="Add new district" value={newDistrict} onChange={(event) => setNewDistrict(event.target.value)} />
@@ -731,15 +999,44 @@ export default function ReferenceDataPage() {
 
           {townships.length > 0 && (
             <div className="space-y-2 rounded-md border border-slate-200 p-3">
-              <p className="text-xs font-medium text-slate-600">Edit Townships</p>
-              {townships.map((name, index) => (
-                <div key={`${name}-${index}`} className="flex gap-2">
-                  <Input value={name} onChange={(event) => handleUpdateTownshipName(index, event.target.value)} />
-                  <Button type="button" variant="outline" onClick={() => handleDeleteTownship(index)}>Delete</Button>
+              <div className={`grid gap-2 text-xs font-medium text-slate-600 ${
+                customerCodeSettings.includeTownship
+                  ? 'md:grid-cols-[1fr_12rem_auto]'
+                  : 'md:grid-cols-[1fr_auto]'
+              }`}>
+                <span>Township</span>
+                {customerCodeSettings.includeTownship && <span>Customer code</span>}
+                <span className="sr-only">Actions</span>
+              </div>
+              {townships.map((name) => (
+                <div key={name} className={`grid gap-2 ${
+                  customerCodeSettings.includeTownship
+                    ? 'md:grid-cols-[1fr_12rem_auto]'
+                    : 'md:grid-cols-[1fr_auto]'
+                }`}>
+                  <Input value={name} onChange={(event) => handleUpdateTownshipName(name, event.target.value)} />
+                  {customerCodeSettings.includeTownship && (
+                    <Input
+                      aria-label={`${name} customer code abbreviation`}
+                      value={customerCodeSettings.townshipCodes[selectedRegion]?.[name] ?? ''}
+                      placeholder={`Fallback: ${fallbackLocationCode(name, 'TWN')}`}
+                      onChange={(event) => handleUpdateTownshipCode(name, event.target.value)}
+                      className="font-mono uppercase"
+                    />
+                  )}
+                  <Button type="button" variant="outline" onClick={() => handleDeleteTownship(name)}>Delete</Button>
                 </div>
               ))}
             </div>
           )}
+
+          <Button
+            type="button"
+            onClick={() => handleSave('township')}
+            disabled={township.saving || township.loading}
+          >
+            {township.saving ? 'Saving...' : 'Save Township Settings'}
+          </Button>
 
           {structuredTownshipSuccess && <p className="text-sm text-emerald-600">{structuredTownshipSuccess}</p>}
           {structuredTownshipError && <p className="text-sm text-rose-600">{structuredTownshipError}</p>}
@@ -762,9 +1059,6 @@ export default function ReferenceDataPage() {
           )}
           {township.error && <p className="text-sm text-rose-600">{township.error}</p>}
           {township.success && <p className="text-sm text-emerald-600">{township.success}</p>}
-          <Button onClick={() => handleSave('township')} disabled={township.saving || township.loading}>
-            {township.saving ? 'Saving...' : 'Save Township Data'}
-          </Button>
         </CardContent>
       </Card>
 

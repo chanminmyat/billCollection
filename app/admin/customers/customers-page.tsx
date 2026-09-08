@@ -35,6 +35,8 @@ import {
 } from '@/lib/billing-config';
 import { formatDisplayDate, formatDisplayDateRange } from '@/lib/date-format';
 import { appendActivityLog } from '@/lib/activity-log';
+import ExcelBulkActions from '../../components/excel-bulk-actions';
+import type { ExcelImportRow, ExcelTemplateColumn } from '@/lib/excel-template';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 const CUSTOMER_CREATE_DRAFT_STORAGE_KEY = 'billpro_customer_create_draft_v1';
@@ -44,6 +46,39 @@ const POST_CREATE_INVOICE_PROMPT_SESSION_KEY = 'billpro_post_create_invoice_prom
 const CUSTOMER_BILLING_FEE_CACHE_STORAGE_KEY = 'billpro_customer_billing_fee_cache_v1';
 const CUSTOMER_DRAFT_TTL_DAYS = 7;
 const CUSTOMER_DRAFT_TTL_MS = CUSTOMER_DRAFT_TTL_DAYS * 24 * 60 * 60 * 1000;
+
+const CUSTOMER_IMPORT_COLUMNS: ExcelTemplateColumn[] = [
+  { key: 'customer_type', required: true, description: 'individual or business.', example: 'individual', width: 16 },
+  { key: 'name', required: true, description: 'Personal name or company name.', example: 'Mg Mg', width: 24 },
+  { key: 'nrc', required: true, description: 'Personal NRC, or authorized contact NRC for a business.', example: '12/ALANA(N)123456', width: 24 },
+  { key: 'contact_person', description: 'Required for business customers.', example: '', width: 24 },
+  { key: 'registration_number', description: 'Business registration number.', example: '', width: 24 },
+  { key: 'tax_id', description: 'Business tax identification number.', example: '', width: 20 },
+  { key: 'phone', required: true, description: 'Primary phone number.', example: '979123456', width: 18 },
+  { key: 'secondary_phone', description: 'Optional secondary phone number.', example: '', width: 18 },
+  { key: 'email', description: 'Optional contact email.', example: 'mgmg@example.com', width: 28 },
+  { key: 'region', required: true, description: 'Region name from the Locations sheet.', example: 'Yangon Region', width: 24 },
+  { key: 'district', required: true, description: 'District name from the Locations sheet.', example: 'West Yangon(Downtown)', width: 24 },
+  { key: 'township', required: true, description: 'Township name from the Locations sheet.', example: 'Ahlon', width: 20 },
+  { key: 'ward', required: true, description: 'Installation ward.', example: 'Thayet Taw Ward', width: 24 },
+  { key: 'building', description: 'Building or house number.', example: 'No. 12', width: 18 },
+  { key: 'street', description: 'Street name.', example: 'Lower Kyeemyindaing Road', width: 28 },
+  { key: 'city', description: 'City.', example: 'Yangon', width: 18 },
+  { key: 'postal_code', description: 'Postal code.', example: '11121', width: 14 },
+  { key: 'map_link', description: 'Optional Google Maps link.', example: '', width: 32 },
+  { key: 'plan_code', required: true, description: 'Existing plan code from the Plans sheet.', example: 'PLAN-BASIC-50', width: 22 },
+  { key: 'billing_rule', required: true, description: 'Billing rule ID or exact name from the Billing Rules sheet.', example: 'Monthly Default Rule', width: 28 },
+  { key: 'service_type', description: 'Defaults to Fiber.', example: 'Fiber', width: 16 },
+  { key: 'service_start_date', required: true, description: 'Date in YYYY-MM-DD format.', example: '2026-09-08', width: 20 },
+  { key: 'installation_date', required: true, description: 'Date in YYYY-MM-DD format.', example: '2026-09-08', width: 20 },
+  { key: 'ip_type', description: 'Dynamic or Static. Defaults to Dynamic.', example: 'Dynamic', width: 14 },
+  { key: 'static_ip', description: 'Required only when ip_type is Static.', example: '', width: 18 },
+  { key: 'collector_code', description: 'Optional existing collector code for assignment.', example: '', width: 20 },
+  { key: 'collection_service', description: 'yes or no. Defaults to no.', example: 'no', width: 20 },
+  { key: 'collection_fee', description: 'Required when collection_service is yes.', example: '0', width: 18 },
+  { key: 'installation_fee', description: 'Optional installation fee.', example: '0', width: 18 },
+  { key: 'additional_fees', description: 'Optional additional fees.', example: '0', width: 18 },
+];
 
 type SelectOption = { value: string; label: string };
 type PlanOption = {
@@ -602,6 +637,7 @@ export default function CustomersPage({
   const [hasFetchedCustomers, setHasFetchedCustomers] = useState(false);
   const [customersLoading, setCustomersLoading] = useState(false);
   const [customersError, setCustomersError] = useState('');
+  const [customerImportRefreshKey, setCustomerImportRefreshKey] = useState(0);
   const [remoteCollectors, setRemoteCollectors] = useState<Array<{ id: string; name: string; code?: string }>>([]);
   const [hasFetchedCollectors, setHasFetchedCollectors] = useState(false);
   const [collectorsLoading, setCollectorsLoading] = useState(false);
@@ -1671,6 +1707,207 @@ export default function CustomersPage({
     return base ? `${base}, ${address.postalCode}` : address.postalCode;
   };
 
+  const customerImportReferenceSheets = useMemo(
+    () => [
+      {
+        name: 'Locations',
+        headers: ['region', 'district', 'township'],
+        rows: Object.entries(townshipData as Record<string, Record<string, string[]>>).flatMap(
+          ([region, districtMap]) =>
+            Object.entries(districtMap).flatMap(([district, townships]) =>
+              townships.map((township) => [region, district, township]),
+            ),
+        ),
+      },
+      {
+        name: 'Plans',
+        headers: ['plan_code', 'plan_name', 'bandwidth', 'monthly_fee', 'currency'],
+        rows: activePlans.map((plan) => [
+          plan.planCode,
+          plan.planName,
+          plan.bandwidthPlan ?? '',
+          plan.monthlyFee ?? 0,
+          plan.currency ?? 'MMK',
+        ]),
+      },
+      {
+        name: 'Billing Rules',
+        headers: ['billing_rule_id', 'billing_rule_name', 'billing_type'],
+        rows: activeBillingRules.map((rule) => [rule.id, rule.name, rule.billingType]),
+      },
+      {
+        name: 'NRC Reference',
+        headers: ['state_number', 'state_name', 'township_short', 'township_name', 'nrc_type'],
+        rows: nrcData.nrcTownships.flatMap((township) =>
+          nrcData.nrcTypes.map((type) => [
+            township.stateCode,
+            nrcData.nrcStates.find((state) => state.code === township.stateCode)?.name.en ?? '',
+            township.short.en,
+            township.name.en,
+            type.name.en,
+          ]),
+        ),
+      },
+    ],
+    [activeBillingRules, activePlans],
+  );
+
+  const normalizeImportDate = (raw: string) => {
+    const value = raw.trim();
+    const iso = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (iso) return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`;
+    const dayFirst = value.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+    if (dayFirst) {
+      return `${dayFirst[3]}-${dayFirst[2].padStart(2, '0')}-${dayFirst[1].padStart(2, '0')}`;
+    }
+    return '';
+  };
+
+  const importCustomerRow = async (row: ExcelImportRow, rowNumber: number) => {
+    const value = (key: string) => String(row[key] ?? '').trim();
+    const type = value('customer_type').toLowerCase();
+    const name = value('name');
+    const nrc = value('nrc').replace(/\s+/g, '');
+    const phone = value('phone').replace(/\D/g, '').replace(/^95/, '').replace(/^0/, '');
+    const email = value('email');
+    const region = value('region');
+    const district = value('district');
+    const township = value('township');
+    const serviceStartDate = normalizeImportDate(value('service_start_date'));
+    const installationDate = normalizeImportDate(value('installation_date'));
+    const planCode = value('plan_code');
+    const plan = activePlans.find(
+      (item) => item.planCode.trim().toLowerCase() === planCode.toLowerCase(),
+    );
+    const billingRuleValue = value('billing_rule').toLowerCase();
+    const rule = activeBillingRules.find(
+      (item) =>
+        item.id.toLowerCase() === billingRuleValue || item.name.trim().toLowerCase() === billingRuleValue,
+    );
+    const locationMap = (townshipData as Record<string, Record<string, string[]>>)[region];
+
+    if (!['individual', 'business'].includes(type)) {
+      throw new Error('customer_type must be individual or business.');
+    }
+    if (!/^9\d{5,10}$/.test(phone)) {
+      throw new Error('Phone must be a valid Myanmar number beginning with 9.');
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new Error('Email address is invalid.');
+    }
+    if (!/^.+\/.+\(.+\)[A-Za-z0-9]{6}$/.test(nrc)) {
+      throw new Error('NRC must use a format such as 12/ALANA(N)123456.');
+    }
+    if (type === 'business' && !value('contact_person')) {
+      throw new Error('contact_person is required for a business customer.');
+    }
+    if (!locationMap || !locationMap[district]?.includes(township)) {
+      throw new Error('Region, district, and township must match a row in the Locations sheet.');
+    }
+    if (!plan) throw new Error(`Plan code "${planCode}" was not found or is inactive.`);
+    if (!rule) throw new Error(`Billing rule "${value('billing_rule')}" was not found or is inactive.`);
+    if (!serviceStartDate || !installationDate) {
+      throw new Error('Dates must use YYYY-MM-DD or DD/MM/YYYY format.');
+    }
+
+    const ipType = value('ip_type').toLowerCase() === 'static' ? 'Static' : 'Dynamic';
+    if (ipType === 'Static' && !value('static_ip')) {
+      throw new Error('static_ip is required when ip_type is Static.');
+    }
+    const collectionService = value('collection_service').toLowerCase() === 'yes' ? 'yes' : 'no';
+    const collectionFee = Number(value('collection_fee') || 0);
+    if (collectionService === 'yes' && (!Number.isFinite(collectionFee) || collectionFee < 0)) {
+      throw new Error('collection_fee must be a valid non-negative number.');
+    }
+    const installationAddress = formatAddress({
+      building: value('building'),
+      street: value('street'),
+      ward: value('ward'),
+      city: value('city'),
+      township,
+      district,
+      region,
+      postalCode: value('postal_code'),
+    });
+
+    const payload = {
+      customer: {
+        createInvoiceNow: false,
+        customerType: type,
+        userStatus: 'enable',
+        personalInformation: type === 'individual' ? { name, nrc } : null,
+        businessInformation:
+          type === 'business'
+            ? {
+                companyName: name,
+                businessRegistrationNumber: value('registration_number'),
+                taxIdentificationNumber: value('tax_id'),
+                authorizedContactPerson: value('contact_person'),
+                contactNrc: nrc,
+              }
+            : null,
+        contactInformation: {
+          primaryPhone: phone,
+          secondaryPhone: value('secondary_phone'),
+          ...(email ? { email } : {}),
+        },
+        collectorCode: collectionService === 'yes' ? value('collector_code') || null : null,
+        billingRuleId: rule.id,
+        billingRuleName: rule.name,
+        addressInformation: {
+          installationRegion: region,
+          installationTownship: township,
+          installation: installationAddress,
+          installationMapLink: value('map_link'),
+          billing: 'Same as installation',
+          billingMapLink: value('map_link'),
+        },
+        services: {
+          serviceId: plan.planCode,
+          serviceType: value('service_type') || 'Fiber',
+          packageName: plan.planName,
+          bandwidthPlan: plan.bandwidthPlan ?? '',
+          serviceStartDate,
+          installationDate,
+          ipType,
+          staticIpAddress: value('static_ip'),
+        },
+        billingInformation: {
+          firstInvoiceMode: 'anniversary',
+          billingCycle: 'Monthly',
+          billingDay: Number(serviceStartDate.slice(-2)),
+          currency: plan.currency ?? 'MMK',
+          monthlySubscriptionFee: Number(plan.monthlyFee) || 0,
+          installationFee: Number(value('installation_fee') || 0),
+          additionalFees: Number(value('additional_fees') || 0),
+          collectionService,
+          collectionFee,
+          discountApplied: 'no',
+          discountAmount: 0,
+          discountPeriod: '',
+        },
+      },
+    };
+
+    const response = await fetch(`${API_BASE_URL}/auth/customers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      const message = Array.isArray(data?.message)
+        ? data.message.join(', ')
+        : data?.message ?? data?.error ?? 'Customer creation failed.';
+      throw new Error(String(message));
+    }
+
+    logAdminActivity('customer_imported', 'Customer imported from Excel.', 'customer', data?.id, name, {
+      excelRow: rowNumber,
+      customerType: type,
+    });
+  };
+
   const parseNrcValue = (value: string | null | undefined) => {
     if (!value || typeof value !== 'string') {
       return { state: '', township: '', type: '', number: '' };
@@ -2374,7 +2611,7 @@ export default function CustomersPage({
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [customerImportRefreshKey]);
 
   useEffect(() => {
     let isMounted = true;
@@ -2895,6 +3132,8 @@ export default function CustomersPage({
             }
           : {}),
         addressInformation: {
+          installationRegion,
+          installationTownship,
           installation: formatAddress({
             building: installationBuilding,
             street: installationStreet,
@@ -6070,8 +6309,50 @@ export default function CustomersPage({
 
         {!inlineForm && !editingCustomer && (
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <CardTitle>Customers</CardTitle>
+              <ExcelBulkActions
+                entityLabel="Customer"
+                fileName="customer-import-template.xlsx"
+                columns={CUSTOMER_IMPORT_COLUMNS}
+                exampleRows={[
+                  {
+                    customer_type: 'individual',
+                    name: 'Mg Mg',
+                    nrc: '12/ALANA(N)123456',
+                    phone: '979123456',
+                    email: 'mgmg@example.com',
+                    region: 'Yangon Region',
+                    district: 'West Yangon(Downtown)',
+                    township: 'Ahlon',
+                    ward: 'Thayet Taw Ward',
+                    building: 'No. 12',
+                    street: 'Lower Kyeemyindaing Road',
+                    city: 'Yangon',
+                    postal_code: '11121',
+                    plan_code: activePlans[0]?.planCode ?? '',
+                    billing_rule: activeBillingRules[0]?.name ?? '',
+                    service_type: 'Fiber',
+                    service_start_date: new Date().toISOString().slice(0, 10),
+                    installation_date: new Date().toISOString().slice(0, 10),
+                    ip_type: 'Dynamic',
+                    collection_service: 'no',
+                    collection_fee: 0,
+                    installation_fee: 0,
+                    additional_fees: 0,
+                  },
+                ]}
+                referenceSheets={customerImportReferenceSheets}
+                onImportRow={importCustomerRow}
+                onComplete={() => setCustomerImportRefreshKey((current) => current + 1)}
+                disabled={
+                  customersLoading ||
+                  plansLoading ||
+                  billingRulesLoading ||
+                  activePlans.length === 0 ||
+                  activeBillingRules.length === 0
+                }
+              />
             </CardHeader>
             <CardContent>
               <div className="flex flex-col md:flex-row gap-4 mb-6">

@@ -18,9 +18,29 @@ import nrcData from '@/lib/nrc-data.json';
 import townshipData from '@/lib/township.json';
 import { useToast } from '@/hooks/use-toast';
 import { appendActivityLog } from '@/lib/activity-log';
+import ExcelBulkActions from '../../components/excel-bulk-actions';
+import type { ExcelImportRow, ExcelTemplateColumn } from '@/lib/excel-template';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 const CUSTOMER_BILLING_FEE_CACHE_STORAGE_KEY = 'billpro_customer_billing_fee_cache_v1';
+
+const COLLECTOR_IMPORT_COLUMNS: ExcelTemplateColumn[] = [
+  { key: 'name', required: true, description: 'Collector full name.', example: 'Aung Aung', width: 24 },
+  { key: 'phone', required: true, description: 'Myanmar phone number.', example: '979123456', width: 18 },
+  { key: 'email', description: 'Optional email. A system email is created when blank.', example: 'aung@example.com', width: 28 },
+  { key: 'nrc', required: true, description: 'Complete NRC in canonical format.', example: '12/ALANA(N)123456', width: 24 },
+  { key: 'status', description: 'active or suspended. Defaults to active.', example: 'active', width: 14 },
+  { key: 'region', required: true, description: 'Region name from the Locations sheet.', example: 'Yangon Region', width: 24 },
+  { key: 'district', required: true, description: 'District name from the Locations sheet.', example: 'West Yangon(Downtown)', width: 24 },
+  { key: 'township', required: true, description: 'Township name from the Locations sheet.', example: 'Ahlon', width: 20 },
+  { key: 'assigned_areas', description: 'Optional township/area names separated with semicolons.', example: 'Ahlon;Sanchaung', width: 30 },
+  { key: 'building', description: 'Building or house number.', example: 'No. 12', width: 18 },
+  { key: 'street', description: 'Street name.', example: 'Lower Kyeemyindaing Road', width: 28 },
+  { key: 'ward', description: 'Ward.', example: 'Thayet Taw Ward', width: 24 },
+  { key: 'city', description: 'City.', example: 'Yangon', width: 18 },
+  { key: 'postal_code', description: 'Postal code.', example: '11121', width: 14 },
+  { key: 'language', description: 'Preferred language, for example english or burmese.', example: 'burmese', width: 16 },
+];
 
 const normalizePhoneCacheKey = (value: string | null | undefined) =>
   String(value || '')
@@ -217,6 +237,7 @@ export default function CollectorsPage({
   const [hasFetchedCollectors, setHasFetchedCollectors] = useState(false);
   const [collectorsLoading, setCollectorsLoading] = useState(false);
   const [collectorsError, setCollectorsError] = useState('');
+  const [collectorImportRefreshKey, setCollectorImportRefreshKey] = useState(0);
   const [isAddingCollector, setIsAddingCollector] = useState(false);
   const [isUpdatingCollectorStatus, setIsUpdatingCollectorStatus] = useState<Record<string, boolean>>({});
   const [isUpdatingCollector, setIsUpdatingCollector] = useState(false);
@@ -520,6 +541,34 @@ export default function CollectorsPage({
     { value: 'active', label: 'Active' },
     { value: 'suspended', label: 'Suspended' }
   ];
+  const collectorImportReferenceSheets = useMemo(
+    () => [
+      {
+        name: 'Locations',
+        headers: ['region', 'district', 'township'],
+        rows: Object.entries(townshipData as Record<string, Record<string, string[]>>).flatMap(
+          ([region, districtMap]) =>
+            Object.entries(districtMap).flatMap(([district, townships]) =>
+              townships.map((township) => [region, district, township]),
+            ),
+        ),
+      },
+      {
+        name: 'NRC Reference',
+        headers: ['state_number', 'state_name', 'township_short', 'township_name', 'nrc_type'],
+        rows: nrcData.nrcTownships.flatMap((township) =>
+          nrcData.nrcTypes.map((type) => [
+            township.stateCode,
+            nrcData.nrcStates.find((state) => state.code === township.stateCode)?.name.en ?? '',
+            township.short.en,
+            township.name.en,
+            type.name.en,
+          ]),
+        ),
+      },
+    ],
+    [],
+  );
 
   const formatAddress = (address: {
     building: string;
@@ -545,6 +594,80 @@ export default function CollectorsPage({
       return base;
     }
     return base ? `${base}, ${address.postalCode}` : address.postalCode;
+  };
+
+  const importCollectorRow = async (row: ExcelImportRow, rowNumber: number) => {
+    const value = (key: string) => String(row[key] ?? '').trim();
+    const name = value('name');
+    const phone = toMyanmarPhoneLocal(value('phone'));
+    const email = value('email');
+    const nrc = value('nrc').replace(/\s+/g, '');
+    const region = value('region');
+    const district = value('district');
+    const township = value('township');
+    const districtMap = (townshipData as Record<string, Record<string, string[]>>)[region];
+
+    if (!/^9\d{6,10}$/.test(phone)) {
+      throw new Error('Phone must be a valid Myanmar number beginning with 9.');
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new Error('Email address is invalid.');
+    }
+    if (!/^.+\/.+\(.+\)[A-Za-z0-9]{6}$/.test(nrc)) {
+      throw new Error('NRC must use a format such as 12/ALANA(N)123456.');
+    }
+    if (!districtMap || !districtMap[district]?.includes(township)) {
+      throw new Error('Region, district, and township must match a row in the Locations sheet.');
+    }
+
+    const rawStatus = value('status').toLowerCase();
+    if (rawStatus && !['active', 'enable', 'suspended', 'disable'].includes(rawStatus)) {
+      throw new Error('Status must be active or suspended.');
+    }
+    const assignedAreas = value('assigned_areas')
+      .split(/[;,]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const generatedEmail = `collector-import-${Date.now()}-${rowNumber}@billpro.local`;
+    const address = formatAddress({
+      building: value('building'),
+      street: value('street'),
+      ward: value('ward'),
+      city: value('city'),
+      township,
+      district,
+      region,
+      postalCode: value('postal_code'),
+    });
+
+    const response = await fetch(`${API_BASE_URL}/auth/collectors`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        collector: {
+          name,
+          phone,
+          email: email || generatedEmail,
+          area: township,
+          assignedAreas: assignedAreas.length > 0 ? assignedAreas : [township],
+          status: ['suspended', 'disable'].includes(rawStatus) ? 'disable' : 'enable',
+          nrc,
+          language: value('language') || 'burmese',
+          address,
+        },
+      }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      const message = Array.isArray(data?.message)
+        ? data.message.join(', ')
+        : data?.message ?? data?.error ?? 'Collector creation failed.';
+      throw new Error(String(message));
+    }
+
+    logAdminActivity('collector_imported', 'Collector imported from Excel.', 'collector', data?.id, name, {
+      excelRow: rowNumber,
+    });
   };
 
   const formatNrc = (state: string, township: string, type: string, number: string) => {
@@ -826,7 +949,7 @@ export default function CollectorsPage({
     return () => {
       isMounted = false;
     };
-  }, [inlineForm]);
+  }, [inlineForm, collectorImportRefreshKey]);
 
   useEffect(() => {
     if (inlineForm) return;
@@ -2104,8 +2227,36 @@ export default function CollectorsPage({
             </Card>
 
             <Card>
-              <CardHeader>
+              <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <CardTitle>Collectors ({filteredCollectors.length})</CardTitle>
+                <ExcelBulkActions
+                  entityLabel="Collector"
+                  fileName="collector-import-template.xlsx"
+                  columns={COLLECTOR_IMPORT_COLUMNS}
+                  exampleRows={[
+                    {
+                      name: 'Aung Aung',
+                      phone: '979123456',
+                      email: 'aung@example.com',
+                      nrc: '12/ALANA(N)123456',
+                      status: 'active',
+                      region: 'Yangon Region',
+                      district: 'West Yangon(Downtown)',
+                      township: 'Ahlon',
+                      assigned_areas: 'Ahlon;Sanchaung',
+                      building: 'No. 12',
+                      street: 'Lower Kyeemyindaing Road',
+                      ward: 'Thayet Taw Ward',
+                      city: 'Yangon',
+                      postal_code: '11121',
+                      language: 'burmese',
+                    },
+                  ]}
+                  referenceSheets={collectorImportReferenceSheets}
+                  onImportRow={importCollectorRow}
+                  onComplete={() => setCollectorImportRefreshKey((current) => current + 1)}
+                  disabled={collectorsLoading}
+                />
               </CardHeader>
               <CardContent>
                 {collectorsLoading && (
