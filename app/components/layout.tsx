@@ -403,6 +403,19 @@ export default function Layout({ children }: LayoutProps) {
                     : isCustomersRoute;
               const isMenuExpanded = isMenuOpen || isMenuRoute;
               const toggleMenu = () => {
+                if (!sidebarOpen) {
+                  setSidebarOpen(true);
+                  if (menuKey === 'collectors') {
+                    setCollectorsMenuOpen(true);
+                  } else if (menuKey === 'billing') {
+                    setBillingMenuOpen(true);
+                  } else if (menuKey === 'paymentConfig') {
+                    setPaymentConfigMenuOpen(true);
+                  } else {
+                    setCustomersMenuOpen(true);
+                  }
+                  return;
+                }
                 if (menuKey === 'collectors') {
                   setCollectorsMenuOpen((prev) => !prev);
                 } else if (menuKey === 'billing') {
@@ -437,7 +450,7 @@ export default function Layout({ children }: LayoutProps) {
                       />
                     )}
                   </button>
-                  {isMenuExpanded && (
+                  {sidebarOpen && isMenuExpanded && (
                     <div
                       className={
                         sidebarOpen
