@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { 
   LayoutDashboard, 
@@ -9,8 +9,8 @@ import {
   BarChart3, 
   LogOut, 
   Menu, 
+  X,
   ChevronDown,
-  ChevronLeft,
   Building2,
   UserCheck,
   DollarSign,
@@ -52,7 +52,6 @@ export default function Layout({ children }: LayoutProps) {
     }
     return false;
   });
-  const [isDesktop, setIsDesktop] = useState(false);
   const [uiLanguage, setUiLanguage] = useState<UiLanguage>('en');
   const [customersMenuOpen, setCustomersMenuOpen] = useState(false);
   const [collectorsMenuOpen, setCollectorsMenuOpen] = useState(false);
@@ -64,6 +63,8 @@ export default function Layout({ children }: LayoutProps) {
     mm: { ...DEFAULT_COLLECTOR_DASHBOARD_COPY.mm },
   }));
   const [branding, setBranding] = useState<SystemBranding>(() => readSystemBranding());
+  const sidebarRef = useRef<HTMLDivElement>(null);
+  const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -144,7 +145,6 @@ export default function Layout({ children }: LayoutProps) {
     if (typeof window === 'undefined') return;
     const updateSidebar = () => {
       const desktop = window.innerWidth >= 1024;
-      setIsDesktop(desktop);
       if (!desktop) {
         setSidebarOpen(false);
       }
@@ -272,28 +272,27 @@ export default function Layout({ children }: LayoutProps) {
     }
   }, [sidebarOpen]);
 
+  useEffect(() => {
+    if (!sidebarOpen) return;
+
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (
+        !sidebarRef.current?.contains(target) &&
+        !sidebarToggleRef.current?.contains(target)
+      ) {
+        setSidebarOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', closeOnOutsideClick);
+    return () => document.removeEventListener('pointerdown', closeOnOutsideClick);
+  }, [sidebarOpen]);
+
   const closeSidebarOnMobile = () => {
     if (typeof window === 'undefined') return;
     if (window.innerWidth < 1024) {
       setSidebarOpen(false);
-    }
-  };
-
-  const handleSidebarMouseEnter = () => {
-    if (typeof window === 'undefined') return;
-    if (isDesktop) {
-      setSidebarOpen(true);
-    }
-  };
-
-  const handleSidebarMouseLeave = () => {
-    if (typeof window === 'undefined') return;
-    if (isDesktop) {
-      setSidebarOpen(false);
-      setCustomersMenuOpen(false);
-      setCollectorsMenuOpen(false);
-      setBillingMenuOpen(false);
-      setPaymentConfigMenuOpen(false);
     }
   };
 
@@ -313,13 +312,12 @@ export default function Layout({ children }: LayoutProps) {
 
       {/* Sidebar */}
       <div
-        onMouseEnter={handleSidebarMouseEnter}
-        onMouseLeave={handleSidebarMouseLeave}
-        className={`fixed inset-y-0 left-0 z-50 bg-white shadow-lg transition-all duration-300 ease-in-out ${
+        ref={sidebarRef}
+        className={`fixed inset-y-0 left-0 z-50 flex h-dvh flex-col bg-white shadow-lg transition-all duration-300 ease-in-out ${
           sidebarOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full lg:w-16 lg:translate-x-0'
         }`}
       >
-        <div className="flex items-center justify-between p-4 border-b">
+        <div className="shrink-0 flex items-center justify-between p-4 border-b">
           <div className="flex items-center space-x-2">
             {branding.logoDataUrl ? (
               <img
@@ -337,15 +335,17 @@ export default function Layout({ children }: LayoutProps) {
               variant="ghost"
               size="sm"
               onClick={() => setSidebarOpen(false)}
+              aria-label="Close sidebar"
+              title="Close sidebar"
             >
-              <ChevronLeft className="h-4 w-4" />
+              <X className="h-5 w-5" />
             </Button>
           )}
         </div>
 
         <Link
           href="/profile"
-          className={`block p-4 hover:bg-gray-50 ${
+          className={`block shrink-0 p-4 hover:bg-gray-50 ${
             pathname === '/profile' ? 'bg-blue-50 border-r-2 border-blue-700' : ''
           }`}
         >
@@ -369,7 +369,11 @@ export default function Layout({ children }: LayoutProps) {
           </div>
         </Link>
 
-        <nav className="mt-4">
+        <nav
+          className={`mt-4 min-h-0 flex-1 pb-4 ${
+            sidebarOpen ? 'overflow-y-auto overflow-x-hidden' : 'overflow-visible'
+          }`}
+        >
           {navItems.map((item) => {
             const Icon = item.icon;
             if (item.children) {
@@ -397,6 +401,7 @@ export default function Layout({ children }: LayoutProps) {
                     : menuKey === 'paymentConfig'
                       ? isPaymentConfigRoute
                     : isCustomersRoute;
+              const isMenuExpanded = isMenuOpen || isMenuRoute;
               const toggleMenu = () => {
                 if (menuKey === 'collectors') {
                   setCollectorsMenuOpen((prev) => !prev);
@@ -428,11 +433,11 @@ export default function Layout({ children }: LayoutProps) {
                     </span>
                     {sidebarOpen && (
                       <ChevronDown
-                        className={`h-4 w-4 transition-transform ${isMenuOpen ? 'rotate-180' : ''}`}
+                        className={`h-4 w-4 transition-transform ${isMenuExpanded ? 'rotate-180' : ''}`}
                       />
                     )}
                   </button>
-                  {isMenuOpen && (
+                  {isMenuExpanded && (
                     <div
                       className={
                         sidebarOpen
@@ -443,9 +448,10 @@ export default function Layout({ children }: LayoutProps) {
                       {item.children.map((child) => {
                         const [childPath, childQuery] = child.href.split('?');
                         const tabQuery = childQuery?.startsWith('tab=') ? childQuery.slice(4) : null;
+                        const activeTab = searchParams.get('tab');
                         const isChildActive =
                           pathname === childPath &&
-                          (tabQuery ? searchParams.get('tab') === tabQuery : true);
+                          (tabQuery ? activeTab === tabQuery : !activeTab);
                         return (
                           <Link
                             key={child.href}
@@ -519,7 +525,7 @@ export default function Layout({ children }: LayoutProps) {
           })}
         </nav>
 
-        <div className="absolute bottom-4 left-4 right-4">
+        <div className="shrink-0 border-t bg-white p-4">
           <Button
             variant="ghost"
             onClick={logout}
@@ -538,22 +544,25 @@ export default function Layout({ children }: LayoutProps) {
         {/* Top bar */}
         <div className="bg-white shadow-sm border-b px-4 py-3 lg:px-6">
           <div className="flex items-center justify-between">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setSidebarOpen(true)}
-              className="lg:hidden"
-            >
-              <Menu className="h-5 w-5" />
-            </Button>
+            <div>
+              {!sidebarOpen && (
+                <Button
+                  ref={sidebarToggleRef}
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSidebarOpen(true)}
+                  aria-label="Open sidebar"
+                  title="Open sidebar"
+                >
+                  <Menu className="h-5 w-5" />
+                </Button>
+              )}
+            </div>
             
             <div className="flex items-center space-x-4">
-              <div className="text-sm text-gray-500">
+              <div className="hidden text-sm text-gray-500 sm:block">
                 {formatDisplayDate(new Date())}
               </div>
-            </div>
-
-            <div className="flex items-center space-x-4">
               {user.role === 'collector' && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>

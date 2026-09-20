@@ -14,7 +14,8 @@ import { Plus, SlidersHorizontal } from 'lucide-react';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 
-type BillingModel = 'recurring' | 'usage' | 'prepaid' | 'postpaid';
+type BillingModel = 'recurring' | 'usage';
+type PaymentTiming = 'prepaid' | 'postpaid';
 type BillingType = 'fixed' | 'anniversary';
 type BillingMode = 'monthly' | 'quarterly' | 'bi_yearly' | 'yearly' | 'custom';
 type AdjustmentType = 'plus' | 'minus';
@@ -25,6 +26,7 @@ type BillingRuleItem = {
   id?: string;
   name: string;
   billingModel: BillingModel;
+  paymentTiming: PaymentTiming;
   billingType: BillingType;
   billingMode: BillingMode;
   customMonths: string;
@@ -54,6 +56,7 @@ type GlobalAdjustment = {
 const initialRule: BillingRuleItem = {
   name: '',
   billingModel: 'recurring',
+  paymentTiming: 'prepaid',
   billingType: 'fixed',
   billingMode: 'monthly',
   customMonths: '',
@@ -93,8 +96,12 @@ export default function SuperAdminBillingRulesPage() {
   const [newAdjustmentIsActive, setNewAdjustmentIsActive] = useState(true);
 
   const normalizeRule = (item: any, fallback: BillingRuleItem): BillingRuleItem => {
-    const modelRaw = String(
-      item?.billingModel ?? item?.prepaidPostpaid ?? item?.paymentMode ?? item?.model ?? fallback.billingModel,
+    const modelRaw = String(item?.billingModel ?? item?.model ?? fallback.billingModel).toLowerCase();
+    const paymentTimingRaw = String(
+      item?.prepaidPostpaid ??
+        item?.paymentTiming ??
+        item?.paymentMode ??
+        (modelRaw === 'prepaid' || modelRaw === 'postpaid' ? modelRaw : fallback.paymentTiming),
     ).toLowerCase();
     const typeRaw = String(item?.billingType ?? item?.type ?? fallback.billingType).toLowerCase();
     const modeRaw = String(item?.billingMode ?? item?.cycle ?? fallback.billingMode).toLowerCase();
@@ -103,13 +110,8 @@ export default function SuperAdminBillingRulesPage() {
       id: item?.id ?? fallback.id,
       name: String(item?.name ?? item?.ruleName ?? fallback.name),
       billingModel:
-        modelRaw === 'usage'
-          ? 'usage'
-          : modelRaw === 'prepaid'
-            ? 'prepaid'
-            : modelRaw === 'postpaid'
-              ? 'postpaid'
-              : 'recurring',
+        modelRaw === 'usage' ? 'usage' : 'recurring',
+      paymentTiming: paymentTimingRaw === 'prepaid' ? 'prepaid' : 'postpaid',
       billingType: typeRaw === 'anniversary' ? 'anniversary' : 'fixed',
       billingMode:
         modeRaw === 'quarterly' || modeRaw === 'bi_yearly' || modeRaw === 'yearly' || modeRaw === 'custom'
@@ -472,6 +474,7 @@ export default function SuperAdminBillingRulesPage() {
     const payloadFull = {
       name: form.name.trim(),
       billingModel: form.billingModel,
+      prepaidPostpaid: form.paymentTiming,
       billingType: form.billingType,
       billingMode: form.billingMode,
       customMonths: form.billingMode === 'custom' ? toIntegerOrNull(form.customMonths) : null,
@@ -491,6 +494,7 @@ export default function SuperAdminBillingRulesPage() {
     const payloadMinimal = {
       name: form.name.trim(),
       billingModel: form.billingModel,
+      prepaidPostpaid: form.paymentTiming,
       billingType: form.billingType,
       billingMode: form.billingMode,
       customMonths: form.billingMode === 'custom' ? toIntegerOrNull(form.customMonths) : null,
@@ -641,8 +645,24 @@ export default function SuperAdminBillingRulesPage() {
                 <SelectContent>
                   <SelectItem value="recurring">Recurring</SelectItem>
                   <SelectItem value="usage">Usage Based</SelectItem>
-                  <SelectItem value="prepaid">Prepaid</SelectItem>
-                  <SelectItem value="postpaid">Postpaid</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Payment Timing</Label>
+              <Select
+                value={form.paymentTiming}
+                onValueChange={(value) =>
+                  setForm((prev) => ({ ...prev, paymentTiming: value as PaymentTiming }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="prepaid">Prepaid (Pay Before Service)</SelectItem>
+                  <SelectItem value="postpaid">Postpaid (Pay After Service)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1099,19 +1119,21 @@ export default function SuperAdminBillingRulesPage() {
               <div className="grid grid-cols-2 gap-2">
                 <div className="rounded-md border bg-slate-50 px-2 py-1">
                   <span className="text-xs text-slate-500">Model</span>
-                  <p className="font-medium capitalize">{rule.billingModel}</p>
+                  <p className="font-medium">
+                    {rule.billingModel === 'usage' ? 'Usage Based' : 'Recurring'}
+                  </p>
                 </div>
                 <div className="rounded-md border bg-slate-50 px-2 py-1">
-                  <span className="text-xs text-slate-500">Type</span>
-                  <p className="font-medium capitalize">{rule.billingType}</p>
+                  <span className="text-xs text-slate-500">Payment Timing</span>
+                  <p className="font-medium capitalize">{rule.paymentTiming}</p>
                 </div>
                 <div className="rounded-md border bg-slate-50 px-2 py-1">
                   <span className="text-xs text-slate-500">Mode</span>
                   <p className="font-medium capitalize">{rule.billingMode.replace('_', '-')}</p>
                 </div>
                 <div className="rounded-md border bg-slate-50 px-2 py-1">
-                  <span className="text-xs text-slate-500">Custom Months</span>
-                  <p className="font-medium">{rule.billingMode === 'custom' ? rule.customMonths || '-' : '-'}</p>
+                  <span className="text-xs text-slate-500">Billing Type</span>
+                  <p className="font-medium capitalize">{rule.billingType}</p>
                 </div>
               </div>
 

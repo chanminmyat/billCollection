@@ -1,7 +1,8 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useLayoutEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { installAuthenticatedFetch, USER_ACCESS_TOKEN_KEY } from '@/lib/api-auth';
 
 interface CollectorProfile {
   id?: string;
@@ -75,20 +76,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
+  useLayoutEffect(() => {
+    installAuthenticatedFetch();
+  }, []);
+
   useEffect(() => {
     try {
       const savedUser = window.localStorage.getItem('billflow_user');
-      if (savedUser) {
+      const accessToken = window.localStorage.getItem(USER_ACCESS_TOKEN_KEY);
+      if (savedUser && accessToken) {
         const parsedUser = JSON.parse(savedUser);
         if (parsedUser && parsedUser.role) {
           setUser(parsedUser);
         } else {
           window.localStorage.removeItem('billflow_user');
+          window.localStorage.removeItem(USER_ACCESS_TOKEN_KEY);
         }
+      } else {
+        window.localStorage.removeItem('billflow_user');
+        window.localStorage.removeItem(USER_ACCESS_TOKEN_KEY);
       }
     } catch {
       setUser(null);
       window.localStorage.removeItem('billflow_user');
+      window.localStorage.removeItem(USER_ACCESS_TOKEN_KEY);
     } finally {
       setIsLoading(false);
     }
@@ -133,8 +144,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       const userData = data?.user;
+      const accessToken = data?.accessToken;
 
-      if (!userData || !userData.role) {
+      if (!userData || !userData.role || !accessToken) {
         throw new Error('Invalid response from server');
       }
 
@@ -144,6 +156,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       setUser(userData);
       localStorage.setItem('billflow_user', JSON.stringify(userData));
+      localStorage.setItem(USER_ACCESS_TOKEN_KEY, accessToken);
 
       const dashboardPath =
         userData.role === 'admin'
@@ -156,6 +169,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       setUser(null);
       localStorage.removeItem('billflow_user');
+      localStorage.removeItem(USER_ACCESS_TOKEN_KEY);
       if (error instanceof Error) {
         throw error;
       }
@@ -302,6 +316,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = () => {
     setUser(null);
     localStorage.removeItem('billflow_user');
+    localStorage.removeItem(USER_ACCESS_TOKEN_KEY);
     router.push('/');
   };
 

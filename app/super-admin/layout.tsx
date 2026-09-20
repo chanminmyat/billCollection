@@ -26,6 +26,7 @@ import {
   SYSTEM_BRANDING_UPDATED_EVENT,
 } from '@/lib/system-branding';
 import type { SystemBranding } from '@/lib/system-branding';
+import { SUPER_ADMIN_ACCESS_TOKEN_KEY } from '@/lib/api-auth';
 
 const navItems = [
   { href: '/super-admin/dashboard', label: 'Overview', icon: LayoutDashboard },
@@ -48,14 +49,6 @@ export default function SuperAdminLayout({ children }: { children: React.ReactNo
   const [isAuthed, setIsAuthed] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [branding, setBranding] = useState<SystemBranding>(() => readSystemBranding());
-
-  const readCookieFlag = (name: string) => {
-    if (typeof document === 'undefined') return '';
-    const matched = document.cookie
-      .split('; ')
-      .find((item) => item.startsWith(`${name}=`));
-    return matched ? decodeURIComponent(matched.split('=').slice(1).join('=')) : '';
-  };
 
   const title = useMemo(() => {
     if (currentPath.startsWith('/super-admin/admins')) return 'Manage Admins';
@@ -101,9 +94,7 @@ export default function SuperAdminLayout({ children }: { children: React.ReactNo
       }
     }, 1500);
     try {
-      const localStorageAuthed = window.localStorage.getItem('super_admin_authed') === 'true';
-      const cookieAuthed = readCookieFlag('super_admin_authed') === 'true';
-      const authed = localStorageAuthed || cookieAuthed;
+      const authed = Boolean(window.localStorage.getItem(SUPER_ADMIN_ACCESS_TOKEN_KEY));
       setIsAuthed(authed);
       if (!authed && !isLogin) {
         router.replace('/super-admin');
@@ -112,14 +103,9 @@ export default function SuperAdminLayout({ children }: { children: React.ReactNo
         router.replace('/super-admin/dashboard');
       }
     } catch {
-      // Fallback when storage is blocked by browser privacy settings.
-      const cookieAuthed = readCookieFlag('super_admin_authed') === 'true';
-      setIsAuthed(cookieAuthed);
-      if (!cookieAuthed && !isLogin) {
+      setIsAuthed(false);
+      if (!isLogin) {
         router.replace('/super-admin');
-      }
-      if (cookieAuthed && isLogin) {
-        router.replace('/super-admin/dashboard');
       }
     } finally {
       if (!cancelled) {
@@ -136,14 +122,10 @@ export default function SuperAdminLayout({ children }: { children: React.ReactNo
   const handleLogout = () => {
     if (typeof window === 'undefined') return;
     try {
-      window.localStorage.removeItem('super_admin_authed');
+      window.localStorage.removeItem(SUPER_ADMIN_ACCESS_TOKEN_KEY);
       window.localStorage.removeItem('super_admin_user');
-      document.cookie =
-        'super_admin_authed=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
     } catch {
       // ignore storage errors
-      document.cookie =
-        'super_admin_authed=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
     }
   };
 

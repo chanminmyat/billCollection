@@ -14,6 +14,9 @@ import {
   SYSTEM_BRANDING_UPDATED_EVENT,
 } from '@/lib/system-branding';
 import type { SystemBranding } from '@/lib/system-branding';
+import { SUPER_ADMIN_ACCESS_TOKEN_KEY } from '@/lib/api-auth';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 
 export default function SuperAdminLoginPage() {
   const router = useRouter();
@@ -22,17 +25,6 @@ export default function SuperAdminLoginPage() {
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [branding, setBranding] = useState<SystemBranding>(() => readSystemBranding());
-
-  const superAdminUser = process.env.NEXT_PUBLIC_SUPER_ADMIN_USERNAME ?? '';
-  const superAdminPass = process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD ?? '';
-
-  const readCookieFlag = (name: string) => {
-    if (typeof document === 'undefined') return '';
-    const matched = document.cookie
-      .split('; ')
-      .find((item) => item.startsWith(`${name}=`));
-    return matched ? decodeURIComponent(matched.split('=').slice(1).join('=')) : '';
-  };
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -60,10 +52,7 @@ export default function SuperAdminLoginPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      const localStorageAuthed = window.localStorage.getItem('super_admin_authed') === 'true';
-      const cookieAuthed = readCookieFlag('super_admin_authed') === 'true';
-      const authed = localStorageAuthed || cookieAuthed;
-      if (authed) {
+      if (window.localStorage.getItem(SUPER_ADMIN_ACCESS_TOKEN_KEY)) {
         router.replace('/super-admin/dashboard');
       }
     } catch {
@@ -71,34 +60,28 @@ export default function SuperAdminLoginPage() {
     }
   }, [router]);
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError('');
     setIsSubmitting(true);
 
-    if (!superAdminUser || !superAdminPass) {
-      setError('Super admin credentials are not configured.');
-      setIsSubmitting(false);
-      return;
-    }
-
-    if (identifier.trim() !== superAdminUser || password !== superAdminPass) {
-      setError('Invalid super admin credentials.');
-      setIsSubmitting(false);
-      return;
-    }
-
     try {
-      window.localStorage.setItem('super_admin_authed', 'true');
-      window.localStorage.setItem('super_admin_user', identifier.trim());
-      document.cookie =
-        `super_admin_authed=true; path=/; max-age=${60 * 60 * 24 * 30}; SameSite=Lax`;
-    } catch {
-      setError('Browser storage is blocked. Please enable cookies/local storage.');
+      const response = await fetch(`${API_BASE_URL}/auth/super-admin/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: identifier.trim(), password }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.accessToken) {
+        throw new Error(data?.message ?? 'Invalid super admin credentials.');
+      }
+      window.localStorage.setItem(SUPER_ADMIN_ACCESS_TOKEN_KEY, data.accessToken);
+      window.localStorage.setItem('super_admin_user', data?.user?.username ?? identifier.trim());
+      router.replace('/super-admin/dashboard');
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Unable to sign in.');
       setIsSubmitting(false);
-      return;
     }
-    router.replace('/super-admin/dashboard');
   };
 
   return (
@@ -162,7 +145,7 @@ export default function SuperAdminLoginPage() {
                 {isSubmitting ? 'Checking...' : 'Enter Console'}
               </Button>
               <p className="text-xs text-slate-500">
-                Uses environment-based credentials for now.
+                Credentials are verified securely by the server.
               </p>
             </form>
           </div>
