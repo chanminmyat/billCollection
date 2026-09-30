@@ -43,10 +43,7 @@ interface LayoutProps {
 
 export default function Layout({ children }: LayoutProps) {
   const { user, logout, isLoading } = useAuth();
-  const [sidebarOpen, setSidebarOpen] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return window.innerWidth >= 1024;
-  });
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [uiLanguage, setUiLanguage] = useState<UiLanguage>('en');
   const [customersMenuOpen, setCustomersMenuOpen] = useState(false);
   const [collectorsMenuOpen, setCollectorsMenuOpen] = useState(false);

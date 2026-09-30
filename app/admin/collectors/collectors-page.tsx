@@ -24,6 +24,9 @@ import type { ExcelImportRow, ExcelTemplateColumn } from '@/lib/excel-template';
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 const CUSTOMER_BILLING_FEE_CACHE_STORAGE_KEY = 'billpro_customer_billing_fee_cache_v1';
 
+const formatMmk = (value: number) =>
+  `${value.toLocaleString('en-US', { maximumFractionDigits: 2 })} MMK`;
+
 const COLLECTOR_IMPORT_COLUMNS: ExcelTemplateColumn[] = [
   { key: 'name', required: true, description: 'Collector full name.', example: 'Aung Aung', width: 24 },
   { key: 'phone', required: true, description: 'Myanmar phone number.', example: '979123456', width: 18 },
@@ -2363,7 +2366,7 @@ export default function CollectorsPage({
                               </Button>
                             </TableCell>
                             <TableCell>
-                              <div className="font-medium">${stats.totalCollected.toFixed(2)}</div>
+                              <div className="font-medium">{formatMmk(stats.totalCollected)}</div>
                               <div className="text-sm text-gray-500">{stats.totalBills} bills</div>
                             </TableCell>
                             <TableCell>
@@ -2718,7 +2721,7 @@ export default function CollectorsPage({
                           </div>
                           <div className="flex justify-between">
                             <span>Total Collected:</span>
-                            <span className="font-medium">${stats.totalCollected.toFixed(2)}</span>
+                            <span className="font-medium">{formatMmk(stats.totalCollected)}</span>
                           </div>
                         </div>
                       </div>
