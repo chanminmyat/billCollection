@@ -368,6 +368,13 @@ const normalizePhoneCacheKey = (value: string | null | undefined) =>
     .replace(/\D/g, '')
     .trim();
 
+const splitCustomerCodeNumber = (value: string | null | undefined) => {
+  const normalized = String(value ?? '').trim().toUpperCase();
+  const match = normalized.match(/^(.*?)(\d+)$/);
+  if (match) return { prefix: match[1], number: match[2] };
+  return { prefix: normalized ? `${normalized}-` : 'C-', number: '' };
+};
+
 const sanitizeDateInput = (value: string) =>
   value.replace(/[^\d/]/g, '').slice(0, 10);
 
@@ -628,6 +635,8 @@ export default function CustomersPage({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [editingCustomerCodePrefix, setEditingCustomerCodePrefix] = useState('');
+  const [editingCustomerCodeNumber, setEditingCustomerCodeNumber] = useState('');
   const [remoteCustomers, setRemoteCustomers] = useState<Customer[]>([]);
   const [customerSummaryById, setCustomerSummaryById] = useState<Record<string, any>>({});
   const [customerProfileById, setCustomerProfileById] = useState<Record<string, any>>({});
@@ -4046,6 +4055,7 @@ export default function CustomersPage({
         merged?.customerCode ??
         ''
     ).trim();
+    const customerCodeParts = splitCustomerCodeNumber(customerCodeForCache);
     const cachedBillingInfo = resolveCustomerBillingFeeCache({
       customerId: customer.id,
       customerCode: customerCodeForCache,
@@ -4070,6 +4080,8 @@ export default function CustomersPage({
         : toNumber(cachedBillingInfo?.collectionFee);
 
     setEditingCustomer(customer);
+    setEditingCustomerCodePrefix(customerCodeParts.prefix);
+    setEditingCustomerCodeNumber(customerCodeParts.number);
     setErrors({});
     setCustomerType(resolvedCustomerType);
     setUserStatus(resolvedStatus);
@@ -4459,6 +4471,17 @@ export default function CustomersPage({
   const handleUpdateCustomer = async () => {
     if (!editingCustomer || isUpdatingCustomer) return;
 
+    const customerCodeNumber = editingCustomerCodeNumber.replace(/\D/g, '');
+    if (!customerCodeNumber || Number(customerCodeNumber) < 1) {
+      toast({
+        title: 'Invalid customer code number',
+        description: 'Enter a customer code number greater than zero.',
+        variant: 'destructive'
+      });
+      return;
+    }
+    const nextCustomerCode = `${editingCustomerCodePrefix}${customerCodeNumber}`.toUpperCase();
+
     const normalizedServiceStartDate = parseDdMmYyyyToIso(serviceStartDateInput);
     const normalizedContractStartDate = parseDdMmYyyyToIso(contractStartDateInput);
     const normalizedContractEndDate = parseDdMmYyyyToIso(contractEndDateInput);
@@ -4482,6 +4505,14 @@ export default function CustomersPage({
     const linkedAccountPayload: Record<string, string> = {
       phone: primaryPhone.trim()
     };
+    const previousCustomerCode = String(
+      (editingCustomer as Customer & { code?: string })?.code ??
+        customerSummaryById[editingCustomer.id]?.customerCode ??
+        ''
+    ).trim();
+    if (nextCustomerCode !== previousCustomerCode) {
+      linkedAccountPayload.username = nextCustomerCode;
+    }
     if (contactEmail.trim()) {
       linkedAccountPayload.email = contactEmail.trim();
     }
@@ -4521,6 +4552,7 @@ export default function CustomersPage({
         : billingMapLink.trim();
 
     const patchPayloadRaw: Record<string, unknown> = {
+      customerCode: nextCustomerCode,
       customerType,
       status: userStatus,
       collectorCode: nextCollectorCode,
@@ -4618,6 +4650,10 @@ export default function CustomersPage({
                 user: {
                   ...(prev[editingCustomer.id]?.user ?? {}),
                   id: linkedUserId,
+                  username:
+                    String(userData?.username ?? '').trim().length > 0
+                      ? String(userData.username)
+                      : (linkedAccountPayload.username ?? prev[editingCustomer.id]?.user?.username),
                   phone:
                     String(userData?.phone ?? '').trim().length > 0
                       ? String(userData.phone)
@@ -4645,6 +4681,7 @@ export default function CustomersPage({
           row.id === editingCustomer.id
             ? {
                 ...row,
+                code: nextCustomerCode,
                 name: customerNameForLog,
                 phone: primaryPhone.trim(),
                 address: installationAddressValue || row.address,
@@ -4665,6 +4702,7 @@ export default function CustomersPage({
         [editingCustomer.id]: {
           ...(prev[editingCustomer.id] ?? {}),
           ...(data && typeof data === 'object' ? data : {}),
+          customerCode: nextCustomerCode,
           customerType,
           status: userStatus,
           personalName: customerType === 'individual' ? newCustomer.name.trim() : null,
@@ -4704,15 +4742,10 @@ export default function CustomersPage({
           }
         }
       }));
-      const editingCustomerCode = String(
-        (editingCustomer as Customer & { code?: string })?.code ??
-          customerSummaryById[editingCustomer.id]?.customerCode ??
-          ''
-      ).trim();
       upsertCustomerBillingFeeCache(
         {
           customerId: editingCustomer.id,
-          customerCode: editingCustomerCode,
+          customerCode: nextCustomerCode,
           customerPhone: primaryPhone.trim()
         },
         {
@@ -4756,6 +4789,8 @@ export default function CustomersPage({
       }
 
       setEditingCustomer(null);
+      setEditingCustomerCodePrefix('');
+      setEditingCustomerCodeNumber('');
       setCustomerType('individual');
       setUserStatus('enable');
       setNrcState('');
@@ -4838,6 +4873,35 @@ export default function CustomersPage({
         <h3 className="text-lg font-semibold text-slate-900">User Information</h3>
       </div>
       <div className="grid gap-6 px-6 py-6 md:grid-cols-2">
+        {editingCustomer && (
+          <div className="space-y-3 md:col-span-2">
+            <Label htmlFor="customerCodeNumber" className="text-sm font-medium text-slate-700">
+              Customer Code Number <span className="text-rose-600">*</span>
+            </Label>
+            <div className="flex max-w-md overflow-hidden rounded-md border border-input bg-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
+              <div className="flex items-center border-r border-input bg-slate-100 px-3 font-mono text-sm text-slate-600">
+                {editingCustomerCodePrefix}
+              </div>
+              <Input
+                id="customerCodeNumber"
+                inputMode="numeric"
+                value={editingCustomerCodeNumber}
+                onChange={(event) =>
+                  setEditingCustomerCodeNumber(event.target.value.replace(/\D/g, '').slice(0, 10))
+                }
+                className="rounded-none border-0 font-mono focus-visible:ring-0 focus-visible:ring-offset-0"
+                placeholder="001"
+              />
+            </div>
+            <p className="text-xs text-slate-500">
+              Updated code:{' '}
+              <span className="font-mono font-medium">
+                {editingCustomerCodePrefix}{editingCustomerCodeNumber || '—'}
+              </span>
+              . The configured prefix remains unchanged.
+            </p>
+          </div>
+        )}
         <div className="space-y-3">
           <Label className="text-sm font-medium text-slate-700">
             Customer Type <span className="text-rose-600">*</span>
@@ -6296,7 +6360,14 @@ export default function CustomersPage({
             <CardContent className="space-y-6">
               {formContent}
               <div className="flex justify-end space-x-2">
-                <Button variant="outline" onClick={() => setEditingCustomer(null)}>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setEditingCustomer(null);
+                    setEditingCustomerCodePrefix('');
+                    setEditingCustomerCodeNumber('');
+                  }}
+                >
                   Cancel
                 </Button>
                 <Button onClick={handleUpdateCustomer} disabled={isUpdatingCustomer}>

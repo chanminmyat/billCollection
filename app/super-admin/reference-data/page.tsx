@@ -865,6 +865,7 @@ export default function ReferenceDataPage() {
               <p className="text-sm font-semibold text-slate-900">Customer Code Format</p>
               <p className="text-xs text-slate-600">
                 Choose which parts appear in newly generated customer codes.
+                Each unique region/township prefix has its own sequence, so a new township starts at 001.
               </p>
             </div>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
