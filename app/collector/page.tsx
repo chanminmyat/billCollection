@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Search,
-  DollarSign,
+  Banknote,
   FileText,
   Users,
   Calendar,
@@ -170,8 +170,8 @@ const toNumber = (value: string | number | null | undefined) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const formatMoney = (value: string | number | null | undefined, currency = 'MMK') =>
-  `${toNumber(value).toLocaleString()} ${currency}`;
+const formatMoney = (value: string | number | null | undefined) =>
+  `${toNumber(value).toLocaleString()} MMK`;
 
 const normalizeInvoiceStatus = (status: string | null | undefined): InvoiceStatus => {
   const normalized = String(status ?? '').trim().toLowerCase();
@@ -1750,7 +1750,7 @@ export default function CollectorDashboard() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">{copy.todaysCollection}</CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
+              <Banknote className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{formatMoney(todayCollection)}</div>
@@ -1881,7 +1881,7 @@ export default function CollectorDashboard() {
                               </p>
                             </div>
                             <p className="text-lg font-semibold text-green-700">
-                              {formatMoney(bill.totalAmount, bill.currency || 'MMK')}
+                              {formatMoney(bill.totalAmount)}
                             </p>
                           </div>
                           <div className="mt-3 flex flex-wrap gap-2">
@@ -2013,7 +2013,7 @@ export default function CollectorDashboard() {
 
                         <div className="flex items-center justify-between">
                           <div className="text-2xl font-bold text-green-600">
-                            {formatMoney(bill.totalAmount, bill.currency || 'MMK')}
+                            {formatMoney(bill.totalAmount)}
                           </div>
                           <div className="flex items-center gap-2">
                             <Badge variant={bill.status === 'overdue' ? 'destructive' : 'secondary'}>
@@ -2123,7 +2123,7 @@ export default function CollectorDashboard() {
 
                         <div className="flex items-center justify-between">
                           <div className="text-lg font-bold">
-                            {formatMoney(monthlyFee, customer.subscription?.plan?.currency || 'MMK')}
+                            {formatMoney(monthlyFee)}
                             {copy.perMonth}
                           </div>
                           <div className="text-sm text-gray-500">
@@ -2207,7 +2207,7 @@ export default function CollectorDashboard() {
 
                         <div className="flex items-center justify-between">
                           <div className="text-2xl font-bold text-green-600">
-                            {formatMoney(bill.totalAmount, bill.currency || 'MMK')}
+                            {formatMoney(bill.totalAmount)}
                           </div>
                           <div className="text-sm text-gray-500">
                             {copy.due}: {formatDisplayDate(bill.dueDate, '-')}
@@ -2331,7 +2331,7 @@ export default function CollectorDashboard() {
                   <div>
                     <Label>{copy.amount}</Label>
                     <p className="text-lg font-bold">
-                      {formatMoney(selectedCollectionInvoice.totalAmount, selectedCollectionInvoice.currency || 'MMK')}
+                      {formatMoney(selectedCollectionInvoice.totalAmount)}
                     </p>
                   </div>
                 </div>
@@ -2795,7 +2795,7 @@ export default function CollectorDashboard() {
                   <div>
                     <Label className="text-sm font-medium text-gray-500">{copy.amount}</Label>
                     <p className="text-2xl font-bold text-green-600">
-                      {formatMoney(selectedBillDetails.totalAmount, selectedBillDetails.currency || 'MMK')}
+                      {formatMoney(selectedBillDetails.totalAmount)}
                     </p>
                   </div>
                   <div>
@@ -2899,10 +2899,7 @@ export default function CollectorDashboard() {
                   <div>
                     <Label className="text-sm font-medium text-gray-500">{copy.monthlyFee}</Label>
                     <p className="text-lg font-bold">
-                      {formatMoney(
-                        selectedCustomerDetails.customer.subscription?.plan?.monthlyFee,
-                        selectedCustomerDetails.customer.subscription?.plan?.currency || 'MMK'
-                      )}
+                      {formatMoney(selectedCustomerDetails.customer.subscription?.plan?.monthlyFee)}
                     </p>
                   </div>
                 </div>
@@ -2939,8 +2936,7 @@ export default function CollectorDashboard() {
                   <p className="text-sm">
                     {selectedCustomerDetails.lastInvoice?.paidAt
                       ? `${formatDisplayDate(selectedCustomerDetails.lastInvoice.paidAt, '-')} - ${formatMoney(
-                          selectedCustomerDetails.lastInvoice.totalAmount,
-                          selectedCustomerDetails.lastInvoice.currency || 'MMK'
+                          selectedCustomerDetails.lastInvoice.totalAmount
                         )}`
                       : copy.noPaymentYet}
                   </p>

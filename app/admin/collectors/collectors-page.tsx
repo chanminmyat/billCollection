@@ -1131,7 +1131,6 @@ export default function CollectorsPage({
     const emailForCreate = enteredEmail || fallbackGeneratedEmail;
 
     const payload = {
-      assignedAreas: normalizeAssignedAreas(selectedAssignedAreas),
       collector: {
         name: newCollector.name,
         phone: newCollector.phone,
@@ -1143,8 +1142,6 @@ export default function CollectorsPage({
         address: addressValue
       }
     };
-
-    console.log('Add collector payload:', JSON.stringify(payload, null, 2));
 
     let createdCollectorId: string | undefined;
     let createdCollectorCode: string | undefined;
@@ -1159,7 +1156,9 @@ export default function CollectorsPage({
       const data = await response.json().catch(() => null);
 
       if (!response.ok) {
-        const message = data?.message ?? 'Failed to create collector';
+        const message = Array.isArray(data?.message)
+          ? data.message.join(', ')
+          : data?.message ?? 'Failed to create collector';
         toast({
           title: 'Create collector failed',
           description: String(message),

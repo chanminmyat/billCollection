@@ -314,10 +314,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = () => {
-    setUser(null);
-    localStorage.removeItem('billflow_user');
-    localStorage.removeItem(USER_ACCESS_TOKEN_KEY);
-    router.push('/');
+    // Keep protected pages in their loading state while the hard navigation
+    // completes. Clearing `user` first briefly rendered their "Access denied"
+    // fallback before the login page was loaded.
+    setIsLoading(true);
+    try {
+      window.localStorage.removeItem('billflow_user');
+      window.localStorage.removeItem(USER_ACCESS_TOKEN_KEY);
+    } catch {
+      // Continue logout even when browser storage is unavailable.
+    }
+
+    // A clean navigation resets all role-specific dashboard state.
+    window.location.replace('/');
   };
 
   return (

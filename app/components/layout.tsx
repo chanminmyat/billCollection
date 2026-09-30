@@ -13,7 +13,7 @@ import {
   ChevronDown,
   Building2,
   UserCheck,
-  DollarSign,
+  Banknote,
   Activity,
   Globe
 } from 'lucide-react';
@@ -45,12 +45,7 @@ export default function Layout({ children }: LayoutProps) {
   const { user, logout, isLoading } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     if (typeof window === 'undefined') return false;
-    if (window.innerWidth < 1024) return false;
-    const saved = window.localStorage.getItem('sidebarOpen');
-    if (saved !== null) {
-      return saved === 'true';
-    }
-    return false;
+    return window.innerWidth >= 1024;
   });
   const [uiLanguage, setUiLanguage] = useState<UiLanguage>('en');
   const [customersMenuOpen, setCustomersMenuOpen] = useState(false);
@@ -107,7 +102,7 @@ export default function Layout({ children }: LayoutProps) {
             ],
           },
           {
-            icon: DollarSign,
+            icon: Banknote,
             label: 'Payment Config',
             children: [
               { label: 'Create Payment Account', href: '/admin/billing/payment-config/create' },
@@ -128,7 +123,7 @@ export default function Layout({ children }: LayoutProps) {
         return [
           { icon: LayoutDashboard, label: 'Dashboard', href: '/customer' },
           { icon: FileText, label: 'Bills', href: '/customer/bills' },
-          { icon: DollarSign, label: 'Payments', href: '/customer/payments' },
+          { icon: Banknote, label: 'Payments', href: '/customer/payments' },
         ];
       default:
         return [];
@@ -264,13 +259,6 @@ export default function Layout({ children }: LayoutProps) {
       window.removeEventListener(SYSTEM_BRANDING_UPDATED_EVENT, syncBranding as EventListener);
     };
   }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (window.innerWidth >= 1024) {
-      window.localStorage.setItem('sidebarOpen', String(sidebarOpen));
-    }
-  }, [sidebarOpen]);
 
   useEffect(() => {
     if (!sidebarOpen) return;
@@ -499,9 +487,9 @@ export default function Layout({ children }: LayoutProps) {
                 <button
                   key={item.href}
                   type="button"
-                  className={`flex w-full items-center ${sidebarOpen ? 'space-x-3 px-4' : 'justify-center px-0'} py-3 text-sm font-medium transition-colors ${
+                  className={`mx-2 flex w-[calc(100%-1rem)] items-center rounded-md ${sidebarOpen ? 'space-x-3 px-2' : 'justify-center px-0'} py-3 text-sm font-medium transition-colors ${
                     isActive
-                      ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700'
+                      ? 'bg-blue-50 text-blue-700'
                       : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                   }`}
                   onClick={() => {
@@ -515,7 +503,7 @@ export default function Layout({ children }: LayoutProps) {
                     closeSidebarOnMobile();
                   }}
                 >
-                  <Icon className="h-5 w-5" />
+                  <Icon className="h-5 w-5 shrink-0" />
                   {sidebarOpen && <span>{item.label}</span>}
                 </button>
               );
@@ -524,14 +512,14 @@ export default function Layout({ children }: LayoutProps) {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex items-center ${sidebarOpen ? 'space-x-3 px-4' : 'justify-center px-0'} py-3 text-sm font-medium transition-colors ${
+                className={`mx-2 flex w-[calc(100%-1rem)] items-center rounded-md ${sidebarOpen ? 'space-x-3 px-2' : 'justify-center px-0'} py-3 text-sm font-medium transition-colors ${
                   isActive
-                    ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700'
+                    ? 'bg-blue-50 text-blue-700'
                     : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                 }`}
                 onClick={closeSidebarOnMobile}
               >
-                <Icon className="h-5 w-5" />
+                <Icon className="h-5 w-5 shrink-0" />
                 {sidebarOpen && <span>{item.label}</span>}
               </Link>
             );
