@@ -1798,7 +1798,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
             </DialogHeader>
             {selectedPaymentAccount ? (
               <div className="space-y-4">
-                <div className="rounded-xl border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-slate-50 p-4">
+                <div className="rounded-xl border border-emerald-100 bg-gradient-to-br from-blue-50 via-white to-slate-50 p-4">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-xs uppercase tracking-wide text-slate-500">Payment Type</p>
@@ -2052,9 +2052,9 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                   const breakdown = selectedReceipt.collectionEvents.find((event) => event.type === 'plan_change_adjustment')!.planChangeBreakdown!;
                   const currency = selectedReceipt.currency || 'MMK';
                   return (
-                    <div className="rounded-lg border border-blue-200 bg-blue-50/70 p-4">
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4">
                       <h3 className="font-semibold text-blue-950">Plan Change Calculation</h3>
-                      <p className="mt-1 text-xs text-blue-900">The charge is prorated by active days under each plan.</p>
+                      <p className="mt-1 text-xs text-emerald-900">The charge is prorated by active days under each plan.</p>
                       <div className="mt-3 overflow-x-auto">
                         <Table>
                           <TableHeader><TableRow><TableHead>Plan</TableHead><TableHead>Service Dates</TableHead><TableHead className="text-right">Days</TableHead><TableHead className="text-right">Monthly Rate</TableHead><TableHead className="text-right">Prorated Charge</TableHead></TableRow></TableHeader>
@@ -2064,7 +2064,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                       <div className="ml-auto mt-3 max-w-sm space-y-1 text-right text-sm">
                         <p>Previously billed: <span className="font-medium">{formatMoney(breakdown.previouslyBilledAmount, currency)}</span></p>
                         <p>Recalculated period total: <span className="font-medium">{formatMoney(breakdown.recalculatedPeriodTotal, currency)}</span></p>
-                        <p className="border-t border-blue-200 pt-2 font-semibold text-blue-950">Remaining amount: {formatMoney(breakdown.balanceDue, currency)}</p>
+                        <p className="border-t border-emerald-200 pt-2 font-semibold text-blue-950">Remaining amount: {formatMoney(breakdown.balanceDue, currency)}</p>
                       </div>
                     </div>
                   );

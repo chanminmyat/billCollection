@@ -5630,7 +5630,7 @@ export default function CustomersPage({
             )}
           </div>
           {isEditingPlanChanged && (
-            <div className="space-y-2 rounded-md border border-blue-200 bg-blue-50 p-3">
+            <div className="space-y-2 rounded-md border border-emerald-200 bg-emerald-50 p-3">
               <Label htmlFor="planEffectiveDate" className="text-sm font-medium text-slate-700">
                 New Plan Effective Date
               </Label>
@@ -6380,11 +6380,13 @@ export default function CustomersPage({
             </Card>
           </div>
         ) : (
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">Customer Management</h1>
-              <p className="text-gray-600">Manage your customer database</p>
+              <p className="page-eyebrow">Customer accounts</p>
+              <h1>Customers</h1>
+              <p>Manage your customer database</p>
             </div>
+            <Button onClick={() => router.push('/admin/customers/new-customer')} className="self-start"><Plus className="h-4 w-4" />Add customer</Button>
           </div>
         )}
 
@@ -6687,7 +6689,7 @@ export default function CustomersPage({
                               {isDraftRow ? (
                                 <button
                                   type="button"
-                                  className="text-blue-600 hover:underline"
+                                  className="text-emerald-600 hover:underline"
                                   onClick={() => handleContinueDraft(customerRow.draftId)}
                                 >
                                   {customerRow.code || '—'}
@@ -6695,7 +6697,7 @@ export default function CustomersPage({
                               ) : (
                                 <button
                                   type="button"
-                                  className="text-blue-600 hover:underline"
+                                  className="text-emerald-600 hover:underline"
                                   onClick={() => openCustomerViewDialog(customer)}
                                 >
                                   {customerRow.code || '—'}
@@ -6848,7 +6850,7 @@ export default function CustomersPage({
                             {isDraftRow ? (
                               <button
                                 type="button"
-                                className="text-sm text-blue-600 hover:underline"
+                                className="text-sm text-emerald-600 hover:underline"
                                 onClick={() => handleContinueDraft(customerRow.draftId)}
                               >
                                 {customerRow.code || '—'}
@@ -6856,7 +6858,7 @@ export default function CustomersPage({
                             ) : (
                               <button
                                 type="button"
-                                className="text-sm text-blue-600 hover:underline"
+                                className="text-sm text-emerald-600 hover:underline"
                                 onClick={() => openCustomerViewDialog(customer)}
                               >
                                 {customerRow.code || '—'}

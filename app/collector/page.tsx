@@ -1832,7 +1832,7 @@ export default function CollectorDashboard() {
                           key={bill.id}
                           className={`rounded-md border p-3 transition-colors ${
                             dragOverQueueBillId === bill.id
-                              ? 'border-blue-500 bg-blue-50'
+                              ? 'border-emerald-500 bg-emerald-50'
                               : 'border-slate-200 bg-white'
                           }`}
                           draggable
@@ -1868,7 +1868,7 @@ export default function CollectorDashboard() {
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <p className="font-medium text-slate-900">
-                                <span className="mr-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-100 px-1 text-xs font-semibold text-blue-700">
+                                <span className="mr-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-100 px-1 text-xs font-semibold text-emerald-700">
                                   {index + 1}
                                 </span>
                                 {displayName}
@@ -1975,8 +1975,8 @@ export default function CollectorDashboard() {
                               type="button"
                               className={`mt-0.5 flex h-7 w-7 min-h-7 min-w-7 shrink-0 items-center justify-center rounded-md border-2 text-xs font-bold leading-none transition-colors ${
                                 selectionOrder
-                                  ? 'border-blue-700 bg-blue-700 text-white shadow-sm'
-                                  : 'border-slate-400 bg-white text-slate-600 hover:border-blue-500 hover:text-blue-700'
+                                  ? 'border-emerald-700 bg-emerald-700 text-white shadow-sm'
+                                  : 'border-slate-400 bg-white text-slate-600 hover:border-emerald-500 hover:text-emerald-700'
                               }`}
                               onClick={() =>
                                 toggleDueBillSelection(
@@ -2001,7 +2001,7 @@ export default function CollectorDashboard() {
                           </div>
                           <div className="flex flex-col items-end gap-2">
                             {isBillQueuedToday(bill.id) && (
-                              <Badge variant="secondary" className="bg-blue-50 text-blue-700">
+                              <Badge variant="secondary" className="bg-emerald-50 text-emerald-700">
                                 {queuedTagLabel}
                               </Badge>
                             )}
@@ -2657,7 +2657,7 @@ export default function CollectorDashboard() {
             </DialogHeader>
             {selectedPaymentAccount ? (
               <div className="space-y-4">
-                <div className="rounded-xl border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-slate-50 p-4">
+                <div className="rounded-xl border border-emerald-100 bg-gradient-to-br from-blue-50 via-white to-slate-50 p-4">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-xs uppercase tracking-wide text-slate-500">{paymentTypeLabel}</p>

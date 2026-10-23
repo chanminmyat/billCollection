@@ -534,7 +534,7 @@ const statusBadgeVariant = (status: InvoiceStatus | string) => {
 };
 
 const transactionActionClass = (action: TransactionAction) => {
-  if (action === 'created') return 'bg-blue-50 text-blue-700 border border-blue-200';
+  if (action === 'created') return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
   if (action === 'edited') return 'bg-amber-50 text-amber-700 border border-amber-200';
   if (action === 'receipt') return 'bg-cyan-50 text-cyan-700 border border-cyan-200';
   if (action === 'cancelled') return 'bg-rose-50 text-rose-700 border border-rose-200';
@@ -4621,7 +4621,7 @@ export default function BillingPage() {
       return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
     }
     if (status === 'scheduled') {
-      return 'bg-blue-50 text-blue-700 border border-blue-200';
+      return 'bg-sky-50 text-sky-700 border border-sky-200';
     }
     if (status === 'waiting_payment') {
       return 'bg-amber-50 text-amber-700 border border-amber-200';
@@ -4645,7 +4645,7 @@ export default function BillingPage() {
       <div className="space-y-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900">Invoice Management</h1>
+            <p className="page-eyebrow">Billing workspace</p><h1>Invoices</h1>
             <p className="text-slate-600">
               Invoice list, next-invoice schedule, and automatic release engine
             </p>
@@ -4705,7 +4705,7 @@ export default function BillingPage() {
 
         {activeTab === 'invoice-list' ? (
           <>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium">Total Invoices</CardTitle>
@@ -5198,9 +5198,9 @@ export default function BillingPage() {
                     <p className="text-xs text-emerald-700">Ready</p>
                     <p className="font-semibold text-emerald-900">{engineStats.ready}</p>
                   </div>
-                  <div className="rounded-md border bg-blue-50 px-3 py-2 text-sm">
-                    <p className="text-xs text-blue-700">Scheduled</p>
-                    <p className="font-semibold text-blue-900">{engineStats.scheduled}</p>
+                  <div className="rounded-md border bg-sky-50 px-3 py-2 text-sm">
+                    <p className="text-xs text-sky-700">Scheduled</p>
+                    <p className="font-semibold text-sky-900">{engineStats.scheduled}</p>
                   </div>
                   <div className="rounded-md border bg-violet-50 px-3 py-2 text-sm">
                     <p className="text-xs text-violet-700">Releasing</p>
@@ -5458,9 +5458,9 @@ export default function BillingPage() {
                       {billingRules.filter((rule) => rule.isActive).length}
                     </p>
                   </div>
-                  <div className="rounded-md border bg-blue-50 px-3 py-2 text-sm">
-                    <p className="text-xs text-blue-700">Selected Customers</p>
-                    <p className="font-semibold text-blue-900">{selectedRuleCustomerIds.length}</p>
+                  <div className="rounded-md border bg-emerald-50 px-3 py-2 text-sm">
+                    <p className="text-xs text-emerald-700">Selected Customers</p>
+                    <p className="font-semibold text-emerald-900">{selectedRuleCustomerIds.length}</p>
                   </div>
                   <div className="rounded-md border bg-emerald-50 px-3 py-2 text-sm">
                     <p className="text-xs text-emerald-700">Selected Invoices</p>
@@ -6016,7 +6016,7 @@ export default function BillingPage() {
                                   `Payment Slip - ${formatInvoiceNo(log.invoiceNo, log.invoiceId)}`,
                                 )
                               }
-                              className="inline-flex text-sm font-medium text-blue-600 underline underline-offset-2"
+                              className="inline-flex text-sm font-medium text-emerald-600 underline underline-offset-2"
                             >
                               View Payment Slip
                             </button>
@@ -6958,9 +6958,9 @@ export default function BillingPage() {
                     })()}
 
                     {selectedInvoicePlanChangeBreakdown && (
-                      <div className="mt-5 rounded-lg border border-blue-200 bg-blue-50/70 p-4">
+                      <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50/70 p-4">
                         <h3 className="font-semibold text-blue-950">Plan Change Calculation</h3>
-                        <p className="mt-1 text-xs text-blue-900">
+                        <p className="mt-1 text-xs text-emerald-900">
                           Charges are prorated by the number of active days in each plan period.
                         </p>
                         <div className="mt-3 overflow-x-auto">
@@ -6990,7 +6990,7 @@ export default function BillingPage() {
                         <div className="mt-3 ml-auto max-w-sm space-y-1 text-right text-sm">
                           <p className="text-slate-700">Previously billed for this period: <span className="font-medium">{formatMoney(selectedInvoicePlanChangeBreakdown.previouslyBilledAmount, selectedInvoice.currency || 'MMK')}</span></p>
                           <p className="text-slate-700">Recalculated period total: <span className="font-medium">{formatMoney(selectedInvoicePlanChangeBreakdown.recalculatedPeriodTotal, selectedInvoice.currency || 'MMK')}</span></p>
-                          <p className="border-t border-blue-200 pt-2 font-semibold text-blue-950">Remaining amount due now: {formatMoney(selectedInvoicePlanChangeBreakdown.balanceDue, selectedInvoice.currency || 'MMK')}</p>
+                          <p className="border-t border-emerald-200 pt-2 font-semibold text-blue-950">Remaining amount due now: {formatMoney(selectedInvoicePlanChangeBreakdown.balanceDue, selectedInvoice.currency || 'MMK')}</p>
                         </div>
                       </div>
                     )}
@@ -7047,7 +7047,7 @@ export default function BillingPage() {
                                   )}`,
                                 )
                               }
-                              className="mt-2 inline-flex font-medium text-blue-600 underline underline-offset-2"
+                              className="mt-2 inline-flex font-medium text-emerald-600 underline underline-offset-2"
                             >
                               View Payment Slip
                             </button>
@@ -7100,7 +7100,7 @@ export default function BillingPage() {
                                           )}`,
                                         )
                                       }
-                                      className="mt-2 inline-flex text-xs font-medium text-blue-600 underline underline-offset-2"
+                                      className="mt-2 inline-flex text-xs font-medium text-emerald-600 underline underline-offset-2"
                                     >
                                       View Payment Slip
                                     </button>

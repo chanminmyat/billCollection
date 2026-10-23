@@ -446,7 +446,7 @@ export default function PaymentConfigPage({ mode }: PaymentConfigPageProps) {
                                 href={account.qrCodeDataUrl}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline"
+                                className="text-sm font-medium text-emerald-600 hover:text-emerald-700 hover:underline"
                               >
                                 View QR
                               </a>

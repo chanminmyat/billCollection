@@ -1047,6 +1047,63 @@ export default function CollectorsPage({
     };
   }, [inlineForm]);
 
+  const getCollectorStats = (collector: Collector) => {
+    const hasRemoteAssignments = availableCustomers.some((customer) => customer.collectorId);
+    const assignedCustomers = hasRemoteAssignments
+      ? availableCustomers.filter((customer) => isCustomerAssignedToCollector(customer, collector))
+      : customers.filter((customer) => isCustomerAssignedToCollector(customer, collector));
+    const assignedCustomerIds = new Set(assignedCustomers.map((customer) => String(customer.id)));
+    const hasRemoteInvoices = remoteInvoices.length > 0;
+
+    const collectorBills = hasRemoteInvoices
+      ? remoteInvoices.filter((invoice) => assignedCustomerIds.has(String(invoice.customerId ?? '')))
+      : bills.filter((bill) => bill.collectorId === collector.id);
+
+    const paidBills = collectorBills.filter(
+      (bill) => String((bill as { status?: string }).status ?? '').trim().toLowerCase() === 'paid'
+    );
+    const totalCollected = paidBills.reduce((sum, bill) => {
+      const amountValue = hasRemoteInvoices
+        ? (bill as CollectorInvoiceRecord).totalAmount ?? (bill as CollectorInvoiceRecord).amount
+        : (bill as { amount: number }).amount;
+      const numericAmount = typeof amountValue === 'number' ? amountValue : Number(amountValue ?? 0);
+      return sum + (Number.isFinite(numericAmount) ? numericAmount : 0);
+    }, 0);
+    const collectionRate = collectorBills.length > 0 ? (paidBills.length / collectorBills.length * 100) : 0;
+
+    return {
+      assignedCustomers: assignedCustomers.length,
+      totalCollected,
+      collectionRate,
+      totalBills: collectorBills.length
+    };
+  };
+
+  const collectorStatsById = useMemo(() => {
+    return collectorsSource.reduce<Record<string, ReturnType<typeof getCollectorStats>>>((acc, collector) => {
+      acc[collector.id] = getCollectorStats(collector);
+      return acc;
+    }, {});
+  }, [collectorsSource, availableCustomers, customers, bills, remoteInvoices]);
+
+  const topPerformer = useMemo<Collector | null>(() => {
+    if (collectorsSource.length === 0) return null;
+    let bestCollector: Collector | null = null;
+    let bestScore = -1;
+
+    collectorsSource.forEach((collector) => {
+      const stats = collectorStatsById[collector.id];
+      if (!stats) return;
+      const score = stats.totalCollected;
+      if (score > bestScore) {
+        bestScore = score;
+        bestCollector = collector;
+      }
+    });
+
+    return bestCollector;
+  }, [collectorsSource, collectorStatsById]);
+
   if (authLoading) {
     return <div className="min-h-screen bg-gray-50" />;
   }
@@ -1561,63 +1618,6 @@ export default function CollectorsPage({
     }
   };
 
-  const getCollectorStats = (collector: Collector) => {
-    const hasRemoteAssignments = availableCustomers.some((customer) => customer.collectorId);
-    const assignedCustomers = hasRemoteAssignments
-      ? availableCustomers.filter((customer) => isCustomerAssignedToCollector(customer, collector))
-      : customers.filter((customer) => isCustomerAssignedToCollector(customer, collector));
-    const assignedCustomerIds = new Set(assignedCustomers.map((customer) => String(customer.id)));
-    const hasRemoteInvoices = remoteInvoices.length > 0;
-
-    const collectorBills = hasRemoteInvoices
-      ? remoteInvoices.filter((invoice) => assignedCustomerIds.has(String(invoice.customerId ?? '')))
-      : bills.filter((bill) => bill.collectorId === collector.id);
-
-    const paidBills = collectorBills.filter(
-      (bill) => String((bill as { status?: string }).status ?? '').trim().toLowerCase() === 'paid'
-    );
-    const totalCollected = paidBills.reduce((sum, bill) => {
-      const amountValue = hasRemoteInvoices
-        ? (bill as CollectorInvoiceRecord).totalAmount ?? (bill as CollectorInvoiceRecord).amount
-        : (bill as { amount: number }).amount;
-      const numericAmount = typeof amountValue === 'number' ? amountValue : Number(amountValue ?? 0);
-      return sum + (Number.isFinite(numericAmount) ? numericAmount : 0);
-    }, 0);
-    const collectionRate = collectorBills.length > 0 ? (paidBills.length / collectorBills.length * 100) : 0;
-
-    return {
-      assignedCustomers: assignedCustomers.length,
-      totalCollected,
-      collectionRate,
-      totalBills: collectorBills.length
-    };
-  };
-
-  const collectorStatsById = useMemo(() => {
-    return collectorsSource.reduce<Record<string, ReturnType<typeof getCollectorStats>>>((acc, collector) => {
-      acc[collector.id] = getCollectorStats(collector);
-      return acc;
-    }, {});
-  }, [collectorsSource, availableCustomers, customers, bills, remoteInvoices]);
-
-  const topPerformer = useMemo<Collector | null>(() => {
-    if (collectorsSource.length === 0) return null;
-    let bestCollector: Collector | null = null;
-    let bestScore = -1;
-
-    collectorsSource.forEach((collector) => {
-      const stats = collectorStatsById[collector.id];
-      if (!stats) return;
-      const score = stats.totalCollected;
-      if (score > bestScore) {
-        bestScore = score;
-        bestCollector = collector;
-      }
-    });
-
-    return bestCollector;
-  }, [collectorsSource, collectorStatsById]);
-
   const openAssignDialog = (collector: Collector) => {
     const currentAssigned = availableCustomers
       .filter((customer) => isCustomerAssignedToCollector(customer, collector))
@@ -2122,11 +2122,13 @@ export default function CollectorsPage({
             </Card>
           </div>
         ) : (
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">Collector Management</h1>
-              <p className="text-gray-600">Manage your collection team</p>
+              <p className="page-eyebrow">Your collection team</p>
+              <h1>Collectors</h1>
+              <p>Manage your collection team</p>
             </div>
+            <Button onClick={() => router.push('/admin/collectors/new-collector')} className="self-start"><Plus className="h-4 w-4" />Add collector</Button>
           </div>
         )}
 
@@ -2288,7 +2290,7 @@ export default function CollectorsPage({
                                 <div className="font-medium">{collector.name}</div>
                                 <button
                                   type="button"
-                                  className="text-sm text-blue-600 hover:underline"
+                                  className="text-sm text-emerald-600 hover:underline"
                                   onClick={() => openViewDialog(collector)}
                                 >
                                   ID:{' '}
@@ -2399,7 +2401,7 @@ export default function CollectorsPage({
                             <div>
                               <button
                                 type="button"
-                                className="text-sm text-blue-600 hover:underline"
+                                className="text-sm text-emerald-600 hover:underline"
                                 onClick={() => openViewDialog(collector)}
                               >
                                 {(collector as Collector & { collectorCode?: string }).collectorCode ||

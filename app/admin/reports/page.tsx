@@ -424,7 +424,7 @@ export default function ReportsPage() {
       </div>
       {error && <div role="alert" className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{error}</div>}
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">{REPORTS.map((item) => <button key={item.id} onClick={() => setReport(item.id)} className={`rounded-lg border px-3 py-3 text-left text-sm font-semibold transition ${report === item.id ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>{item.label}</button>)}</div>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">{REPORTS.map((item) => <button key={item.id} onClick={() => setReport(item.id)} className={`rounded-lg border px-3 py-3 text-left text-sm font-semibold transition ${report === item.id ? 'border-emerald-600 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>{item.label}</button>)}</div>
 
       <Card><CardHeader className="pb-3"><CardTitle className="text-base">Report filters</CardTitle><p className="text-sm text-slate-500">{activeDescription}</p></CardHeader><CardContent>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">

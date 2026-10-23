@@ -1,10 +1,10 @@
-"use client";
+'use client';
 
-import { useEffect, useRef, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { useEffect, useRef, useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Dialog,
   DialogContent,
@@ -12,31 +12,39 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useAuth } from "./contexts/auth-context";
-import { useRouter } from "next/navigation";
-import { Building2, Eye, EyeOff } from "lucide-react";
+} from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useAuth } from './contexts/auth-context';
+import { useRouter } from 'next/navigation';
+import {
+  Building2,
+  Eye,
+  EyeOff,
+  Users,
+  FileText,
+  Wallet,
+  ArrowRight,
+} from 'lucide-react';
 import {
   fetchSystemBranding,
   readSystemBranding,
   SYSTEM_BRANDING_STORAGE_KEY,
   SYSTEM_BRANDING_UPDATED_EVENT,
-} from "@/lib/system-branding";
-import type { SystemBranding } from "@/lib/system-branding";
+} from '@/lib/system-branding';
+import type { SystemBranding } from '@/lib/system-branding';
 
 export default function LoginPage() {
   const [credentials, setCredentials] = useState({
-    identifier: "",
-    password: "",
+    identifier: '',
+    password: '',
   });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isForgotOpen, setIsForgotOpen] = useState(false);
-  const [resetChoice, setResetChoice] = useState<"email" | "security">("email");
+  const [resetChoice, setResetChoice] = useState<'email' | 'security'>('email');
   const [forgotData, setForgotData] = useState({
-    email: "",
-    identifier: "",
+    email: '',
+    identifier: '',
     securityAnswers: [] as string[],
   });
   const [securityQuestions, setSecurityQuestions] = useState<
@@ -46,23 +54,25 @@ export default function LoginPage() {
   const [isFetchingQuestions, setIsFetchingQuestions] = useState(false);
   const [isVerifyingAnswers, setIsVerifyingAnswers] = useState(false);
   const [emailResetStatus, setEmailResetStatus] = useState<{
-    type: "success" | "error";
+    type: 'success' | 'error';
     message: string;
   } | null>(null);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const { login } = useAuth();
   const router = useRouter();
   const resetCloseTimer = useRef<NodeJS.Timeout | null>(null);
-  const [branding, setBranding] = useState<SystemBranding>(() => readSystemBranding());
+  const [branding, setBranding] = useState<SystemBranding>(() =>
+    readSystemBranding(),
+  );
 
   const [passwordVisible, setPasswordVisible] = useState({
     login: false,
   });
   const API_BASE_URL =
-    process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+    process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === 'undefined') return;
     const syncBranding = () => {
       setBranding(readSystemBranding());
     };
@@ -76,11 +86,17 @@ export default function LoginPage() {
       .catch(() => {
         syncBranding();
       });
-    window.addEventListener("storage", onStorage);
-    window.addEventListener(SYSTEM_BRANDING_UPDATED_EVENT, syncBranding as EventListener);
+    window.addEventListener('storage', onStorage);
+    window.addEventListener(
+      SYSTEM_BRANDING_UPDATED_EVENT,
+      syncBranding as EventListener,
+    );
     return () => {
-      window.removeEventListener("storage", onStorage);
-      window.removeEventListener(SYSTEM_BRANDING_UPDATED_EVENT, syncBranding as EventListener);
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener(
+        SYSTEM_BRANDING_UPDATED_EVENT,
+        syncBranding as EventListener,
+      );
     };
   }, []);
 
@@ -88,7 +104,7 @@ export default function LoginPage() {
     e.preventDefault();
     setErrorMessage(null);
     if (!credentials.identifier || !credentials.password) {
-      setErrorMessage("Please enter your login details.");
+      setErrorMessage('Please enter your login details.');
       return;
     }
 
@@ -99,7 +115,7 @@ export default function LoginPage() {
       const message =
         error instanceof Error
           ? error.message
-          : "Unable to login. Please try again.";
+          : 'Unable to login. Please try again.';
       setErrorMessage(message);
     } finally {
       setIsSubmitting(false);
@@ -108,7 +124,7 @@ export default function LoginPage() {
 
   const fetchSecurityQuestions = async () => {
     if (!forgotData.identifier) {
-      setSecurityError("Please enter your email or username first.");
+      setSecurityError('Please enter your email or username first.');
       return;
     }
 
@@ -118,9 +134,9 @@ export default function LoginPage() {
 
     try {
       const response = await fetch(`${API_BASE_URL}/auth/security-questions`, {
-        method: "POST",
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({ identifier: forgotData.identifier }),
       });
@@ -129,26 +145,26 @@ export default function LoginPage() {
       if (!response.ok) {
         const message =
           data?.message ??
-          "Unable to load security questions. Please try again.";
+          'Unable to load security questions. Please try again.';
         throw new Error(message);
       }
 
       const questions = Array.isArray(data?.questions) ? data.questions : [];
       setSecurityQuestions(
         questions.map((item: { question: any; prompt: any }) => ({
-          question: item.question ?? "",
-          prompt: item.prompt ?? item.question ?? "",
-        }))
+          question: item.question ?? '',
+          prompt: item.prompt ?? item.question ?? '',
+        })),
       );
       setForgotData((prev) => ({
         ...prev,
-        securityAnswers: new Array(questions.length).fill(""),
+        securityAnswers: new Array(questions.length).fill(''),
       }));
     } catch (error) {
       const message =
         error instanceof Error
           ? error.message
-          : "Unable to load security questions.";
+          : 'Unable to load security questions.';
       setSecurityError(message);
     } finally {
       setIsFetchingQuestions(false);
@@ -156,7 +172,7 @@ export default function LoginPage() {
   };
 
   useEffect(() => {
-    if (emailResetStatus?.type === "success" && isForgotOpen) {
+    if (emailResetStatus?.type === 'success' && isForgotOpen) {
       if (resetCloseTimer.current) {
         clearTimeout(resetCloseTimer.current);
       }
@@ -176,8 +192,8 @@ export default function LoginPage() {
     e.preventDefault();
     if (!forgotData.email) {
       setEmailResetStatus({
-        type: "error",
-        message: "Please enter your registered email.",
+        type: 'error',
+        message: 'Please enter your registered email.',
       });
       return;
     }
@@ -186,9 +202,9 @@ export default function LoginPage() {
     setIsSendingEmail(true);
 
     try {
-      const response = await fetch("/api/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const response = await fetch('/api/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: forgotData.email }),
       });
 
@@ -206,16 +222,16 @@ export default function LoginPage() {
       }
 
       setEmailResetStatus({
-        type: "success",
+        type: 'success',
         message:
-          data?.message ?? "Reset link sent. Please check your email inbox.",
+          data?.message ?? 'Reset link sent. Please check your email inbox.',
       });
     } catch (error) {
       const message =
         error instanceof Error
           ? error.message
-          : "Unable to process reset request.";
-      setEmailResetStatus({ type: "error", message });
+          : 'Unable to process reset request.';
+      setEmailResetStatus({ type: 'error', message });
     } finally {
       setIsSendingEmail(false);
     }
@@ -225,12 +241,12 @@ export default function LoginPage() {
     e.preventDefault();
 
     if (!forgotData.identifier || securityQuestions.length === 0) {
-      setSecurityError("Please load your security questions first.");
+      setSecurityError('Please load your security questions first.');
       return;
     }
 
     if (forgotData.securityAnswers.some((answer) => !answer)) {
-      setSecurityError("Please answer all security questions.");
+      setSecurityError('Please answer all security questions.');
       return;
     }
 
@@ -241,9 +257,9 @@ export default function LoginPage() {
       const response = await fetch(
         `${API_BASE_URL}/auth/security-question-reset`,
         {
-          method: "POST",
+          method: 'POST',
           headers: {
-            "Content-Type": "application/json",
+            'Content-Type': 'application/json',
           },
           body: JSON.stringify({
             identifier: forgotData.identifier,
@@ -252,13 +268,13 @@ export default function LoginPage() {
               answer: forgotData.securityAnswers[index],
             })),
           }),
-        }
+        },
       );
 
       const data = await response.json().catch(() => null);
 
       if (!response.ok) {
-        const message = data?.message ?? "Unable to verify your answers.";
+        const message = data?.message ?? 'Unable to verify your answers.';
         throw new Error(message);
       }
 
@@ -267,7 +283,7 @@ export default function LoginPage() {
       const message =
         error instanceof Error
           ? error.message
-          : "Unable to verify your answers.";
+          : 'Unable to verify your answers.';
       setSecurityError(message);
     }
     setIsVerifyingAnswers(false);
@@ -280,8 +296,8 @@ export default function LoginPage() {
     }
     setIsForgotOpen(open);
     if (!open) {
-      setResetChoice("email");
-      setForgotData({ email: "", identifier: "", securityAnswers: [] });
+      setResetChoice('email');
+      setForgotData({ email: '', identifier: '', securityAnswers: [] });
       setSecurityQuestions([]);
       setSecurityError(null);
       setIsVerifyingAnswers(false);
@@ -291,99 +307,183 @@ export default function LoginPage() {
   };
 
   return (
-    <div className='min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4'>
-      <Card className='w-full max-w-md'>
-        <CardHeader className='text-center'>
-          <div className='flex justify-center mb-4'>
+    <div className="auth-shell">
+      <section className="auth-story">
+        <div className="relative z-10 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#315848]">
             {branding.logoDataUrl ? (
               <img
                 src={branding.logoDataUrl}
-                alt={`${branding.systemName} logo`}
-                className="h-12 w-12 rounded object-contain"
+                alt=""
+                className="h-7 w-7 object-contain"
               />
             ) : (
-              <Building2 className='h-12 w-12 text-blue-600' />
+              <Building2 className="h-5 w-5 text-emerald-100" />
             )}
           </div>
-          <CardTitle className='text-2xl font-bold text-gray-800'>
+          <span className="text-xl font-semibold tracking-tight">
             {branding.systemName}
-          </CardTitle>
-          <p className='text-gray-600'>{branding.systemTagline}</p>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleLogin} className='space-y-4'>
-            <div className='space-y-2'>
-              <Label htmlFor='identifier'>Email / Username / Phone</Label>
-              <Input
-                id='identifier'
-                type='text'
-                placeholder='Enter your email, username, or phone'
-                value={credentials.identifier}
-                onChange={(e) =>
-                  setCredentials({ ...credentials, identifier: e.target.value })
-                }
-                autoComplete='username'
-                required
-              />
-            </div>
-            <div className='space-y-2'>
-              <Label htmlFor='password'>Password</Label>
-              <div className='relative'>
-                <Input
-                  id='password'
-                  type={passwordVisible.login ? "text" : "password"}
-                  placeholder='Enter password'
-                  value={credentials.password}
-                  onChange={(e) =>
-                    setCredentials({ ...credentials, password: e.target.value })
-                  }
-                  autoComplete='current-password'
-                  required
-                  className='pr-10'
+          </span>
+        </div>
+        <div className="relative z-10 my-16 max-w-md">
+          <p className="mb-6 text-[10px] font-semibold uppercase tracking-[0.24em] text-[#93b5a2]">
+            A clearer way to manage billing
+          </p>
+          <h1 className="text-5xl font-medium leading-[1.12] tracking-[-0.04em] xl:text-6xl">
+            Less admin.
+            <br />
+            <span className="text-[#acd7bd]">More clarity.</span>
+          </h1>
+          <p className="mt-6 max-w-sm text-sm leading-7 text-[#aebfb5]">
+            Bring your customers, invoices and collections together in one
+            organized workspace.
+          </p>
+          <div className="mt-12 space-y-5 border-t border-white/10 pt-7">
+            {[
+              {
+                icon: Users,
+                title: 'Know your customers',
+                detail: 'Accounts, plans and service details.',
+              },
+              {
+                icon: FileText,
+                title: 'Keep billing organized',
+                detail: 'Invoices, schedules and payment records.',
+              },
+              {
+                icon: Wallet,
+                title: 'Stay on top of collections',
+                detail: 'Track payments and overdue balances.',
+              },
+            ].map((item) => (
+              <div key={item.title} className="flex items-center gap-4">
+                <item.icon
+                  className="h-[18px] w-[18px] shrink-0 text-[#93b5a2]"
+                  strokeWidth={1.5}
                 />
-                <button
-                  type='button'
-                  onClick={() =>
-                    setPasswordVisible((prev) => ({
-                      ...prev,
-                      login: !prev.login,
-                    }))
-                  }
-                  className='absolute inset-y-0 right-2 text-gray-500 hover:text-gray-800'
-                  aria-label={
-                    passwordVisible.login ? "Hide password" : "Show password"
-                  }
-                >
-                  {passwordVisible.login ? (
-                    <EyeOff className='h-4 w-4' />
-                  ) : (
-                    <Eye className='h-4 w-4' />
-                  )}
-                </button>
+                <div>
+                  <p className="text-xs font-medium text-[#e6eee8]">
+                    {item.title}
+                  </p>
+                  <p className="mt-1 text-[11px] text-[#91a79a]">
+                    {item.detail}
+                  </p>
+                </div>
               </div>
-            </div>
-            {errorMessage && (
-              <div className='text-sm text-red-600 bg-red-50 border border-red-100 rounded px-3 py-2'>
-                {errorMessage}
-              </div>
-            )}
-            <Button type='submit' className='w-full' disabled={isSubmitting}>
-              {isSubmitting ? "Signing In..." : "Sign In"}
-            </Button>
-            <button
-              type='button'
-              className='w-full text-sm text-blue-600 hover:underline'
-              onClick={() => handleForgotOpenChange(true)}
-            >
-              Forgot password?
-            </button>
-          </form>
-          <div className='mt-6 text-sm text-gray-500 text-center'>
-            <p>Demo credentials:</p>
-            <p>Use any valid email, username, or phone number plus password.</p>
+            ))}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+        <p className="relative z-10 text-[11px] text-[#81998b]">
+          {branding.systemTagline}
+        </p>
+      </section>
+      <section className="flex min-w-0 flex-col items-center justify-center px-5 py-12 sm:px-10">
+        <Card className="w-full max-w-[420px] border-0 bg-transparent shadow-none">
+          <CardHeader className="px-0 pb-8 pt-0">
+            <div className="mb-6 flex lg:hidden">
+              {branding.logoDataUrl ? (
+                <img
+                  src={branding.logoDataUrl}
+                  alt={`${branding.systemName} logo`}
+                  className="h-12 w-12 rounded object-contain"
+                />
+              ) : (
+                <Building2 className="h-10 w-10 text-primary" />
+              )}
+            </div>
+            <p className="page-eyebrow">Welcome to your workspace</p>
+            <CardTitle className="text-3xl font-semibold tracking-tight">
+              Welcome back
+            </CardTitle>
+            <p className="!mt-3 text-sm text-muted-foreground">
+              Sign in to your {branding.systemName} account to continue.
+            </p>
+          </CardHeader>
+          <CardContent className="p-0">
+            <form onSubmit={handleLogin} className="space-y-5">
+              <div className="space-y-2">
+                <Label htmlFor="identifier">Email / Username / Phone</Label>
+                <Input
+                  id="identifier"
+                  type="text"
+                  placeholder="Enter your email, username, or phone"
+                  value={credentials.identifier}
+                  onChange={(e) =>
+                    setCredentials({
+                      ...credentials,
+                      identifier: e.target.value,
+                    })
+                  }
+                  autoComplete="username"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={passwordVisible.login ? 'text' : 'password'}
+                    placeholder="Enter password"
+                    value={credentials.password}
+                    onChange={(e) =>
+                      setCredentials({
+                        ...credentials,
+                        password: e.target.value,
+                      })
+                    }
+                    autoComplete="current-password"
+                    required
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPasswordVisible((prev) => ({
+                        ...prev,
+                        login: !prev.login,
+                      }))
+                    }
+                    className="absolute inset-y-0 right-2 text-gray-500 hover:text-gray-800"
+                    aria-label={
+                      passwordVisible.login ? 'Hide password' : 'Show password'
+                    }
+                  >
+                    {passwordVisible.login ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+              {errorMessage && (
+                <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded px-3 py-2">
+                  {errorMessage}
+                </div>
+              )}
+              <Button
+                type="submit"
+                className="h-11 w-full"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? 'Signing In...' : 'Sign In'}
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+              <button
+                type="button"
+                className="w-full text-xs font-medium text-primary hover:underline"
+                onClick={() => handleForgotOpenChange(true)}
+              >
+                Forgot password?
+              </button>
+            </form>
+            <p className="mt-8 border-t pt-5 text-center text-xs leading-6 text-muted-foreground">
+              Need access? Contact your system administrator.
+            </p>
+          </CardContent>
+        </Card>
+      </section>
 
       <Dialog open={isForgotOpen} onOpenChange={handleForgotOpenChange}>
         <DialogContent>
@@ -396,19 +496,19 @@ export default function LoginPage() {
           <Tabs
             value={resetChoice}
             onValueChange={(value) =>
-              setResetChoice(value as "email" | "security")
+              setResetChoice(value as 'email' | 'security')
             }
           >
-            <TabsList className='grid grid-cols-2'>
-              <TabsTrigger value='email'>Email</TabsTrigger>
-              <TabsTrigger value='security'>Security Question</TabsTrigger>
+            <TabsList className="grid grid-cols-2">
+              <TabsTrigger value="email">Email</TabsTrigger>
+              <TabsTrigger value="security">Security Question</TabsTrigger>
             </TabsList>
-            <TabsContent value='email'>
-              <form className='space-y-3 mt-4' onSubmit={handleForgotSubmit}>
-                <Label htmlFor='forgotEmail'>Registered Email</Label>
+            <TabsContent value="email">
+              <form className="space-y-3 mt-4" onSubmit={handleForgotSubmit}>
+                <Label htmlFor="forgotEmail">Registered Email</Label>
                 <Input
-                  id='forgotEmail'
-                  type='email'
+                  id="forgotEmail"
+                  type="email"
                   value={forgotData.email}
                   onChange={(e) =>
                     setForgotData({ ...forgotData, email: e.target.value })
@@ -418,9 +518,9 @@ export default function LoginPage() {
                 {emailResetStatus && (
                   <p
                     className={`text-sm ${
-                      emailResetStatus.type === "error"
-                        ? "text-red-600"
-                        : "text-green-600"
+                      emailResetStatus.type === 'error'
+                        ? 'text-red-600'
+                        : 'text-green-600'
                     }`}
                   >
                     {emailResetStatus.message}
@@ -428,21 +528,21 @@ export default function LoginPage() {
                 )}
                 <DialogFooter>
                   <Button
-                    type='submit'
+                    type="submit"
                     disabled={!forgotData.email || isSendingEmail}
                   >
-                    {isSendingEmail ? "Sending..." : "Send Reset Email"}
+                    {isSendingEmail ? 'Sending...' : 'Send Reset Email'}
                   </Button>
                 </DialogFooter>
               </form>
             </TabsContent>
-            <TabsContent value='security'>
-              <div className='space-y-4 mt-4'>
-                <div className='space-y-2'>
-                  <Label htmlFor='forgotIdentifier'>Username / Phone</Label>
-                  <div className='flex gap-2'>
+            <TabsContent value="security">
+              <div className="space-y-4 mt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="forgotIdentifier">Username / Phone</Label>
+                  <div className="flex gap-2">
                     <Input
-                      id='forgotIdentifier'
+                      id="forgotIdentifier"
                       value={forgotData.identifier}
                       onChange={(e) =>
                         setForgotData({
@@ -453,26 +553,26 @@ export default function LoginPage() {
                       required
                     />
                     <Button
-                      type='button'
-                      variant='outline'
+                      type="button"
+                      variant="outline"
                       onClick={fetchSecurityQuestions}
                       disabled={!forgotData.identifier || isFetchingQuestions}
                     >
-                      {isFetchingQuestions ? "Loading..." : "Load Questions"}
+                      {isFetchingQuestions ? 'Loading...' : 'Load Questions'}
                     </Button>
                   </div>
                 </div>
                 {securityError && (
-                  <p className='text-sm text-red-600'>{securityError}</p>
+                  <p className="text-sm text-red-600">{securityError}</p>
                 )}
                 {securityQuestions.length > 0 && (
                   <form
-                    className='space-y-3'
+                    className="space-y-3"
                     onSubmit={handleSecurityResetSubmit}
                   >
                     {securityQuestions.map((question, index) => (
                       <div
-                        className='space-y-2'
+                        className="space-y-2"
                         key={`${question.question}-${index}`}
                       >
                         <Label htmlFor={`security-answer-${index}`}>
@@ -480,7 +580,7 @@ export default function LoginPage() {
                         </Label>
                         <Input
                           id={`security-answer-${index}`}
-                          value={forgotData.securityAnswers[index] ?? ""}
+                          value={forgotData.securityAnswers[index] ?? ''}
                           onChange={(e) => {
                             const newAnswers = [...forgotData.securityAnswers];
                             newAnswers[index] = e.target.value;
@@ -493,17 +593,17 @@ export default function LoginPage() {
                         />
                       </div>
                     ))}
-                    <DialogFooter className='flex flex-col gap-2 sm:flex-row sm:justify-end'>
+                    <DialogFooter className="flex flex-col gap-2 sm:flex-row sm:justify-end">
                       <Button
-                        type='submit'
+                        type="submit"
                         disabled={
                           isVerifyingAnswers ||
                           forgotData.securityAnswers.some((answer) => !answer)
                         }
                       >
                         {isVerifyingAnswers
-                          ? "Verifying..."
-                          : "Continue with Security Question"}
+                          ? 'Verifying...'
+                          : 'Continue with Security Question'}
                       </Button>
                     </DialogFooter>
                   </form>

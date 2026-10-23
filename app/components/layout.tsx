@@ -2,27 +2,41 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { 
-  LayoutDashboard, 
-  Users, 
-  FileText, 
-  BarChart3, 
-  LogOut, 
-  Menu, 
+import {
+  LayoutDashboard,
+  Users,
+  FileText,
+  BarChart3,
+  LogOut,
+  Menu,
   X,
   ChevronDown,
   Building2,
   UserCheck,
   Banknote,
   Activity,
-  Globe
+  Globe,
+  ChevronRight,
+  PanelLeftClose,
+  CalendarDays,
 } from 'lucide-react';
 import { useAuth } from '../contexts/auth-context';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { formatDisplayDate } from '@/lib/date-format';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { readUiLanguage, UI_LANGUAGE_STORAGE_KEY, UI_LANGUAGE_UPDATED_EVENT, UiLanguage, writeUiLanguage } from '@/lib/ui-language';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  readUiLanguage,
+  UI_LANGUAGE_STORAGE_KEY,
+  UI_LANGUAGE_UPDATED_EVENT,
+  UiLanguage,
+  writeUiLanguage,
+} from '@/lib/ui-language';
 import {
   COLLECTOR_DASHBOARD_COPY_UPDATED_AT_STORAGE_KEY,
   COLLECTOR_DASHBOARD_COPY_UPDATED_EVENT,
@@ -44,17 +58,27 @@ interface LayoutProps {
 export default function Layout({ children }: LayoutProps) {
   const { user, logout, isLoading } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(false);
   const [uiLanguage, setUiLanguage] = useState<UiLanguage>('en');
-  const [customersMenuOpen, setCustomersMenuOpen] = useState(false);
-  const [collectorsMenuOpen, setCollectorsMenuOpen] = useState(false);
-  const [billingMenuOpen, setBillingMenuOpen] = useState(false);
-  const [paymentConfigMenuOpen, setPaymentConfigMenuOpen] = useState(false);
-  const [collectorViewHash, setCollectorViewHash] = useState<string>('dashboard');
+  const [customersMenuOpen, setCustomersMenuOpen] = useState<boolean | null>(
+    null,
+  );
+  const [collectorsMenuOpen, setCollectorsMenuOpen] = useState<boolean | null>(
+    null,
+  );
+  const [billingMenuOpen, setBillingMenuOpen] = useState<boolean | null>(null);
+  const [paymentConfigMenuOpen, setPaymentConfigMenuOpen] = useState<
+    boolean | null
+  >(null);
+  const [collectorViewHash, setCollectorViewHash] =
+    useState<string>('dashboard');
   const [collectorDashboardCopy, setCollectorDashboardCopy] = useState(() => ({
     en: { ...DEFAULT_COLLECTOR_DASHBOARD_COPY.en },
     mm: { ...DEFAULT_COLLECTOR_DASHBOARD_COPY.mm },
   }));
-  const [branding, setBranding] = useState<SystemBranding>(() => readSystemBranding());
+  const [branding, setBranding] = useState<SystemBranding>(() =>
+    readSystemBranding(),
+  );
   const sidebarRef = useRef<HTMLDivElement>(null);
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const pathname = usePathname();
@@ -63,8 +87,11 @@ export default function Layout({ children }: LayoutProps) {
   const role = user?.role;
   const isCollectorBurmese = role === 'collector' && uiLanguage === 'mm';
 
-  const collectorLabel = (english: string, burmese: string) => (isCollectorBurmese ? burmese : english);
-  const collectorCopy = isCollectorBurmese ? collectorDashboardCopy.mm : collectorDashboardCopy.en;
+  const collectorLabel = (english: string, burmese: string) =>
+    isCollectorBurmese ? burmese : english;
+  const collectorCopy = isCollectorBurmese
+    ? collectorDashboardCopy.mm
+    : collectorDashboardCopy.en;
 
   const getNavItems = () => {
     switch (role) {
@@ -76,15 +103,24 @@ export default function Layout({ children }: LayoutProps) {
             label: 'Customers',
             children: [
               { label: 'New Customer', href: '/admin/customers/new-customer' },
-              { label: 'Customer List', href: '/admin/customers/customer-list' },
+              {
+                label: 'Customer List',
+                href: '/admin/customers/customer-list',
+              },
             ],
           },
           {
             icon: UserCheck,
             label: 'Collectors',
             children: [
-              { label: 'New Collector', href: '/admin/collectors/new-collector' },
-              { label: 'Collector List', href: '/admin/collectors/collector-list' },
+              {
+                label: 'New Collector',
+                href: '/admin/collectors/new-collector',
+              },
+              {
+                label: 'Collector List',
+                href: '/admin/collectors/collector-list',
+              },
             ],
           },
           {
@@ -92,9 +128,15 @@ export default function Layout({ children }: LayoutProps) {
             label: 'Billing',
             children: [
               { label: 'Invoice List', href: '/admin/billing' },
-              { label: 'Create Invoice', href: '/admin/billing/create-invoice' },
+              {
+                label: 'Create Invoice',
+                href: '/admin/billing/create-invoice',
+              },
               { label: 'Rule Config', href: '/admin/billing?tab=rule-config' },
-              { label: 'Create Receipt', href: '/admin/billing/receipt/create' },
+              {
+                label: 'Create Receipt',
+                href: '/admin/billing/receipt/create',
+              },
               { label: 'Receipt List', href: '/admin/billing/receipt/list' },
             ],
           },
@@ -102,19 +144,56 @@ export default function Layout({ children }: LayoutProps) {
             icon: Banknote,
             label: 'Payment Config',
             children: [
-              { label: 'Create Payment Account', href: '/admin/billing/payment-config/create' },
-              { label: 'Payment Account List', href: '/admin/billing/payment-config/list' },
+              {
+                label: 'Create Payment Account',
+                href: '/admin/billing/payment-config/create',
+              },
+              {
+                label: 'Payment Account List',
+                href: '/admin/billing/payment-config/list',
+              },
             ],
           },
-          { icon: Activity, label: 'Activity Log', href: '/admin/activity-log' },
+          {
+            icon: Activity,
+            label: 'Activity Log',
+            href: '/admin/activity-log',
+          },
           { icon: BarChart3, label: 'Reports', href: '/admin/reports' },
         ];
       case 'collector':
         return [
-          { icon: LayoutDashboard, label: collectorCopy.dashboardTitle || collectorLabel('Dashboard', 'ဒက်ရှ်ဘုတ်'), href: '/collector#dashboard' },
-          { icon: Users, label: collectorCopy.assignedCustomers || collectorLabel('Assigned Customers', 'တာဝန်ပေးထားသော ဖောက်သည်များ'), href: '/collector#assigned_customers' },
-          { icon: FileText, label: collectorCopy.assignedBillsLabel || collectorLabel('Assigned Bills', 'တာဝန်ပေးထားသော ဘီလ်များ'), href: '/collector#assigned_bills' },
-          { icon: UserCheck, label: collectorCopy.collectedBillsLabel || collectorLabel('Collected Bills', 'ကောက်ခံပြီး ဘီလ်များ'), href: '/collector#collected_bills' },
+          {
+            icon: LayoutDashboard,
+            label:
+              collectorCopy.dashboardTitle ||
+              collectorLabel('Dashboard', 'ဒက်ရှ်ဘုတ်'),
+            href: '/collector#dashboard',
+          },
+          {
+            icon: Users,
+            label:
+              collectorCopy.assignedCustomers ||
+              collectorLabel(
+                'Assigned Customers',
+                'တာဝန်ပေးထားသော ဖောက်သည်များ',
+              ),
+            href: '/collector#assigned_customers',
+          },
+          {
+            icon: FileText,
+            label:
+              collectorCopy.assignedBillsLabel ||
+              collectorLabel('Assigned Bills', 'တာဝန်ပေးထားသော ဘီလ်များ'),
+            href: '/collector#assigned_bills',
+          },
+          {
+            icon: UserCheck,
+            label:
+              collectorCopy.collectedBillsLabel ||
+              collectorLabel('Collected Bills', 'ကောက်ခံပြီး ဘီလ်များ'),
+            href: '/collector#collected_bills',
+          },
         ];
       case 'customer':
         return [
@@ -130,22 +209,28 @@ export default function Layout({ children }: LayoutProps) {
   const navItems = getNavItems();
   const isCustomersRoute = pathname.startsWith('/admin/customers');
   const isCollectorsRoute = pathname.startsWith('/admin/collectors');
-  const isPaymentConfigRoute = pathname.startsWith('/admin/billing/payment-config');
-  const isBillingRoute = pathname.startsWith('/admin/billing') && !isPaymentConfigRoute;
+  const isPaymentConfigRoute = pathname.startsWith(
+    '/admin/billing/payment-config',
+  );
+  const isBillingRoute =
+    pathname.startsWith('/admin/billing') && !isPaymentConfigRoute;
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    setCustomersMenuOpen(null);
+    setCollectorsMenuOpen(null);
+    setBillingMenuOpen(null);
+    setPaymentConfigMenuOpen(null);
+  }, [pathname]);
+
+  useEffect(() => {
+    const desktop = window.matchMedia('(min-width: 1024px)');
     const updateSidebar = () => {
-      const desktop = window.innerWidth >= 1024;
-      if (!desktop) {
-        setSidebarOpen(false);
-      }
+      setIsDesktop(desktop.matches);
+      setSidebarOpen(desktop.matches);
     };
     updateSidebar();
-    window.addEventListener('resize', updateSidebar);
-    return () => {
-      window.removeEventListener('resize', updateSidebar);
-    };
+    desktop.addEventListener('change', updateSidebar);
+    return () => desktop.removeEventListener('change', updateSidebar);
   }, []);
 
   useEffect(() => {
@@ -183,10 +268,16 @@ export default function Layout({ children }: LayoutProps) {
     };
 
     window.addEventListener('storage', onStorage);
-    window.addEventListener(UI_LANGUAGE_UPDATED_EVENT, syncLanguage as EventListener);
+    window.addEventListener(
+      UI_LANGUAGE_UPDATED_EVENT,
+      syncLanguage as EventListener,
+    );
     return () => {
       window.removeEventListener('storage', onStorage);
-      window.removeEventListener(UI_LANGUAGE_UPDATED_EVENT, syncLanguage as EventListener);
+      window.removeEventListener(
+        UI_LANGUAGE_UPDATED_EVENT,
+        syncLanguage as EventListener,
+      );
     };
   }, [role, user?.collectorProfile?.language]);
 
@@ -196,10 +287,13 @@ export default function Layout({ children }: LayoutProps) {
     let active = true;
     const loadCollectorCopy = async () => {
       try {
-        const response = await fetch('/api/reference-data/collector-dashboard-copy', {
-          method: 'GET',
-          headers: { 'Content-Type': 'application/json' },
-        });
+        const response = await fetch(
+          '/api/reference-data/collector-dashboard-copy',
+          {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
         const data = await response.json().catch(() => null);
         if (!active) return;
         if (!response.ok) return;
@@ -221,11 +315,17 @@ export default function Layout({ children }: LayoutProps) {
 
     void loadCollectorCopy();
     window.addEventListener('storage', onStorage);
-    window.addEventListener(COLLECTOR_DASHBOARD_COPY_UPDATED_EVENT, onUpdated as EventListener);
+    window.addEventListener(
+      COLLECTOR_DASHBOARD_COPY_UPDATED_EVENT,
+      onUpdated as EventListener,
+    );
     return () => {
       active = false;
       window.removeEventListener('storage', onStorage);
-      window.removeEventListener(COLLECTOR_DASHBOARD_COPY_UPDATED_EVENT, onUpdated as EventListener);
+      window.removeEventListener(
+        COLLECTOR_DASHBOARD_COPY_UPDATED_EVENT,
+        onUpdated as EventListener,
+      );
     };
   }, [role]);
 
@@ -250,15 +350,21 @@ export default function Layout({ children }: LayoutProps) {
         syncBranding();
       });
     window.addEventListener('storage', onStorage);
-    window.addEventListener(SYSTEM_BRANDING_UPDATED_EVENT, syncBranding as EventListener);
+    window.addEventListener(
+      SYSTEM_BRANDING_UPDATED_EVENT,
+      syncBranding as EventListener,
+    );
     return () => {
       window.removeEventListener('storage', onStorage);
-      window.removeEventListener(SYSTEM_BRANDING_UPDATED_EVENT, syncBranding as EventListener);
+      window.removeEventListener(
+        SYSTEM_BRANDING_UPDATED_EVENT,
+        syncBranding as EventListener,
+      );
     };
   }, []);
 
   useEffect(() => {
-    if (!sidebarOpen) return;
+    if (!sidebarOpen || isDesktop) return;
 
     const closeOnOutsideClick = (event: PointerEvent) => {
       const target = event.target as Node;
@@ -271,8 +377,52 @@ export default function Layout({ children }: LayoutProps) {
     };
 
     document.addEventListener('pointerdown', closeOnOutsideClick);
-    return () => document.removeEventListener('pointerdown', closeOnOutsideClick);
-  }, [sidebarOpen]);
+    return () =>
+      document.removeEventListener('pointerdown', closeOnOutsideClick);
+  }, [sidebarOpen, isDesktop]);
+
+  useEffect(() => {
+    if (!sidebarOpen || isDesktop) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const sidebar = sidebarRef.current;
+    const focusableSelector = 'a[href], button:not([disabled]), [tabindex="0"]';
+    sidebar?.querySelector<HTMLElement>(focusableSelector)?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setSidebarOpen(false);
+      }
+      if (event.key === 'Tab') {
+        const elements =
+          sidebar?.querySelectorAll<HTMLElement>(focusableSelector);
+        if (!elements?.length) return;
+        const first = elements[0];
+        const last = elements[elements.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', handleKeyDown);
+      if (previousFocus?.isConnected) previousFocus.focus();
+      else sidebarToggleRef.current?.focus();
+    };
+  }, [sidebarOpen, isDesktop]);
+
+  useEffect(() => {
+    const sidebar = sidebarRef.current;
+    if (!sidebarOpen && !isDesktop) sidebar?.setAttribute('inert', '');
+    else sidebar?.removeAttribute('inert');
+  }, [sidebarOpen, isDesktop, isLoading]);
 
   const closeSidebarOnMobile = () => {
     if (typeof window === 'undefined') return;
@@ -282,83 +432,85 @@ export default function Layout({ children }: LayoutProps) {
   };
 
   if (isLoading || !user) {
-    return <div className="min-h-screen bg-gray-50" />;
+    return <div className="min-h-screen bg-background" />;
   }
 
+  const activeSection =
+    pathname === '/profile'
+      ? 'Profile'
+      : navItems.find((item) =>
+          item.children?.some((child) => pathname === child.href.split('?')[0]),
+        )?.label ||
+        navItems.find((item) => item.href?.split('#')[0] === pathname)?.label ||
+        'Workspace';
+  const initials = user.name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((name) => name[0])
+    .join('')
+    .toUpperCase();
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Mobile sidebar overlay */}
+    <div className="app-shell">
+      <a
+        href="#main-content"
+        className="sr-only fixed left-4 top-4 z-[60] rounded-lg bg-card px-4 py-3 text-sm text-primary shadow-lg focus:not-sr-only"
+      >
+        Skip to content
+      </a>
       {sidebarOpen && (
-        <div 
-          className="fixed inset-0 z-40 bg-black bg-opacity-50 lg:hidden"
+        <div
+          className="app-mobile-overlay fixed inset-0 z-40 bg-black/40 backdrop-blur-sm lg:hidden"
           onClick={() => setSidebarOpen(false)}
+          aria-hidden="true"
         />
       )}
-
-      {/* Sidebar */}
-      <div
+      <aside
         ref={sidebarRef}
-        className={`fixed inset-y-0 left-0 z-50 flex h-dvh flex-col bg-white shadow-lg transition-all duration-300 ease-in-out ${
-          sidebarOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full lg:w-16 lg:translate-x-0'
-        }`}
+        aria-label="Main navigation"
+        aria-hidden={!sidebarOpen && !isDesktop}
+        className={`app-sidebar ${sidebarOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full lg:w-[76px] lg:translate-x-0'}`}
       >
-        <div className="shrink-0 flex items-center justify-between p-4 border-b">
-          <div className="flex items-center space-x-2">
+        <div
+          className={`flex h-[76px] shrink-0 items-center border-b border-white/[0.07] ${sidebarOpen ? 'justify-between px-5' : 'justify-center px-3'}`}
+        >
+          <div className="flex min-w-0 items-center gap-3">
             {branding.logoDataUrl ? (
               <img
                 src={branding.logoDataUrl}
                 alt={`${branding.systemName} logo`}
-                className="h-8 w-8 rounded object-contain"
+                className="h-9 w-9 shrink-0 rounded-lg bg-white/5 object-contain p-1"
               />
             ) : (
-              <Building2 className="h-8 w-8 text-blue-600" />
-            )}
-            {sidebarOpen && <h1 className="truncate text-xl font-bold text-gray-800">{branding.systemName}</h1>}
-          </div>
-          {sidebarOpen && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setSidebarOpen(false)}
-              aria-label="Close sidebar"
-              title="Close sidebar"
-            >
-              <X className="h-5 w-5" />
-            </Button>
-          )}
-        </div>
-
-        <Link
-          href="/profile"
-          className={`block shrink-0 p-4 hover:bg-gray-50 ${
-            pathname === '/profile' ? 'bg-blue-50 border-r-2 border-blue-700' : ''
-          }`}
-        >
-          <div className={`flex items-center ${sidebarOpen ? 'space-x-3' : 'justify-center'}`}>
-            <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-              <span className="text-blue-600 font-medium">
-                {user.name.charAt(0)}
-              </span>
-            </div>
-            {sidebarOpen && (
-              <div>
-                <p className="font-medium text-gray-800">{user.name}</p>
-                <p className="text-sm text-gray-500 capitalize">
-                  {isCollectorBurmese ? 'ကောက်ခံသူ' : user.role}
-                </p>
-                <span className="mt-1 inline-flex items-center text-xs font-medium text-blue-600">
-                  {collectorCopy.editProfileLabel || collectorLabel('Edit profile', 'ပရိုဖိုင် ပြင်ရန်')}
-                </span>
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#315848] text-emerald-100">
+                <Building2 className="h-5 w-5" />
               </div>
             )}
+            {sidebarOpen && (
+              <span className="truncate text-lg font-semibold tracking-tight text-white">
+                {branding.systemName}
+              </span>
+            )}
           </div>
-        </Link>
-
-        <nav
-          className={`mt-4 min-h-0 flex-1 pb-4 ${
-            sidebarOpen ? 'overflow-y-auto overflow-x-hidden' : 'overflow-visible'
-          }`}
+          {sidebarOpen && (
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(false)}
+              aria-label="Close sidebar"
+              title="Collapse navigation"
+              className="ml-2 rounded-md p-1.5 text-[#a8b9b0] hover:bg-white/10 hover:text-white"
+            >
+              <PanelLeftClose className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+        <div
+          className={`pt-7 pb-3 text-[10px] font-semibold uppercase tracking-[0.17em] text-[#82998d] ${sidebarOpen ? 'px-7' : 'px-2 text-center'}`}
         >
+          {sidebarOpen ? 'Workspace' : 'Menu'}
+        </div>
+        <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-5">
           {navItems.map((item) => {
             const Icon = item.icon;
             if (item.children) {
@@ -369,7 +521,7 @@ export default function Layout({ children }: LayoutProps) {
                     ? 'billing'
                     : item.label === 'Payment Config'
                       ? 'paymentConfig'
-                    : 'customers';
+                      : 'customers';
               const isMenuOpen =
                 menuKey === 'collectors'
                   ? collectorsMenuOpen
@@ -385,67 +537,49 @@ export default function Layout({ children }: LayoutProps) {
                     ? isBillingRoute
                     : menuKey === 'paymentConfig'
                       ? isPaymentConfigRoute
-                    : isCustomersRoute;
-              const isMenuExpanded = isMenuOpen || isMenuRoute;
+                      : isCustomersRoute;
+              const isMenuExpanded = isMenuOpen ?? isMenuRoute;
               const toggleMenu = () => {
-                if (!sidebarOpen) {
-                  setSidebarOpen(true);
-                  if (menuKey === 'collectors') {
-                    setCollectorsMenuOpen(true);
-                  } else if (menuKey === 'billing') {
-                    setBillingMenuOpen(true);
-                  } else if (menuKey === 'paymentConfig') {
-                    setPaymentConfigMenuOpen(true);
-                  } else {
-                    setCustomersMenuOpen(true);
-                  }
-                  return;
-                }
-                if (menuKey === 'collectors') {
-                  setCollectorsMenuOpen((prev) => !prev);
-                } else if (menuKey === 'billing') {
-                  setBillingMenuOpen((prev) => !prev);
-                } else if (menuKey === 'paymentConfig') {
-                  setPaymentConfigMenuOpen((prev) => !prev);
-                } else {
-                  setCustomersMenuOpen((prev) => !prev);
-                }
+                if (!sidebarOpen) setSidebarOpen(true);
+                const next = !sidebarOpen || !isMenuExpanded;
+                if (menuKey === 'collectors') setCollectorsMenuOpen(next);
+                else if (menuKey === 'billing') setBillingMenuOpen(next);
+                else if (menuKey === 'paymentConfig')
+                  setPaymentConfigMenuOpen(next);
+                else setCustomersMenuOpen(next);
               };
               return (
-                <div
-                  key={item.label}
-                  className="relative px-2"
-                >
+                <div key={item.label}>
                   <button
                     type="button"
-                    className={`flex w-full items-center justify-between rounded-md px-2 py-3 text-sm font-medium transition-colors ${
-                      isMenuRoute
-                        ? 'bg-blue-50 text-blue-700'
-                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                    }`}
+                    className={`app-nav-item ${!sidebarOpen ? 'justify-center px-0' : ''}`}
+                    data-active={isMenuRoute}
                     onClick={toggleMenu}
+                    aria-label={item.label}
+                    title={!sidebarOpen ? item.label : undefined}
+                    aria-expanded={sidebarOpen && isMenuExpanded}
+                    aria-controls={`nav-${menuKey}`}
                   >
-                    <span className="flex items-center space-x-3">
-                      <Icon className="h-5 w-5" />
-                      {sidebarOpen && <span>{item.label}</span>}
-                    </span>
+                    <Icon className="h-[18px] w-[18px] shrink-0" />
                     {sidebarOpen && (
-                      <ChevronDown
-                        className={`h-4 w-4 transition-transform ${isMenuExpanded ? 'rotate-180' : ''}`}
-                      />
+                      <>
+                        <span className="flex-1 text-left">{item.label}</span>
+                        <ChevronDown
+                          className={`h-3.5 w-3.5 transition-transform ${isMenuExpanded ? 'rotate-180' : ''}`}
+                        />
+                      </>
                     )}
                   </button>
                   {sidebarOpen && isMenuExpanded && (
                     <div
-                      className={
-                        sidebarOpen
-                          ? 'ml-9 mt-1 space-y-1'
-                          : 'absolute left-full top-0 z-50 ml-2 w-52 rounded-md border border-slate-200 bg-white py-2 shadow-lg'
-                      }
+                      id={`nav-${menuKey}`}
+                      className="mb-2 ml-[21px] mt-1 space-y-0.5 border-l border-white/10 pl-3"
                     >
                       {item.children.map((child) => {
                         const [childPath, childQuery] = child.href.split('?');
-                        const tabQuery = childQuery?.startsWith('tab=') ? childQuery.slice(4) : null;
+                        const tabQuery = childQuery?.startsWith('tab=')
+                          ? childQuery.slice(4)
+                          : null;
                         const activeTab = searchParams.get('tab');
                         const isChildActive =
                           pathname === childPath &&
@@ -454,11 +588,8 @@ export default function Layout({ children }: LayoutProps) {
                           <Link
                             key={child.href}
                             href={child.href}
-                            className={`block rounded-md px-3 py-2 ${sidebarOpen ? 'text-xs' : 'text-sm'} font-medium transition-colors ${
-                              isChildActive
-                                ? 'bg-blue-100 text-blue-700'
-                                : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                            }`}
+                            className="app-nav-child"
+                            aria-current={isChildActive ? 'page' : undefined}
                             onClick={closeSidebarOnMobile}
                           >
                             {child.label}
@@ -470,37 +601,42 @@ export default function Layout({ children }: LayoutProps) {
                 </div>
               );
             }
-
             let isActive = pathname === item.href;
-            const isCollectorViewLink = role === 'collector' && item.href.startsWith('/collector#');
-            const collectorTargetView = isCollectorViewLink ? item.href.split('#')[1] || 'dashboard' : null;
-            if (role === 'collector' && item.href.startsWith('/collector')) {
-              const hrefView = item.href.split('#')[1] || 'dashboard';
-              const currentView = collectorViewHash || searchParams.get('view') || 'dashboard';
-              isActive = pathname === '/collector' && currentView === hrefView;
-            }
+            const isCollectorViewLink =
+              role === 'collector' && item.href.startsWith('/collector#');
+            const collectorTargetView = isCollectorViewLink
+              ? item.href.split('#')[1] || 'dashboard'
+              : null;
+            if (isCollectorViewLink)
+              isActive =
+                pathname === '/collector' &&
+                (collectorViewHash ||
+                  searchParams.get('view') ||
+                  'dashboard') === collectorTargetView;
+            const classes = `app-nav-item ${!sidebarOpen ? 'justify-center px-0' : ''}`;
             if (isCollectorViewLink && collectorTargetView) {
               return (
                 <button
                   key={item.href}
                   type="button"
-                  className={`mx-2 flex w-[calc(100%-1rem)] items-center rounded-md ${sidebarOpen ? 'space-x-3 px-2' : 'justify-center px-0'} py-3 text-sm font-medium transition-colors ${
-                    isActive
-                      ? 'bg-blue-50 text-blue-700'
-                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                  }`}
+                  className={classes}
+                  data-active={isActive}
+                  aria-current={isActive ? 'page' : undefined}
+                  aria-label={item.label}
+                  title={!sidebarOpen ? item.label : undefined}
                   onClick={() => {
                     setCollectorViewHash(collectorTargetView);
-                    if (typeof window !== 'undefined') {
-                      const { pathname: currentPath, search } = window.location;
-                      const nextUrl = `${currentPath}${search}#${collectorTargetView}`;
-                      window.history.pushState(null, '', nextUrl);
-                      window.dispatchEvent(new HashChangeEvent('hashchange'));
-                    }
+                    const { pathname: currentPath, search } = window.location;
+                    window.history.pushState(
+                      null,
+                      '',
+                      `${currentPath}${search}#${collectorTargetView}`,
+                    );
+                    window.dispatchEvent(new HashChangeEvent('hashchange'));
                     closeSidebarOnMobile();
                   }}
                 >
-                  <Icon className="h-5 w-5 shrink-0" />
+                  <Icon className="h-[18px] w-[18px] shrink-0" />
                   {sidebarOpen && <span>{item.label}</span>}
                 </button>
               );
@@ -509,91 +645,123 @@ export default function Layout({ children }: LayoutProps) {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`mx-2 flex w-[calc(100%-1rem)] items-center rounded-md ${sidebarOpen ? 'space-x-3 px-2' : 'justify-center px-0'} py-3 text-sm font-medium transition-colors ${
-                  isActive
-                    ? 'bg-blue-50 text-blue-700'
-                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                }`}
+                className={classes}
+                data-active={isActive}
+                aria-current={isActive ? 'page' : undefined}
+                aria-label={item.label}
+                title={!sidebarOpen ? item.label : undefined}
                 onClick={closeSidebarOnMobile}
               >
-                <Icon className="h-5 w-5 shrink-0" />
+                <Icon className="h-[18px] w-[18px] shrink-0" />
                 {sidebarOpen && <span>{item.label}</span>}
               </Link>
             );
           })}
         </nav>
-
-        <div className="shrink-0 border-t bg-white p-4">
-          <Button
-            variant="ghost"
-            onClick={logout}
-            className={`w-full text-gray-600 hover:text-gray-900 ${
-              sidebarOpen ? 'justify-start' : 'justify-center'
-            }`}
+        <div className="shrink-0 border-t border-white/[0.08] p-3">
+          <Link
+            href="/profile"
+            className={`app-nav-item ${sidebarOpen ? 'px-2' : 'justify-center px-0'}`}
+            data-active={pathname === '/profile'}
+            title="Edit profile"
+            onClick={closeSidebarOnMobile}
           >
-            <LogOut className="h-5 w-5 mr-3" />
-            {sidebarOpen && (collectorCopy.logoutLabel || collectorLabel('Logout', 'ထွက်မည်'))}
-          </Button>
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#d5e9dc] text-xs font-semibold text-[#244b3d]">
+              {initials}
+            </span>
+            {sidebarOpen && (
+              <>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs font-medium text-white">
+                    {user.name}
+                  </span>
+                  <span className="mt-0.5 block text-[11px] capitalize text-[#91a79a]">
+                    {isCollectorBurmese ? 'ကောက်ခံသူ' : user.role}
+                  </span>
+                </span>
+                <ChevronRight className="h-3.5 w-3.5" />
+              </>
+            )}
+          </Link>
+          <button
+            type="button"
+            onClick={logout}
+            aria-label={
+              collectorCopy.logoutLabel || collectorLabel('Logout', 'ထွက်မည်')
+            }
+            title={!sidebarOpen ? 'Logout' : undefined}
+            className={`app-nav-item mt-1 ${sidebarOpen ? 'px-3' : 'justify-center px-0'}`}
+          >
+            <LogOut className="h-4 w-4 shrink-0" />
+            {sidebarOpen && (
+              <span>
+                {collectorCopy.logoutLabel ||
+                  collectorLabel('Logout', 'ထွက်မည်')}
+              </span>
+            )}
+          </button>
         </div>
-      </div>
-
-      {/* Main content */}
-      <div className={sidebarOpen ? 'lg:ml-64' : 'lg:ml-16'}>
-        {/* Top bar */}
-        <div className="bg-white shadow-sm border-b px-4 py-3 lg:px-6">
-          <div className="flex items-center justify-between">
-            <div>
-              {!sidebarOpen && (
-                <Button
-                  ref={sidebarToggleRef}
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setSidebarOpen(true)}
-                  aria-label="Open sidebar"
-                  title="Open sidebar"
-                >
-                  <Menu className="h-5 w-5" />
-                </Button>
-              )}
-            </div>
-            
-            <div className="flex items-center space-x-4">
-              <div className="hidden text-sm text-gray-500 sm:block">
-                {formatDisplayDate(new Date())}
-              </div>
-              {user.role === 'collector' && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900">
-                      <Globe className="h-4 w-4 mr-2" />
-                      {isCollectorBurmese ? 'မြန်မာ' : 'English'}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => handleChangeLanguage('en')}>
-                      English
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleChangeLanguage('mm')}>
-                      မြန်မာ
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
+      </aside>
+      <div
+        className={`app-content min-w-0 transition-[margin] duration-200 ${sidebarOpen ? 'lg:ml-64' : 'lg:ml-[76px]'}`}
+      >
+        <header className="app-topbar flex h-[76px] items-center justify-between gap-3 border-b bg-card px-4 sm:px-6 lg:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            {!sidebarOpen && (
               <Button
+                ref={sidebarToggleRef}
                 variant="ghost"
-                size="sm"
-                onClick={logout}
-                className="text-gray-600 hover:text-gray-900"
+                size="icon"
+                onClick={() => setSidebarOpen(true)}
+                aria-label="Open sidebar"
+                aria-expanded={false}
               >
-                <LogOut className="h-4 w-4 mr-2" />
-                {collectorCopy.logoutLabel || collectorLabel('Logout', 'ထွက်မည်')}
+                <Menu className="h-5 w-5" />
               </Button>
+            )}
+            <div className="flex min-w-0 items-center gap-2 text-xs">
+              <span className="hidden text-muted-foreground sm:inline">
+                Workspace
+              </span>
+              <ChevronRight className="hidden h-3 w-3 text-muted-foreground/60 sm:block" />
+              <span className="truncate font-medium text-foreground">
+                {activeSection}
+              </span>
             </div>
           </div>
-        </div>
-
-        {/* Page content */}
-        <main className="p-4 lg:p-6">
+          <div className="flex shrink-0 items-center gap-3 sm:gap-5">
+            <div className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex">
+              <CalendarDays className="h-3.5 w-3.5" />
+              <span>{formatDisplayDate(new Date())}</span>
+            </div>
+            {user.role === 'collector' && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Globe className="h-4 w-4" />
+                    {isCollectorBurmese ? 'မြန်မာ' : 'English'}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleChangeLanguage('en')}>
+                    English
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleChangeLanguage('mm')}>
+                    မြန်မာ
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            <Link
+              href="/profile"
+              aria-label="View profile"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-50 text-[11px] font-semibold text-emerald-800 ring-1 ring-emerald-100 transition-colors hover:bg-emerald-100"
+            >
+              {initials}
+            </Link>
+          </div>
+        </header>
+        <main id="main-content" tabIndex={-1} className="app-main">
           {children}
         </main>
       </div>
