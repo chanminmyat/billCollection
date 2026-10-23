@@ -327,33 +327,33 @@ export default function LoginPage() {
         </div>
         <div className="relative z-10 my-16 max-w-md">
           <p className="mb-6 text-[10px] font-semibold uppercase tracking-[0.24em] text-[#93b5a2]">
-            A clearer way to manage billing
+            Connected billing for everyone
           </p>
           <h1 className="text-5xl font-medium leading-[1.12] tracking-[-0.04em] xl:text-6xl">
-            Less admin.
+            Your billing.
             <br />
-            <span className="text-[#acd7bd]">More clarity.</span>
+            <span className="text-[#acd7bd]">Made simple.</span>
           </h1>
           <p className="mt-6 max-w-sm text-sm leading-7 text-[#aebfb5]">
-            Bring your customers, invoices and collections together in one
-            organized workspace.
+            One place for admins, collectors and customers to access accounts,
+            billing and payments.
           </p>
           <div className="mt-12 space-y-5 border-t border-white/10 pt-7">
             {[
               {
                 icon: Users,
-                title: 'Know your customers',
-                detail: 'Accounts, plans and service details.',
+                title: 'For admins',
+                detail: 'Manage customers, billing and reports.',
               },
               {
                 icon: FileText,
-                title: 'Keep billing organized',
-                detail: 'Invoices, schedules and payment records.',
+                title: 'For collectors',
+                detail: 'View assigned bills and record collections.',
               },
               {
                 icon: Wallet,
-                title: 'Stay on top of collections',
-                detail: 'Track payments and overdue balances.',
+                title: 'For customers',
+                detail: 'View your bills and payment history.',
               },
             ].map((item) => (
               <div key={item.title} className="flex items-center gap-4">
@@ -391,12 +391,13 @@ export default function LoginPage() {
                 <Building2 className="h-10 w-10 text-primary" />
               )}
             </div>
-            <p className="page-eyebrow">Welcome to your workspace</p>
+            <p className="page-eyebrow">Welcome to your account</p>
             <CardTitle className="text-3xl font-semibold tracking-tight">
               Welcome back
             </CardTitle>
             <p className="!mt-3 text-sm text-muted-foreground">
-              Sign in to your {branding.systemName} account to continue.
+              Sign in to your {branding.systemName} account. We&apos;ll open the
+              right dashboard for you.
             </p>
           </CardHeader>
           <CardContent className="p-0">
@@ -479,7 +480,8 @@ export default function LoginPage() {
               </button>
             </form>
             <p className="mt-8 border-t pt-5 text-center text-xs leading-6 text-muted-foreground">
-              Need access? Contact your system administrator.
+              Need help signing in? Contact your service provider or system
+              administrator.
             </p>
           </CardContent>
         </Card>
