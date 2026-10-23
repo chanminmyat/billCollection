@@ -16,15 +16,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from './contexts/auth-context';
 import { useRouter } from 'next/navigation';
-import {
-  Building2,
-  Eye,
-  EyeOff,
-  Users,
-  FileText,
-  Wallet,
-  ArrowRight,
-} from 'lucide-react';
+import { Building2, Eye, EyeOff } from 'lucide-react';
 import {
   fetchSystemBranding,
   readSystemBranding,
@@ -307,185 +299,113 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="auth-shell">
-      <section className="auth-story">
-        <div className="relative z-10 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#315848]">
-            {branding.logoDataUrl ? (
-              <img
-                src={branding.logoDataUrl}
-                alt=""
-                className="h-7 w-7 object-contain"
-              />
-            ) : (
-              <Building2 className="h-5 w-5 text-emerald-100" />
-            )}
-          </div>
-          <span className="text-xl font-semibold tracking-tight">
-            {branding.systemName}
-          </span>
-        </div>
-        <div className="relative z-10 my-16 max-w-md">
-          <p className="mb-6 text-[10px] font-semibold uppercase tracking-[0.24em] text-[#93b5a2]">
-            Connected billing for everyone
-          </p>
-          <h1 className="text-5xl font-medium leading-[1.12] tracking-[-0.04em] xl:text-6xl">
-            Your billing.
-            <br />
-            <span className="text-[#acd7bd]">Made simple.</span>
-          </h1>
-          <p className="mt-6 max-w-sm text-sm leading-7 text-[#aebfb5]">
-            One place for admins, collectors and customers to access accounts,
-            billing and payments.
-          </p>
-          <div className="mt-12 space-y-5 border-t border-white/10 pt-7">
-            {[
-              {
-                icon: Users,
-                title: 'For admins',
-                detail: 'Manage customers, billing and reports.',
-              },
-              {
-                icon: FileText,
-                title: 'For collectors',
-                detail: 'View assigned bills and record collections.',
-              },
-              {
-                icon: Wallet,
-                title: 'For customers',
-                detail: 'View your bills and payment history.',
-              },
-            ].map((item) => (
-              <div key={item.title} className="flex items-center gap-4">
-                <item.icon
-                  className="h-[18px] w-[18px] shrink-0 text-[#93b5a2]"
-                  strokeWidth={1.5}
-                />
-                <div>
-                  <p className="text-xs font-medium text-[#e6eee8]">
-                    {item.title}
-                  </p>
-                  <p className="mt-1 text-[11px] text-[#91a79a]">
-                    {item.detail}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <p className="relative z-10 text-[11px] text-[#81998b]">
-          {branding.systemTagline}
-        </p>
-      </section>
-      <section className="flex min-w-0 flex-col items-center justify-center px-5 py-12 sm:px-10">
-        <Card className="w-full max-w-[420px] border-0 bg-transparent shadow-none">
-          <CardHeader className="px-0 pb-8 pt-0">
-            <div className="mb-6 flex lg:hidden">
+    <main className="flex min-h-screen items-center justify-center bg-background px-4 py-10 sm:px-6">
+      <Card className="w-full max-w-[400px] rounded-2xl shadow-[0_12px_40px_-16px_rgba(24,34,31,0.16)]">
+        <CardHeader className="px-7 pb-7 pt-8 sm:px-8">
+          <div className="mb-7 flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
               {branding.logoDataUrl ? (
                 <img
                   src={branding.logoDataUrl}
-                  alt={`${branding.systemName} logo`}
-                  className="h-12 w-12 rounded object-contain"
+                  alt=""
+                  className="h-8 w-8 rounded-lg bg-white object-contain p-1"
                 />
               ) : (
-                <Building2 className="h-10 w-10 text-primary" />
+                <Building2 className="h-5 w-5" strokeWidth={1.7} />
               )}
             </div>
-            <p className="page-eyebrow">Welcome to your account</p>
-            <CardTitle className="text-3xl font-semibold tracking-tight">
-              Welcome back
-            </CardTitle>
-            <p className="!mt-3 text-sm text-muted-foreground">
-              Sign in to your {branding.systemName} account. We&apos;ll open the
-              right dashboard for you.
-            </p>
-          </CardHeader>
-          <CardContent className="p-0">
-            <form onSubmit={handleLogin} className="space-y-5">
-              <div className="space-y-2">
-                <Label htmlFor="identifier">Email / Username / Phone</Label>
+            <span className="text-lg font-semibold tracking-tight">
+              {branding.systemName}
+            </span>
+          </div>
+          <CardTitle className="text-2xl font-semibold tracking-tight">
+            Sign in
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-7 pb-8 sm:px-8">
+          <form onSubmit={handleLogin} className="space-y-5">
+            <div className="space-y-2">
+              <Label htmlFor="identifier">Email / Username / Phone</Label>
+              <Input
+                id="identifier"
+                type="text"
+                placeholder="Email, username or phone"
+                value={credentials.identifier}
+                onChange={(e) =>
+                  setCredentials({
+                    ...credentials,
+                    identifier: e.target.value,
+                  })
+                }
+                className="h-11"
+                autoComplete="username"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <div className="relative">
                 <Input
-                  id="identifier"
-                  type="text"
-                  placeholder="Enter your email, username, or phone"
-                  value={credentials.identifier}
+                  id="password"
+                  type={passwordVisible.login ? 'text' : 'password'}
+                  placeholder="Enter password"
+                  value={credentials.password}
                   onChange={(e) =>
                     setCredentials({
                       ...credentials,
-                      identifier: e.target.value,
+                      password: e.target.value,
                     })
                   }
-                  autoComplete="username"
+                  autoComplete="current-password"
                   required
+                  className="h-11 pr-11"
                 />
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPasswordVisible((prev) => ({
+                      ...prev,
+                      login: !prev.login,
+                    }))
+                  }
+                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-md text-muted-foreground hover:text-foreground"
+                  aria-label={
+                    passwordVisible.login ? 'Hide password' : 'Show password'
+                  }
+                >
+                  {passwordVisible.login ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <div className="relative">
-                  <Input
-                    id="password"
-                    type={passwordVisible.login ? 'text' : 'password'}
-                    placeholder="Enter password"
-                    value={credentials.password}
-                    onChange={(e) =>
-                      setCredentials({
-                        ...credentials,
-                        password: e.target.value,
-                      })
-                    }
-                    autoComplete="current-password"
-                    required
-                    className="pr-10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setPasswordVisible((prev) => ({
-                        ...prev,
-                        login: !prev.login,
-                      }))
-                    }
-                    className="absolute inset-y-0 right-2 text-gray-500 hover:text-gray-800"
-                    aria-label={
-                      passwordVisible.login ? 'Hide password' : 'Show password'
-                    }
-                  >
-                    {passwordVisible.login ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </button>
-                </div>
+            </div>
+            {errorMessage && (
+              <div
+                role="alert"
+                className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700"
+              >
+                {errorMessage}
               </div>
-              {errorMessage && (
-                <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded px-3 py-2">
-                  {errorMessage}
-                </div>
-              )}
-              <Button
-                type="submit"
-                className="h-11 w-full"
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? 'Signing In...' : 'Sign In'}
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-              <button
-                type="button"
-                className="w-full text-xs font-medium text-primary hover:underline"
-                onClick={() => handleForgotOpenChange(true)}
-              >
-                Forgot password?
-              </button>
-            </form>
-            <p className="mt-8 border-t pt-5 text-center text-xs leading-6 text-muted-foreground">
-              Need help signing in? Contact your service provider or system
-              administrator.
-            </p>
-          </CardContent>
-        </Card>
-      </section>
+            )}
+            <Button
+              type="submit"
+              className="h-11 w-full"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Signing In...' : 'Sign In'}
+            </Button>
+            <button
+              type="button"
+              className="w-full text-xs font-medium text-primary hover:underline"
+              onClick={() => handleForgotOpenChange(true)}
+            >
+              Forgot password?
+            </button>
+          </form>
+        </CardContent>
+      </Card>
 
       <Dialog open={isForgotOpen} onOpenChange={handleForgotOpenChange}>
         <DialogContent>
@@ -615,6 +535,6 @@ export default function LoginPage() {
           </Tabs>
         </DialogContent>
       </Dialog>
-    </div>
+    </main>
   );
 }
