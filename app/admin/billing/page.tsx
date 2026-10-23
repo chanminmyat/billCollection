@@ -73,6 +73,7 @@ import {
   BILLING_RULE_ASSIGNMENTS_UPDATED_EVENT,
   readBillingRuleAssignments,
 } from '@/lib/billing-rule-assignments';
+import { useSystemBranding } from '@/lib/use-system-branding';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 const BILLING_ENGINE_SCHEDULE_STORAGE_KEY = 'billing_next_invoice_manual_schedule_v1';
@@ -931,6 +932,7 @@ export default function BillingPage() {
   const { toast } = useToast();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const branding = useSystemBranding();
 
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [customers, setCustomers] = useState<BillingCustomer[]>([]);
@@ -1004,6 +1006,7 @@ export default function BillingPage() {
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceRecord | null>(null);
   const [isPreviousBalanceExpanded, setIsPreviousBalanceExpanded] = useState(true);
   const [adjustmentRows, setAdjustmentRows] = useState<AdjustmentFormRow[]>([]);
+  const [invoiceEditReason, setInvoiceEditReason] = useState('');
   const [editedInvoiceFixedFirstChargeMode, setEditedInvoiceFixedFirstChargeMode] =
     useState<FixedFirstInvoiceChargeMode>('full_month');
   const [paymentMethod, setPaymentMethod] = useState('Cash');
@@ -2162,6 +2165,12 @@ export default function BillingPage() {
     if (!selectedInvoice) return null;
     return normalizeInvoiceStatusLabel(selectedInvoice.status) as InvoiceStatus;
   }, [selectedInvoice]);
+  const selectedInvoicePlanChangeBreakdown = useMemo(
+    () => selectedInvoice?.collectionEvents?.find(
+      (event) => String(event.type) === 'plan_change_adjustment',
+    )?.planChangeBreakdown ?? null,
+    [selectedInvoice],
+  );
   const selectedInvoiceDisplayStatus = useMemo(() => {
     if (!selectedInvoice) return '';
     return getInvoiceDisplayStatusLabel(selectedInvoice);
@@ -2952,6 +2961,7 @@ export default function BillingPage() {
     setPaymentMethod(invoice.paymentMethod || 'Cash');
     setEditedInvoiceRuleId(invoiceRuleDetails.id || INVOICE_RULE_NONE_VALUE);
     setEditedInvoiceFixedFirstChargeMode(inferFixedFirstChargeModeFromInvoice(invoice));
+    setInvoiceEditReason('');
     setDetailOpen(true);
   };
 
@@ -3141,6 +3151,16 @@ export default function BillingPage() {
       return;
     }
 
+    const normalizedEditReason = invoiceEditReason.trim();
+    if (!normalizedEditReason) {
+      toast({
+        title: 'Edit reason required',
+        description: 'Enter why this invoice is being revised before saving.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     const invalid = adjustmentRows.find(
       (row) => row.description.trim().length === 0 || toNumber(row.value) < 0,
     );
@@ -3243,6 +3263,7 @@ export default function BillingPage() {
             releaseDate: formatDateYmd(new Date()),
               billingCycle: derivedBillingCycle,
               replaceInvoiceId: selectedInvoice.id,
+              invoiceEditReason: normalizedEditReason,
               billingRuleId: effectiveRuleId ?? undefined,
             billingRuleName: selectedRule?.name ?? undefined,
             billingMode: selectedRule?.billingMode ?? undefined,
@@ -3522,6 +3543,7 @@ export default function BillingPage() {
         updated.id,
         updated.invoiceNo || updated.id,
         {
+          reason: normalizedEditReason,
           previousInvoiceId: selectedInvoice.id,
           previousInvoiceNo: selectedInvoice.invoiceNo || selectedInvoice.id,
           backendCancelledOldInvoice: cancelledInBackend,
@@ -4288,6 +4310,11 @@ export default function BillingPage() {
   const exportInvoicePdf = () => {
     if (!selectedInvoice) return;
 
+    const invoiceCompanyName = branding.receiptCompanyName || branding.systemName;
+    const invoiceCompanyAddress = branding.receiptAddress;
+    const invoiceCompanyPhone = branding.receiptPhone;
+    const invoiceCompanyEmail = branding.receiptEmail;
+
     const customerName =
       selectedInvoice.customer?.personalName ||
       selectedInvoice.customer?.companyName ||
@@ -4300,6 +4327,10 @@ export default function BillingPage() {
       selectedInvoice.subscription?.plan?.planCode ||
       '—';
     const currency = selectedInvoice.currency || 'MMK';
+    const planChangeEvent = selectedInvoice.collectionEvents?.find(
+      (event) => String(event.type) === 'plan_change_adjustment',
+    );
+    const planChangeBreakdown = planChangeEvent?.planChangeBreakdown;
 
     let rowNumber = 1;
     const itemRows: string[] = [];
@@ -4307,7 +4338,7 @@ export default function BillingPage() {
     itemRows.push(`
       <tr>
         <td>${rowNumber++}</td>
-        <td>Monthly Internet Fee</td>
+        <td>${escapeHtml(selectedInvoice.invoiceType === 'plan_change_adjustment' ? 'Prorated Plan Change Balance' : 'Monthly Internet Fee')}</td>
         <td class="right">1</td>
         <td class="right">${escapeHtml(formatMoney(selectedInvoice.monthlyFee, currency))}</td>
         <td class="right">${escapeHtml(formatMoney(selectedInvoice.monthlyFee, currency))}</td>
@@ -4446,7 +4477,17 @@ export default function BillingPage() {
 
     const invoiceNoDisplay = formatInvoiceNo(selectedInvoice.invoiceNo, selectedInvoice.id);
     const invoiceRuleName = selectedInvoiceRuleDetails.name || 'Unassigned';
-    const invoiceRuleId = selectedInvoiceRuleDetails.id || '—';
+    const planChangeBreakdownHtml = planChangeBreakdown
+      ? `
+        <div class="section">
+          <div class="title">Plan Change Calculation</div>
+          <table><thead><tr><th>Plan</th><th>Service Dates</th><th>Days</th><th>Monthly Rate</th><th>Prorated Charge</th></tr></thead>
+          <tbody>${planChangeBreakdown.segments.map((segment) => `<tr><td>${escapeHtml(segment.planName)}</td><td>${escapeHtml(formatDisplayDateRange(segment.from, segment.to))}</td><td class="right">${segment.days}</td><td class="right">${escapeHtml(formatMoney(segment.monthlyFee, currency))}</td><td class="right">${escapeHtml(formatMoney(segment.amount, currency))}</td></tr>`).join('')}</tbody></table>
+          <div>Previously billed for this period: ${escapeHtml(formatMoney(planChangeBreakdown.previouslyBilledAmount, currency))}</div>
+          <div>Recalculated period total: ${escapeHtml(formatMoney(planChangeBreakdown.recalculatedPeriodTotal, currency))}</div>
+          <div class="bold">Remaining amount due now: ${escapeHtml(formatMoney(planChangeBreakdown.balanceDue, currency))}</div>
+        </div>`
+      : '';
 
     const html = `
       <!doctype html>
@@ -4475,10 +4516,10 @@ export default function BillingPage() {
             <h1>Invoice</h1>
 
             <div class="section">
-              <div>Company Name: ABC Internet Service Provider</div>
-              <div>Address: No. 123, Main Road, Yangon</div>
-              <div>Phone: 09-xxxxxxx</div>
-              <div>Email:</div>
+              <div>Company Name: ${escapeHtml(invoiceCompanyName)}</div>
+              ${invoiceCompanyAddress ? `<div>Address: ${escapeHtml(invoiceCompanyAddress)}</div>` : ''}
+              ${invoiceCompanyPhone ? `<div>Phone: ${escapeHtml(invoiceCompanyPhone)}</div>` : ''}
+              ${invoiceCompanyEmail ? `<div>Email: ${escapeHtml(invoiceCompanyEmail)}</div>` : ''}
             </div>
 
             <div class="section grid">
@@ -4494,7 +4535,6 @@ export default function BillingPage() {
                 <div>Period End Date: ${escapeHtml(formatDisplayDate(selectedInvoice.billingPeriodTo))}</div>
                 <div>Due Date: ${escapeHtml(formatDisplayDate(selectedInvoice.dueDate))}</div>
                 <div>Billing Rule: ${escapeHtml(invoiceRuleName)}</div>
-                <div>Rule ID: ${escapeHtml(invoiceRuleId)}</div>
               </div>
               <div>
                 <div class="title">Customer Information</div>
@@ -4530,6 +4570,7 @@ export default function BillingPage() {
             </div>
 
             <div class="section">
+              ${planChangeBreakdownHtml}
               <div class="title">Notes / Terms</div>
               <div>Please pay before the due date to avoid service suspension.</div>
               <div>No refund after billing period started.</div>
@@ -5584,12 +5625,13 @@ export default function BillingPage() {
                             </TableCell>
                             <TableCell>
                               <div className="text-sm text-slate-900">
-                                {customer.billingRuleName || 'Unassigned'}
-                              </div>
-                              <div className="text-xs text-slate-500">
-                                {customer.billingRuleId ||
-                                  localRuleAssignments.customers[customer.id] ||
-                                  '—'}
+                                {customer.billingRuleName ||
+                                  billingRulesById.get(
+                                    customer.billingRuleId ||
+                                      localRuleAssignments.customers[customer.id] ||
+                                      '',
+                                  )?.name ||
+                                  'Unassigned'}
                               </div>
                             </TableCell>
                             <TableCell>
@@ -6041,6 +6083,7 @@ export default function BillingPage() {
               setSelectedGlobalAdjustmentIds([]);
               setEditedInvoiceRuleId(INVOICE_RULE_NONE_VALUE);
               setEditedInvoiceFixedFirstChargeMode('full_month');
+              setInvoiceEditReason('');
             }
           }}
         >
@@ -6155,7 +6198,7 @@ export default function BillingPage() {
                               </SelectContent>
                             </Select>
                             <p className="text-xs text-slate-500">
-                              Current rule: {selectedInvoiceRuleDetails.name} ({selectedInvoiceRuleDetails.id || '—'})
+                              Current rule: {selectedInvoiceRuleDetails.name}
                             </p>
                           </div>
                           {editedInvoiceRuleForPreview?.billingType === 'fixed' && (
@@ -6197,6 +6240,20 @@ export default function BillingPage() {
                       </div>
 
                       <div className="mt-2">
+                        <div className="mb-5 space-y-2">
+                          <Label htmlFor="invoice-edit-reason">Reason for editing this invoice <span className="text-rose-600">*</span></Label>
+                          <textarea
+                            id="invoice-edit-reason"
+                            value={invoiceEditReason}
+                            onChange={(event) => setInvoiceEditReason(event.target.value)}
+                            placeholder="Explain why this invoice needs to be revised"
+                            rows={3}
+                            maxLength={1000}
+                            required
+                            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          />
+                          <p className="text-xs text-slate-500">This reason is recorded with the cancelled invoice and its replacement.</p>
+                        </div>
                         <p className="mb-2 text-sm font-semibold">Charges Details</p>
                         {selectedInvoicePricingPreview.isProrated && (
                           <div className="mb-3 grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm md:grid-cols-3">
@@ -6588,7 +6645,7 @@ export default function BillingPage() {
                           </div>
 
                           <div className="flex justify-end gap-2">
-                            <Button onClick={saveAdjustments} disabled={isSavingAdjustments}>
+                            <Button onClick={saveAdjustments} disabled={isSavingAdjustments || !invoiceEditReason.trim()}>
                               <Save className="mr-2 h-4 w-4" />
                               {isSavingAdjustments ? 'Saving...' : 'Save Adjustments'}
                             </Button>
@@ -6608,10 +6665,10 @@ export default function BillingPage() {
                     <h2 className="text-center text-3xl font-semibold">Invoice</h2>
 
                     <div className="mt-8 space-y-1 text-sm">
-                      <p>Company Name: ABC Internet Service Provider</p>
-                      <p>Address: No. 123, Main Road, Yangon</p>
-                      <p>Phone: 09-xxxxxxx</p>
-                      <p>Email:</p>
+                      <p>Company Name: {branding.receiptCompanyName || branding.systemName}</p>
+                      {branding.receiptAddress && <p>Address: {branding.receiptAddress}</p>}
+                      {branding.receiptPhone && <p>Phone: {branding.receiptPhone}</p>}
+                      {branding.receiptEmail && <p>Email: {branding.receiptEmail}</p>}
                     </div>
 
                     <div className="mt-8 grid gap-6 md:grid-cols-2">
@@ -6630,7 +6687,6 @@ export default function BillingPage() {
                         <p>Period End Date: {formatDisplayDate(selectedInvoice.billingPeriodTo)}</p>
                         <p>Due Date: {formatDisplayDate(selectedInvoice.dueDate)}</p>
                         <p>Billing Rule: {selectedInvoiceRuleDetails.name}</p>
-                        <p>Rule ID: {selectedInvoiceRuleDetails.id || '—'}</p>
                       </div>
 
                       <div className="space-y-1 text-sm">
@@ -6671,7 +6727,9 @@ export default function BillingPage() {
                       const visibleChargeRows: Array<{ description: string; qty: number; unitPrice: number; amount: number }> = [];
                       if (!hasSystemMonthlyOffset && monthlyFeeAmount > 0) {
                         visibleChargeRows.push({
-                          description: 'Monthly Internet Fee',
+                          description: selectedInvoice.invoiceType === 'plan_change_adjustment'
+                            ? 'Prorated Plan Change Balance'
+                            : 'Monthly Internet Fee',
                           qty: 1,
                           unitPrice: monthlyFeeAmount,
                           amount: monthlyFeeAmount
@@ -6898,6 +6956,44 @@ export default function BillingPage() {
                         </div>
                       );
                     })()}
+
+                    {selectedInvoicePlanChangeBreakdown && (
+                      <div className="mt-5 rounded-lg border border-blue-200 bg-blue-50/70 p-4">
+                        <h3 className="font-semibold text-blue-950">Plan Change Calculation</h3>
+                        <p className="mt-1 text-xs text-blue-900">
+                          Charges are prorated by the number of active days in each plan period.
+                        </p>
+                        <div className="mt-3 overflow-x-auto">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Plan</TableHead>
+                                <TableHead>Service Dates</TableHead>
+                                <TableHead className="text-right">Days</TableHead>
+                                <TableHead className="text-right">Monthly Rate</TableHead>
+                                <TableHead className="text-right">Prorated Charge</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {selectedInvoicePlanChangeBreakdown.segments.map((segment, index) => (
+                                <TableRow key={`${segment.planName}-${segment.from}-${index}`}>
+                                  <TableCell>{segment.planName}</TableCell>
+                                  <TableCell>{formatDisplayDateRange(segment.from, segment.to)}</TableCell>
+                                  <TableCell className="text-right">{segment.days}</TableCell>
+                                  <TableCell className="text-right">{formatMoney(segment.monthlyFee, selectedInvoice.currency || 'MMK')}</TableCell>
+                                  <TableCell className="text-right">{formatMoney(segment.amount, selectedInvoice.currency || 'MMK')}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                        <div className="mt-3 ml-auto max-w-sm space-y-1 text-right text-sm">
+                          <p className="text-slate-700">Previously billed for this period: <span className="font-medium">{formatMoney(selectedInvoicePlanChangeBreakdown.previouslyBilledAmount, selectedInvoice.currency || 'MMK')}</span></p>
+                          <p className="text-slate-700">Recalculated period total: <span className="font-medium">{formatMoney(selectedInvoicePlanChangeBreakdown.recalculatedPeriodTotal, selectedInvoice.currency || 'MMK')}</span></p>
+                          <p className="border-t border-blue-200 pt-2 font-semibold text-blue-950">Remaining amount due now: {formatMoney(selectedInvoicePlanChangeBreakdown.balanceDue, selectedInvoice.currency || 'MMK')}</p>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="mt-8 space-y-1 text-sm">
                       <p className="font-semibold">Notes / Terms</p>

@@ -304,7 +304,10 @@ export default function SuperAdminSettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Receipt Company Information</CardTitle>
+          <CardTitle>Invoice &amp; Receipt Company Information</CardTitle>
+          <p className="text-sm text-slate-500">
+            These saved details appear on invoice previews, invoice PDFs, and receipts.
+          </p>
         </CardHeader>
         <CardContent className="grid gap-6 md:grid-cols-2">
           <div className="space-y-2">

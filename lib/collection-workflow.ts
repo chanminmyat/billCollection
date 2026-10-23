@@ -16,7 +16,24 @@ export type CollectionWorkflowEventType =
   | 'rescheduled'
   | 'office_transfer'
   | 'collector_collected'
-  | 'admin_confirmed';
+  | 'admin_confirmed'
+  | 'plan_change_adjustment'
+  | 'invoice_edited_revision'
+  | 'invoice_replaced_by_revision';
+
+export type PlanChangeInvoiceBreakdown = {
+  segments: Array<{
+    planName: string;
+    from: string;
+    to: string;
+    days: number;
+    monthlyFee: number;
+    amount: number;
+  }>;
+  previouslyBilledAmount: number;
+  recalculatedPeriodTotal: number;
+  balanceDue: number;
+};
 
 export type CollectionWorkflowEvent = {
   id: string;
@@ -26,6 +43,9 @@ export type CollectionWorkflowEvent = {
   timestamp: string;
   actorName?: string;
   actorRole?: string;
+  relatedInvoiceId?: string;
+  relatedInvoiceNo?: string;
+  planChangeBreakdown?: PlanChangeInvoiceBreakdown;
 };
 
 export type CollectionWorkflowRecord = {

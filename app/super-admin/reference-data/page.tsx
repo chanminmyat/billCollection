@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import {
   AlertDialog,
@@ -865,8 +866,34 @@ export default function ReferenceDataPage() {
               <p className="text-sm font-semibold text-slate-900">Customer Code Format</p>
               <p className="text-xs text-slate-600">
                 Choose which parts appear in newly generated customer codes.
-                Each unique region/township prefix has its own sequence, so a new township starts at 001.
+                {customerCodeSettings.sequenceMode === 'per_prefix'
+                  ? ' Each complete prefix has its own sequence, so a new township starts at 001.'
+                  : ' All customer codes share one sequence, regardless of region or township.'}
               </p>
+            </div>
+            <div className="flex flex-col gap-3 rounded-md border border-indigo-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-800">Customer number sequence</p>
+                <p className="text-xs text-slate-500">
+                  {customerCodeSettings.sequenceMode === 'per_prefix'
+                    ? 'Separate by code prefix: YGN-AH-001, YGN-KMD-001.'
+                    : 'Use one shared sequence: YGN-AH-001, YGN-KMD-002.'}
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-slate-600">Separate by prefix</span>
+                <Switch
+                  checked={customerCodeSettings.sequenceMode === 'global'}
+                  onCheckedChange={(checked) =>
+                    setCustomerCodeSettings((current) => ({
+                      ...current,
+                      sequenceMode: checked ? 'global' : 'per_prefix',
+                    }))
+                  }
+                  aria-label="Use one shared customer code sequence"
+                />
+                <span className="text-sm text-slate-600">One shared sequence</span>
+              </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <div className="space-y-1">

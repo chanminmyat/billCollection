@@ -18,9 +18,12 @@ import {
 } from '@/lib/activity-log';
 import { formatDisplayDate } from '@/lib/date-format';
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
+
 export default function ActivityLogPage() {
   const { user, isLoading } = useAuth();
   const [logs, setLogs] = useState<ActivityLogEntry[]>([]);
+  const [statusHistoryLogs, setStatusHistoryLogs] = useState<ActivityLogEntry[]>([]);
   const [search, setSearch] = useState('');
   const [moduleFilter, setModuleFilter] = useState<string>('all');
 
@@ -28,8 +31,40 @@ export default function ActivityLogPage() {
     setLogs(readActivityLogs());
   };
 
+  const refreshStatusHistory = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/system-settings/status-history`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) return;
+      const entries = await response.json().catch(() => []);
+      if (!Array.isArray(entries)) return;
+      setStatusHistoryLogs(entries.map((entry: any) => ({
+        id: `status-${String(entry.id ?? '')}`,
+        timestamp: String(entry.changedAt ?? ''),
+        module: entry.entityType === 'collector' ? 'collector' : 'customer',
+        action: `${entry.entityType}_status_changed`,
+        description: `Status changed from ${entry.previousStatus} to ${entry.status}. Reason: ${entry.reason}`,
+        actorName: String(entry.actorName ?? 'System'),
+        actorRole: entry.source === 'automatic' ? 'system' : 'admin',
+        targetType: entry.entityType,
+        targetId: String(entry.entityId ?? ''),
+        targetName: String(entry.entityName ?? entry.entityCode ?? ''),
+        metadata: {
+          previousStatus: entry.previousStatus,
+          status: entry.status,
+          reason: entry.reason,
+          source: entry.source,
+        },
+      })));
+    } catch {
+      // Local activity entries remain available if status history cannot be reached.
+    }
+  };
+
   useEffect(() => {
     refreshLogs();
+    void refreshStatusHistory();
 
     const onStorage = (event: StorageEvent) => {
       if (!event.key || event.key === ACTIVITY_LOG_STORAGE_KEY) {
@@ -47,7 +82,9 @@ export default function ActivityLogPage() {
 
   const filteredLogs = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    return logs.filter((log) => {
+    return [...logs, ...statusHistoryLogs]
+      .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
+      .filter((log) => {
       const moduleMatches = moduleFilter === 'all' || log.module === moduleFilter;
       if (!moduleMatches) return false;
       if (!keyword) return true;
@@ -59,8 +96,8 @@ export default function ActivityLogPage() {
         (log.targetName || '').toLowerCase().includes(keyword) ||
         (log.targetId || '').toLowerCase().includes(keyword)
       );
-    });
-  }, [logs, moduleFilter, search]);
+      });
+  }, [logs, moduleFilter, search, statusHistoryLogs]);
 
   if (isLoading) {
     return <div className="min-h-screen bg-gray-50" />;
@@ -76,23 +113,29 @@ export default function ActivityLogPage() {
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-3xl font-bold text-slate-900">Activity Log</h1>
-            <p className="text-slate-600">System activities created from admin actions</p>
+                <p className="text-slate-600">Admin activity and saved customer/collector status history</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={refreshLogs}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                refreshLogs();
+                void refreshStatusHistory();
+              }}
+            >
               <RefreshCw className="mr-2 h-4 w-4" />
               Refresh
             </Button>
             <Button
               variant="destructive"
               onClick={() => {
-                if (!window.confirm('Clear all activity logs?')) return;
+                if (!window.confirm('Clear local activity logs? Saved status history will be kept.')) return;
                 clearActivityLogs();
                 refreshLogs();
               }}
             >
               <Trash2 className="mr-2 h-4 w-4" />
-              Clear Logs
+              Clear Local Logs
             </Button>
           </div>
         </div>

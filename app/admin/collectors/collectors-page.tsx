@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Label } from '@/components/ui/label';
@@ -242,7 +243,6 @@ export default function CollectorsPage({
   const [collectorsError, setCollectorsError] = useState('');
   const [collectorImportRefreshKey, setCollectorImportRefreshKey] = useState(0);
   const [isAddingCollector, setIsAddingCollector] = useState(false);
-  const [isUpdatingCollectorStatus, setIsUpdatingCollectorStatus] = useState<Record<string, boolean>>({});
   const [isUpdatingCollector, setIsUpdatingCollector] = useState(false);
   const [availableCustomers, setAvailableCustomers] = useState<AssignableCustomer[]>([]);
   const [customersLoading, setCustomersLoading] = useState(false);
@@ -259,6 +259,7 @@ export default function CollectorsPage({
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [viewCollector, setViewCollector] = useState<Collector | null>(null);
   const [collectorStatus, setCollectorStatus] = useState<CollectorStatusValue>('active');
+  const [collectorStatusNote, setCollectorStatusNote] = useState('');
   const [nrcState, setNrcState] = useState('');
   const [nrcTownship, setNrcTownship] = useState('');
   const [nrcType, setNrcType] = useState('');
@@ -417,14 +418,6 @@ export default function CollectorsPage({
     return source.filter((customer) => isCustomerAssignedToCollector(customer, viewCollector));
   }, [availableCustomers, customers, viewCollector]);
 
-  const updateRemoteCollectorStatus = (id: string, status: CollectorStatusValue) => {
-    setRemoteCollectors((prev) =>
-      prev.map((collector) =>
-        collector.id === id ? { ...collector, status: toCollectorApiStatus(status) } : collector
-      )
-    );
-  };
-
   const updateRemoteCollector = (
     id: string,
     updates: Partial<Collector>
@@ -432,45 +425,6 @@ export default function CollectorsPage({
     setRemoteCollectors((prev) =>
       prev.map((collector) => (collector.id === id ? { ...collector, ...updates } : collector))
     );
-  };
-
-  const handleCollectorStatusChange = async (
-    collector: Collector,
-    status: CollectorStatusValue
-  ) => {
-    if (isUpdatingCollectorStatus[collector.id]) return;
-    setIsUpdatingCollectorStatus((prev) => ({ ...prev, [collector.id]: true }));
-    updateRemoteCollectorStatus(collector.id, status);
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/collectors/${collector.id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ status: toCollectorApiStatus(status) })
-      });
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        const message = data?.message ?? 'Failed to update status';
-        console.error(message, data);
-        throw new Error(message);
-      }
-
-      logAdminActivity(
-        'collector_status_changed',
-        `Collector status changed to ${status}.`,
-        'collector',
-        collector.id,
-        collector.name,
-        { status }
-      );
-    } catch (error) {
-      console.error('Failed to update status', error);
-    } finally {
-      setIsUpdatingCollectorStatus((prev) => ({ ...prev, [collector.id]: false }));
-    }
   };
 
   const townshipOptions = useMemo(() => {
@@ -1334,6 +1288,7 @@ export default function CollectorsPage({
     setAssignedAreaCandidate('');
     setErrors({});
     setCollectorStatus(normalizeCollectorStatus(collector.status));
+    setCollectorStatusNote('');
     setNrcState(resolvedNrcState);
     setNrcTownship(resolvedNrcTownship);
     setNrcType(resolvedNrcType);
@@ -1381,6 +1336,17 @@ export default function CollectorsPage({
   const handleUpdateCollector = async () => {
     if (editingCollector) {
       if (isUpdatingCollector) return;
+      const originalStatus = normalizeCollectorStatus(editingCollector.status);
+      const hasStatusChanged = collectorStatus !== originalStatus;
+      if (hasStatusChanged && !collectorStatusNote.trim()) {
+        setErrors((current) => ({ ...current, statusChangeNote: 'Add a reason for changing collector status.' }));
+        toast({
+          title: 'Status change reason required',
+          description: 'Enter a note explaining why the collector status is changing.',
+          variant: 'destructive'
+        });
+        return;
+      }
       const validationErrors = validateCollectorForm();
       setErrors(validationErrors);
       if (Object.keys(validationErrors).length > 0) {
@@ -1412,6 +1378,7 @@ export default function CollectorsPage({
         area: collectorTownship || collectorDistrict || newCollector.area,
         assignedAreas: normalizeAssignedAreas(selectedAssignedAreas),
         status: toCollectorApiStatus(collectorStatus),
+        ...(hasStatusChanged ? { statusChangeNote: collectorStatusNote.trim() } : {}),
         nrc: nrcValue,
         address: addressValue
       };
@@ -1561,6 +1528,7 @@ export default function CollectorsPage({
         area: ''
       });
       setCollectorStatus('active');
+      setCollectorStatusNote('');
       setNrcState('');
       setNrcTownship('');
       setNrcType('');
@@ -1768,7 +1736,14 @@ export default function CollectorsPage({
           <Label htmlFor="collector-status" className="text-sm font-medium text-slate-700">
             Collector Status <span className="text-rose-600">*</span>
           </Label>
-          <Select value={collectorStatus} onValueChange={(value) => setCollectorStatus(value as CollectorStatusValue)}>
+          <Select
+            value={collectorStatus}
+            onValueChange={(value) => {
+              setCollectorStatus(value as CollectorStatusValue);
+              setCollectorStatusNote('');
+              setErrors((current) => ({ ...current, statusChangeNote: '' }));
+            }}
+          >
             <SelectTrigger id="collector-status">
               <SelectValue placeholder="Select status" />
             </SelectTrigger>
@@ -1780,6 +1755,28 @@ export default function CollectorsPage({
               ))}
             </SelectContent>
           </Select>
+          {editingCollector && collectorStatus !== normalizeCollectorStatus(editingCollector.status) && (
+            <div className="space-y-2">
+              <Label htmlFor="collectorStatusNote">
+                Reason for status change <span className="text-rose-600">*</span>
+              </Label>
+              <Textarea
+                id="collectorStatusNote"
+                value={collectorStatusNote}
+                onChange={(event) => {
+                  setCollectorStatusNote(event.target.value);
+                  if (event.target.value.trim()) {
+                    setErrors((current) => ({ ...current, statusChangeNote: '' }));
+                  }
+                }}
+                placeholder="Explain why the collector status is changing"
+                rows={3}
+              />
+              {errors.statusChangeNote && (
+                <p className="text-xs text-rose-600">{errors.statusChangeNote}</p>
+              )}
+            </div>
+          )}
         </div>
         <div className="space-y-2">
           <Label htmlFor="collector-email" className="text-sm font-medium text-slate-700">
@@ -2326,27 +2323,9 @@ export default function CollectorsPage({
                                     ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                     : 'bg-rose-50 text-rose-700 border-rose-200';
                                 return (
-                                  <Select
-                                    value={statusValue}
-                                    onValueChange={(value) =>
-                                      handleCollectorStatusChange(
-                                        collector,
-                                        value as CollectorStatusValue
-                                      )
-                                    }
-                                    disabled={isUpdatingCollectorStatus[collector.id]}
-                                  >
-                                    <SelectTrigger className={`h-8 w-32 ${statusClass}`}>
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {collectorStatusOptions.map((option) => (
-                                        <SelectItem key={option.value} value={option.value}>
-                                          {option.label}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
+                                  <Badge variant="outline" className={`${statusClass} font-medium`}>
+                                    {collectorStatusOptions.find((option) => option.value === statusValue)?.label ?? statusValue}
+                                  </Badge>
                                 );
                               })()}
                             </TableCell>
@@ -2451,27 +2430,9 @@ export default function CollectorsPage({
                           <div className="grid gap-3">
                             <div>
                               <Label className="text-xs text-slate-500">Status</Label>
-                              <Select
-                                value={statusValue}
-                                onValueChange={(value) =>
-                                  handleCollectorStatusChange(
-                                    collector,
-                                    value as CollectorStatusValue
-                                  )
-                                }
-                                disabled={isUpdatingCollectorStatus[collector.id]}
-                              >
-                                <SelectTrigger className={`h-9 w-full ${statusClass}`}>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {collectorStatusOptions.map((option) => (
-                                    <SelectItem key={option.value} value={option.value}>
-                                      {option.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                              <Badge variant="outline" className={`${statusClass} font-medium`}>
+                                {collectorStatusOptions.find((option) => option.value === statusValue)?.label ?? statusValue}
+                              </Badge>
                             </div>
 
                             <div className="flex flex-wrap gap-2 text-sm text-slate-600">

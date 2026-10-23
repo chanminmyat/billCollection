@@ -30,6 +30,7 @@ import {
 } from '@/lib/billing-config';
 import { formatDisplayDate, formatDisplayDateRange } from '@/lib/date-format';
 import { appendActivityLog } from '@/lib/activity-log';
+import { useSystemBranding } from '@/lib/use-system-branding';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 
@@ -153,6 +154,7 @@ export default function CreateInvoicePage() {
   const { user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
+  const branding = useSystemBranding();
 
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [globalAdjustments, setGlobalAdjustments] = useState<GlobalAdjustmentOption[]>([]);
@@ -1363,10 +1365,10 @@ export default function CreateInvoicePage() {
                       <h2 className="text-center text-3xl font-semibold">Invoice</h2>
 
                       <div className="mt-8 space-y-1 text-sm">
-                        <p>Company Name: ABC Internet Service Provider</p>
-                        <p>Address: No. 123, Main Road, Yangon</p>
-                        <p>Phone: 09-xxxxxxx</p>
-                        <p>Email:</p>
+                        <p>Company Name: {branding.receiptCompanyName || branding.systemName}</p>
+                        {branding.receiptAddress && <p>Address: {branding.receiptAddress}</p>}
+                        {branding.receiptPhone && <p>Phone: {branding.receiptPhone}</p>}
+                        {branding.receiptEmail && <p>Email: {branding.receiptEmail}</p>}
                       </div>
 
                       <div className="mt-8 grid gap-6 md:grid-cols-2">

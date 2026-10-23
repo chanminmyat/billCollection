@@ -4,6 +4,7 @@ export type CustomerCodeSettings = {
   customPrefix: string;
   includeRegion: boolean;
   includeTownship: boolean;
+  sequenceMode: 'per_prefix' | 'global';
   sequenceDigits: number;
   regionCodes: Record<string, string>;
   townshipCodes: Record<string, Record<string, string>>;
@@ -13,6 +14,7 @@ export const EMPTY_CUSTOMER_CODE_SETTINGS: CustomerCodeSettings = {
   customPrefix: '',
   includeRegion: true,
   includeTownship: true,
+  sequenceMode: 'per_prefix',
   sequenceDigits: 3,
   regionCodes: {},
   townshipCodes: {},
@@ -33,6 +35,7 @@ export const normalizeCustomerCodeSettings = (value: unknown): CustomerCodeSetti
   const customPrefix = normalizeCode(source.customPrefix);
   const includeRegion = typeof source.includeRegion === 'boolean' ? source.includeRegion : true;
   const includeTownship = typeof source.includeTownship === 'boolean' ? source.includeTownship : true;
+  const sequenceMode = source.sequenceMode === 'global' ? 'global' : 'per_prefix';
   const sequenceDigits = Math.min(10, Math.max(1, Math.floor(Number(source.sequenceDigits) || 3)));
   const regionCodes: Record<string, string> = {};
   Object.entries(source.regionCodes ?? {}).forEach(([name, code]) => {
@@ -57,6 +60,7 @@ export const normalizeCustomerCodeSettings = (value: unknown): CustomerCodeSetti
     customPrefix,
     includeRegion,
     includeTownship,
+    sequenceMode,
     sequenceDigits,
     regionCodes,
     townshipCodes,

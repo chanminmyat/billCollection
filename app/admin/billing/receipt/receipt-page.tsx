@@ -31,6 +31,7 @@ type ReceiptPageProps = {
 
 type ReceiptInvoice = {
   id: string;
+  invoiceType?: string | null;
   sourceInvoiceId?: string;
   isHistoryRow?: boolean;
   invoiceNo?: string | null;
@@ -53,7 +54,19 @@ type ReceiptInvoice = {
   minusAmount?: string | number | null;
   totalAmount?: string | number | null;
   currency?: string | null;
-  collectionEvents?: Array<{ note?: string | null; label?: string | null; timestamp?: string | null }> | null;
+  collectionEvents?: Array<{
+    id?: string;
+    type?: string | null;
+    note?: string | null;
+    label?: string | null;
+    timestamp?: string | null;
+    planChangeBreakdown?: {
+      segments: Array<{ planName: string; from: string; to: string; days: number; monthlyFee: number; amount: number }>;
+      previouslyBilledAmount: number;
+      recalculatedPeriodTotal: number;
+      balanceDue: number;
+    };
+  }> | null;
   adjustments?: Array<{
     id?: string | null;
     description?: string | null;
@@ -266,6 +279,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [paymentMethodType, setPaymentMethodType] = useState<ReceiptPaymentMethodType>('');
   const [selectedPaymentAccountId, setSelectedPaymentAccountId] = useState('');
+  const [confirmedPaymentAccountNumber, setConfirmedPaymentAccountNumber] = useState('');
   const [confirmAmountInput, setConfirmAmountInput] = useState('');
   const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([]);
   const [isLoadingPaymentAccounts, setIsLoadingPaymentAccounts] = useState(false);
@@ -347,6 +361,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
       .flatMap((item) => {
         const base: ReceiptInvoice = {
           id: String(item?.id ?? ''),
+          invoiceType: item?.invoiceType ?? null,
           invoiceNo: item?.invoiceNo ?? null,
           invoiceDate: item?.invoiceDate ?? null,
           billingPeriodFrom: item?.billingPeriodFrom ?? null,
@@ -417,6 +432,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
 
     return {
       id: String(payload?.id ?? invoiceId),
+      invoiceType: payload?.invoiceType ?? null,
       invoiceNo: payload?.invoiceNo ?? null,
       invoiceDate: payload?.invoiceDate ?? null,
       billingPeriodFrom: payload?.billingPeriodFrom ?? null,
@@ -610,12 +626,12 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
     [invoiceCandidates, selectedInvoiceId],
   );
   const isConfirmAmountMatched = useMemo(() => {
-    if (!confirmCollected || !selectedInvoice || isInvoiceEffectivelyPaid(selectedInvoice)) {
+    if (!selectedInvoice || isInvoiceEffectivelyPaid(selectedInvoice)) {
       return true;
     }
     if (!confirmAmountInput.trim()) return false;
     return amountsMatch(confirmAmountInput, selectedInvoice.totalAmount);
-  }, [confirmAmountInput, confirmCollected, selectedInvoice]);
+  }, [confirmAmountInput, selectedInvoice]);
   const selectedInvoiceReceiptLabel = selectedInvoice
     ? getReceiptStatusLabel(selectedInvoice)
     : '';
@@ -633,6 +649,13 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
     () => availablePaymentAccounts.find((account) => account.id === selectedPaymentAccountId) ?? null,
     [availablePaymentAccounts, selectedPaymentAccountId],
   );
+  const normalizeAccountNumber = (value: string) => value.trim().replace(/[\s-]/g, '').toLowerCase();
+  const isPaymentAccountNumberConfirmed = Boolean(
+    selectedPaymentAccount?.accountNumber &&
+    normalizeAccountNumber(confirmedPaymentAccountNumber) &&
+    normalizeAccountNumber(confirmedPaymentAccountNumber) ===
+      normalizeAccountNumber(selectedPaymentAccount.accountNumber),
+  );
   const hasSelectedPaymentMethod =
     paymentMethodType === 'cash' || paymentMethodType === 'wallet' || paymentMethodType === 'account';
   const requiresPaymentAccount = paymentMethodType === 'wallet' || paymentMethodType === 'account';
@@ -648,6 +671,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
     if (!selectedInvoice) {
       setPaymentMethodType('');
       setSelectedPaymentAccountId('');
+      setConfirmedPaymentAccountNumber('');
       setPaidAtInput('');
       setConfirmAmountInput('');
       setIsPaymentDetailsOpen(false);
@@ -673,6 +697,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
     }
     setPaidAtInput(selectedInvoice.paidAt ? selectedInvoice.paidAt.slice(0, 16) : '');
     setConfirmAmountInput('');
+    setConfirmedPaymentAccountNumber('');
     setIsPaymentDetailsOpen(false);
   }, [activePaymentAccounts, confirmCollected, prefilledCollectedPaymentMethod, selectedInvoice]);
 
@@ -744,6 +769,14 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
       });
       return;
     }
+    if (selectedInvoice && !isInvoiceEffectivelyPaid(selectedInvoice) && !isConfirmAmountMatched) {
+      toast({
+        title: 'Amount confirmation required',
+        description: 'Re-enter the exact invoice total to confirm the amount before creating the receipt.',
+        variant: 'destructive',
+      });
+      return;
+    }
     if (
       selectedInvoice &&
       !isInvoiceEffectivelyPaid(selectedInvoice) &&
@@ -753,6 +786,19 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
       toast({
         title: 'Payment method is required',
         description: 'Please select payment account for selected payment method.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (
+      selectedInvoice &&
+      !isInvoiceEffectivelyPaid(selectedInvoice) &&
+      requiresPaymentAccount &&
+      !isPaymentAccountNumberConfirmed
+    ) {
+      toast({
+        title: 'Payment account confirmation required',
+        description: 'Re-enter the selected payment account number correctly before creating the receipt.',
         variant: 'destructive',
       });
       return;
@@ -966,6 +1012,9 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
       const customerPhone = detail.customer?.primaryPhone || '—';
       const customerAddress = detail.customer?.installationAddress || '—';
       const currency = detail.currency || 'MMK';
+      const planChangeBreakdown = detail.collectionEvents?.find(
+        (event) => event.type === 'plan_change_adjustment',
+      )?.planChangeBreakdown;
       const receiptNo = detail.receiptNo || '__________';
       const invoiceNo = formatInvoiceNo(detail.invoiceNo, detail.id);
       const collectionPaymentSummary = getLatestCollectionPaymentSummary(detail);
@@ -988,7 +1037,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
         rows.push(`
           <tr>
             <td>${rowNo++}</td>
-            <td>Monthly Internet Fee</td>
+            <td>${escapeHtml(detail.invoiceType === 'plan_change_adjustment' ? 'Prorated Plan Change Balance' : 'Monthly Internet Fee')}</td>
             <td class="right">1</td>
             <td class="right">${escapeHtml(formatMoney(detail.monthlyFee, currency))}</td>
             <td class="right">${escapeHtml(formatMoney(detail.monthlyFee, currency))}</td>
@@ -1057,6 +1106,13 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
         `);
       }
 
+      const planChangeBreakdownHtml = planChangeBreakdown
+        ? `<div class="section calculation"><div class="title">Plan Change Calculation</div>
+          <table><thead><tr><th>Plan</th><th>Service Dates</th><th>Days</th><th>Monthly Rate</th><th>Prorated Charge</th></tr></thead>
+          <tbody>${planChangeBreakdown.segments.map((segment) => `<tr><td>${escapeHtml(segment.planName)}</td><td>${escapeHtml(formatDisplayDateRange(segment.from, segment.to))}</td><td class="right">${segment.days}</td><td class="right">${escapeHtml(formatMoney(segment.monthlyFee, currency))}</td><td class="right">${escapeHtml(formatMoney(segment.amount, currency))}</td></tr>`).join('')}</tbody></table>
+          <div class="totals"><div>Previously billed for this period: <strong>${escapeHtml(formatMoney(planChangeBreakdown.previouslyBilledAmount, currency))}</strong></div><div>Recalculated period total: <strong>${escapeHtml(formatMoney(planChangeBreakdown.recalculatedPeriodTotal, currency))}</strong></div><div class="due">Remaining amount due: ${escapeHtml(formatMoney(planChangeBreakdown.balanceDue, currency))}</div></div></div>`
+        : '';
+
       const html = `
         <!doctype html>
         <html>
@@ -1064,57 +1120,87 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
             <meta charset="utf-8" />
             <title>${escapeHtml(receiptNo)} - Receipt</title>
             <style>
-              body { font-family: Arial, sans-serif; margin: 0; color: #111827; }
-              .page { max-width: 980px; margin: 24px auto; border: 2px solid #111827; padding: 20px; }
-              h1 { text-align: center; margin: 0 0 20px; font-size: 42px; letter-spacing: 0.5px; }
-              .section { margin-top: 18px; font-size: 14px; line-height: 1.55; }
-              .title { font-weight: 700; margin-bottom: 8px; }
-              .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-              table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
-              th, td { border: 1px solid #111827; padding: 6px 8px; }
-              th { background: #f3f4f6; }
+              * { box-sizing: border-box; }
+              body { font-family: Arial, sans-serif; margin: 0; padding: 24px; color: #172033; background: #fff; }
+              .page { max-width: 900px; min-height: 1100px; margin: 0 auto; padding: 28px 0; background: #fff; }
+              .masthead { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; padding: 0 0 26px; border-bottom: 0; }
+              .company-header { display: flex; flex-direction: row-reverse; gap: 16px; align-items: flex-start; min-width: 0; }
+              .company-logo { width: 92px; height: 92px; flex: 0 0 92px; object-fit: contain; border-radius: 50%; background: #f8fafc; padding: 8px; }
+              .company-meta { color: #334155; font-size: 13px; line-height: 1.65; }
+              .company-name { color: #172554; font-size: 16px; font-weight: 700; }
+              .receipt-heading { text-align: left; }
+              .eyebrow { color: #172554; font-size: 42px; font-weight: 800; letter-spacing: -1px; text-transform: uppercase; }
+              .receipt-no { margin-top: 10px; color: #334155; font-size: 13px; font-weight: 700; }
+              .issued { margin-top: 4px; color: #475569; font-size: 12px; }
+              .amount-band { display: none; }
+              .amount-label { color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+              .amount { color: #172554; font-size: 27px; font-weight: 700; }
+              .status { display: inline-block; margin-top: 5px; color: #047857; font-size: 11px; font-weight: 700; }
+              .status.cancelled { color: #be123c; }
+              .content { padding: 4px 0 0; }
+              .section { margin-top: 24px; font-size: 13px; line-height: 1.6; }
+              .title { margin-bottom: 10px; color: #172554; font-size: 12px; font-weight: 800; text-transform: uppercase; }
+              .grid { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 24px; }
+              .info-card { padding: 0; border: 0; border-radius: 0; background: #fff; }
+              .info-card div + div { margin-top: 4px; }
+              table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+              th { padding: 11px 10px; color: #172554; background: #fff; border-top: 2px solid #d9685b; border-bottom: 2px solid #d9685b; font-size: 11px; text-align: left; text-transform: uppercase; }
+              td { padding: 11px 10px; border-bottom: 0; }
               .right { text-align: right; }
               .bold { font-weight: 700; }
-              .total { font-size: 16px; font-weight: 700; }
-              .company-header { display: flex; gap: 12px; align-items: flex-start; }
-              .company-logo { width: 56px; height: 56px; object-fit: contain; border: 1px solid #e5e7eb; border-radius: 8px; padding: 4px; }
-              .footer { text-align: center; color: #4b5563; }
-              @media print { .page { margin: 0; border-width: 1px; } }
+              .total { color: #172554; background: #fff; font-size: 16px; font-weight: 700; }
+              .calculation { padding: 17px; border: 1px solid #bfdbfe; border-radius: 12px; background: #eff6ff; }
+              .totals { margin-top: 12px; color: #475569; text-align: right; line-height: 1.9; }
+              .due { color: #1d4ed8; font-size: 15px; font-weight: 700; }
+              .payment-card { padding: 14px 0; border: 0; border-top: 1px solid #dbe3ee; border-radius: 0; background: #fff; }
+              .footer { display: grid; grid-template-columns: 1fr 1.2fr; align-items: end; gap: 18px; margin-top: 80px; padding-top: 0; border-top: 0; color: #475569; text-align: left; font-size: 12px; }
+              .thank-you { color: #172554; font-family: Georgia, serif; font-size: 38px; font-style: italic; }
+              .terms { padding-left: 14px; border-left: 2px solid #172554; }
+              .terms strong { display: block; margin-bottom: 14px; color: #d9685b; font-size: 12px; text-transform: uppercase; }
+              @media (max-width: 640px) { body { padding: 12px; } .masthead { align-items: flex-start; flex-direction: column-reverse; } .receipt-heading { text-align: left; } .content { padding: 0; } .grid { grid-template-columns: 1fr; } .company-header { flex-direction: row; } .footer { grid-template-columns: 1fr; margin-top: 36px; } .terms { padding-left: 0; border-left: 0; } }
+              @media print { body { padding: 0; background: #fff; } .page { min-height: 0; margin: 0; } }
             </style>
           </head>
           <body>
             <div class="page">
-              <h1>Receipt</h1>
-
-              <div class="section company-header">
-                ${receiptLogoHtml}
-                <div>
-                  <div class="bold">${escapeHtml(receiptCompanyName)}</div>
-                  <div>${escapeHtml(receiptAddress)}</div>
-                  <div>${escapeHtml(receiptPhone)}</div>
-                  ${receiptEmail ? `<div>${escapeHtml(receiptEmail)}</div>` : ''}
+              <div class="masthead">
+                <div class="receipt-heading">
+                  <div class="eyebrow">Receipt</div>
+                  <div class="company-meta">
+                    <div class="company-name">${escapeHtml(receiptCompanyName)}</div>
+                    <div>${escapeHtml(receiptAddress)}</div>
+                    <div>${escapeHtml(receiptPhone)}${receiptEmail ? ` · ${escapeHtml(receiptEmail)}` : ''}</div>
+                  </div>
+                </div>
+                <div class="company-header">
+                  ${receiptLogoHtml}
                 </div>
               </div>
-
+              <div class="content">
               <div class="section grid">
-                <div>
-                  <div class="title">Receipt Information</div>
-                  <div>Receipt No: ${escapeHtml(receiptNo)}</div>
-                  <div>Invoice No: ${escapeHtml(invoiceNo)}</div>
-                  <div>Invoice Date: ${escapeHtml(formatDisplayDate(detail.invoiceDate))}</div>
-                  <div>Status: ${escapeHtml(formatStatus(detail.status))}</div>
-                </div>
-                <div>
-                  <div class="title">Customer Information</div>
+                <div class="info-card">
+                  <div class="title">Bill To</div>
+                  <div class="bold">${escapeHtml(customerName)}</div>
                   <div>Customer ID: ${escapeHtml(customerCode)}</div>
-                  <div>Customer Name: ${escapeHtml(customerName)}</div>
-                  <div>Phone No: ${escapeHtml(customerPhone)}</div>
-                  <div>Address: ${escapeHtml(customerAddress)}</div>
-                  <div>Billing Period: ${escapeHtml(formatDisplayDate(detail.billingPeriodFrom))} - ${escapeHtml(
-                    formatDisplayDate(detail.billingPeriodTo),
-                  )}</div>
+                  <div>Phone: ${escapeHtml(customerPhone)}</div>
+                </div>
+                <div class="info-card">
+                  <div class="title">Service Address</div>
+                  <div class="bold">${escapeHtml(customerName)}</div>
+                  <div>${escapeHtml(customerAddress)}</div>
+                </div>
+                <div class="info-card">
+                  <div class="title">Receipt Details</div>
+                  <div>Receipt No: <span class="bold">${escapeHtml(receiptNo)}</span></div>
+                  <div>Receipt date: ${escapeHtml(formatDisplayDate(detail.paidAt || detail.invoiceDate))}</div>
+                  <div>Invoice: <span class="bold">${escapeHtml(invoiceNo)}</span></div>
+                  <div>Invoice date: ${escapeHtml(formatDisplayDate(detail.invoiceDate))}</div>
+                  <div>Due date: ${escapeHtml(formatDisplayDate(detail.dueDate))}</div>
+                  <div class="status ${detail.status === 'cancelled' ? 'cancelled' : ''}">${escapeHtml(formatStatus(detail.status))}</div>
                 </div>
               </div>
+
+              ${planChangeBreakdownHtml}
 
               <div class="section">
                 <div class="title">Charges Details</div>
@@ -1131,14 +1217,14 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                   <tbody>
                     ${rows.join('')}
                     <tr>
-                      <td colspan="4" class="right total">Total Amount</td>
+                      <td colspan="4" class="right total">Total Paid</td>
                       <td class="right total">${escapeHtml(formatMoney(detail.totalAmount, currency))}</td>
                     </tr>
                   </tbody>
                 </table>
               </div>
 
-              <div class="section">
+              <div class="section payment-card">
                 <div class="title">Payment Information</div>
                 <div>Payment Method: ${escapeHtml(resolvedPaymentMethod)}</div>
                 <div>Payment Account: ${escapeHtml(resolvedPaymentAccount)}</div>
@@ -1147,7 +1233,8 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                 <div>Payment Date: ${escapeHtml(formatDisplayDate(detail.paidAt))}</div>
                 <div>Receipt No: ${escapeHtml(receiptNo)}</div>
               </div>
-              ${receiptFooterText ? `<div class="section footer">${escapeHtml(receiptFooterText)}</div>` : ''}
+              <div class="footer"><div class="thank-you">Thank you</div><div class="terms"><strong>Terms &amp; Conditions</strong><div>Payment method: ${escapeHtml(resolvedPaymentMethod)}${resolvedPaymentAccount !== '—' ? ` · ${escapeHtml(resolvedPaymentAccount)}` : ''}</div><div>Collection status: ${escapeHtml(formatCollectionStatus(detail.collectionStatus))}</div>${receiptFooterText ? `<div>${escapeHtml(receiptFooterText)}</div>` : ''}</div></div>
+              </div>
             </div>
           </body>
         </html>
@@ -1430,6 +1517,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                                   : '';
                               setPaymentMethodType(nextType);
                               setSelectedPaymentAccountId('');
+                              setConfirmedPaymentAccountNumber('');
                             }}
                           >
                             <SelectTrigger>
@@ -1454,7 +1542,10 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                       <Label>Payment Account</Label>
                       <Select
                         value={selectedPaymentAccountId}
-                        onValueChange={setSelectedPaymentAccountId}
+                        onValueChange={(value) => {
+                          setSelectedPaymentAccountId(value);
+                          setConfirmedPaymentAccountNumber('');
+                        }}
                         disabled={!requiresPaymentAccount || confirmCollected}
                       >
                         <SelectTrigger>
@@ -1482,6 +1573,26 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                       </Select>
                     </div>
 
+                    {requiresPaymentAccount && selectedPaymentAccount && (
+                      <div className="space-y-1 md:col-span-3">
+                        <Label htmlFor="confirmPaymentAccountNumber">Confirm Payment Account Number</Label>
+                        <Input
+                          id="confirmPaymentAccountNumber"
+                          type="text"
+                          autoComplete="off"
+                          value={confirmedPaymentAccountNumber}
+                          onChange={(event) => setConfirmedPaymentAccountNumber(event.target.value)}
+                          placeholder="Re-enter the selected account number"
+                          aria-invalid={confirmedPaymentAccountNumber.length > 0 && !isPaymentAccountNumberConfirmed}
+                        />
+                        <p className={`text-xs ${isPaymentAccountNumberConfirmed ? 'text-emerald-700' : 'text-slate-500'}`}>
+                          {isPaymentAccountNumberConfirmed
+                            ? 'Payment account number confirmed.'
+                            : 'Enter the selected account number again to confirm it.'}
+                        </p>
+                      </div>
+                    )}
+
                     <div className="space-y-1">
                       <Label>Paid At</Label>
                       <Input
@@ -1492,7 +1603,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                     </div>
                   </div>
 
-                  {confirmCollected && (
+                  {selectedInvoice && !isInvoiceEffectivelyPaid(selectedInvoice) && (
                     <div className="grid gap-3 md:grid-cols-2">
                       <div className="space-y-1">
                         <Label>Invoice Total</Label>
@@ -1502,7 +1613,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label>Confirm Amount</Label>
+                        <Label>Retype Invoice Total to Confirm</Label>
                         <Input
                           type="number"
                           min="0"
@@ -1517,7 +1628,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                           }
                         />
                         <p className="text-xs text-slate-500">
-                          Admin must type the exact invoice total before confirming receipt.
+                          Type the exact invoice total again before confirming payment and creating the receipt.
                         </p>
                         {confirmAmountInput.trim().length > 0 && !isConfirmAmountMatched && (
                           <p className="text-xs font-medium text-rose-600">
@@ -1552,6 +1663,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                   isGenerating ||
                   !selectedInvoiceId ||
                   isSelectedInvoiceReceiptIssued ||
+                  (selectedInvoice && !isInvoiceEffectivelyPaid(selectedInvoice) && !isConfirmAmountMatched) ||
                   (selectedInvoice
                     ? formatStatus(selectedInvoice.status) === 'cancelled' &&
                       selectedInvoiceReceiptLabel !== 'cancelled receipt'
@@ -1776,7 +1888,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
             }
           }}
         >
-          <DialogContent className="inset-0 left-0 top-0 h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 overflow-y-auto rounded-none border-0 p-4 sm:p-6">
+          <DialogContent className="inset-0 left-0 top-0 flex h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-3 overflow-hidden rounded-none border-0 p-4 sm:p-6">
             <DialogHeader>
               <DialogTitle>
                 Receipt Detail
@@ -1793,56 +1905,57 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
             )}
 
             {!isLoadingReceiptDetail && selectedReceipt && (
-              <div className="mx-auto w-full max-w-5xl space-y-4 rounded-lg border border-slate-300 bg-white p-5 text-slate-900">
-                <div className="flex justify-end">
+              <div className="min-h-0 flex-1 overflow-y-auto pb-8">
+              <div className="mx-auto w-full max-w-5xl overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-900 shadow-lg shadow-slate-200/60">
+                <div className="flex justify-end border-b border-slate-100 bg-slate-50 px-6 py-3">
                   <Button variant="outline" size="sm" onClick={() => void exportReceiptPdf()} disabled={isDownloadingReceipt}>
                     <Download className="mr-2 h-4 w-4" />
                     {isDownloadingReceipt ? 'Exporting...' : 'Export as PDF'}
                   </Button>
                 </div>
 
-                <h2 className="text-center text-3xl font-semibold">Receipt</h2>
+                <div className="flex items-start justify-between gap-6 px-6 pb-2 pt-6 sm:px-9 sm:pt-7">
+                  <div>
+                    <h2 className="text-4xl font-extrabold uppercase tracking-tight text-indigo-950 sm:text-5xl">Receipt</h2>
+                    <div className="mt-4 space-y-1 text-sm text-slate-600">
+                      <p className="font-bold text-slate-900">{branding.receiptCompanyName || branding.systemName}</p>
+                      {branding.receiptAddress && <p>{branding.receiptAddress}</p>}
+                      {branding.receiptPhone && <p>{branding.receiptPhone}</p>}
+                      {branding.receiptEmail && <p>{branding.receiptEmail}</p>}
+                    </div>
+                  </div>
+                  {branding.logoDataUrl && <img src={branding.logoDataUrl} alt={`${branding.receiptCompanyName || branding.systemName} logo`} className="h-20 w-20 rounded-full border border-slate-200 bg-white p-2 object-contain sm:h-24 sm:w-24" />}
+                </div>
 
-                <div className="mt-4 flex flex-col gap-3 text-sm sm:flex-row sm:items-start">
-                  {branding.logoDataUrl && (
-                    <img
-                      src={branding.logoDataUrl}
-                      alt={`${branding.receiptCompanyName || branding.systemName} logo`}
-                      className="h-16 w-16 rounded-md border border-slate-200 object-contain p-1"
-                    />
-                  )}
-                  <div className="space-y-1">
-                    <p className="font-semibold">{branding.receiptCompanyName || branding.systemName}</p>
-                    <p>{branding.receiptAddress || '—'}</p>
-                    <p>{branding.receiptPhone || '—'}</p>
-                    {branding.receiptEmail && <p>{branding.receiptEmail}</p>}
+                <div className="space-y-6 px-6 pb-7 pt-3 sm:px-9 sm:pt-3">
+                <div className="grid gap-6 border-b border-slate-200 pb-5 md:grid-cols-3">
+                  <div>
+                    <p className="mb-2 text-sm font-extrabold uppercase text-indigo-950">Bill To</p>
+                    <p className="text-lg font-semibold text-slate-900">{getCustomerName(selectedReceipt)}</p>
+                    <p className="mt-1 font-mono text-sm text-slate-600">{selectedReceipt.customer?.customerCode || '—'}</p>
+                    <p className="text-sm text-slate-600">{selectedReceipt.customer?.primaryPhone || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="mb-2 text-sm font-extrabold uppercase text-indigo-950">Service Address</p>
+                    <p className="text-sm text-slate-700">{selectedReceipt.customer?.installationAddress || '—'}</p>
+                    {selectedReceipt.invoiceType === 'plan_change_adjustment' && <p className="mt-2 text-xs font-semibold text-indigo-700">Plan Change Adjustment</p>}
+                  </div>
+                  <div>
+                    <p className="mb-2 text-sm font-extrabold uppercase text-indigo-950">Receipt Details</p>
+                    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+                      <dt className="text-slate-500">Receipt #</dt><dd className="text-right font-medium text-slate-800">{selectedReceipt.receiptNo || '—'}</dd>
+                      <dt className="text-slate-500">Date</dt><dd className="text-right font-medium text-slate-800">{formatDisplayDate(selectedReceipt.paidAt || selectedReceipt.invoiceDate)}</dd>
+                      <dt className="text-slate-500">Invoice #</dt><dd className="text-right font-medium text-slate-800">{formatInvoiceNo(selectedReceipt.invoiceNo, selectedReceipt.id)}</dd>
+                      <dt className="text-slate-500">Due date</dt><dd className="text-right font-medium text-slate-800">{formatDisplayDate(selectedReceipt.dueDate)}</dd>
+                      <dt className="text-slate-500">Status</dt><dd className={`text-right font-semibold ${getReceiptStatusLabel(selectedReceipt) === 'cancelled receipt' ? 'text-rose-700' : 'text-emerald-700'}`}>{getReceiptStatusLabel(selectedReceipt) === 'issued' ? 'Paid' : getReceiptStatusLabel(selectedReceipt)}</dd>
+                    </dl>
                   </div>
                 </div>
 
-                <div className="mt-6 grid gap-6 md:grid-cols-2">
-                  <div className="space-y-1 text-sm">
-                    <p className="font-semibold">Receipt Information</p>
-                    <p>Receipt No: {selectedReceipt.receiptNo || '__________'}</p>
-                    <p>Invoice No: {formatInvoiceNo(selectedReceipt.invoiceNo, selectedReceipt.id)}</p>
-                    <p>Invoice Date: {formatDisplayDate(selectedReceipt.invoiceDate)}</p>
-                    <p>Status: {getReceiptStatusLabel(selectedReceipt)}</p>
+                <div>
+                  <div className="mb-3 flex items-end justify-between gap-3">
+                    <div><h3 className="text-lg font-semibold text-slate-900">Payment Summary</h3><p className="text-sm text-slate-500">Items covered by this payment</p></div>
                   </div>
-
-                  <div className="space-y-1 text-sm">
-                    <p className="font-semibold">Customer Information</p>
-                    <p>Customer ID: {selectedReceipt.customer?.customerCode || '—'}</p>
-                    <p>Customer Name: {getCustomerName(selectedReceipt)}</p>
-                    <p>Phone No: {selectedReceipt.customer?.primaryPhone || '—'}</p>
-                    <p>Address: {selectedReceipt.customer?.installationAddress || '—'}</p>
-                    <p>
-                      Billing Period: {formatDisplayDate(selectedReceipt.billingPeriodFrom)} -{' '}
-                      {formatDisplayDate(selectedReceipt.billingPeriodTo)}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-6">
-                  <p className="mb-2 text-sm font-semibold">Charges Details</p>
                   <div className="overflow-x-auto">
                     <Table>
                       <TableHeader>
@@ -1858,7 +1971,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                         {toNumber(selectedReceipt.monthlyFee) > 0 && (
                           <TableRow>
                             <TableCell>1</TableCell>
-                            <TableCell>Monthly Internet Fee</TableCell>
+                            <TableCell>{selectedReceipt.invoiceType === 'plan_change_adjustment' ? 'Prorated Plan Change Balance' : 'Monthly Internet Fee'}</TableCell>
                             <TableCell className="text-right">1</TableCell>
                             <TableCell className="text-right">{formatMoney(selectedReceipt.monthlyFee, selectedReceipt.currency || 'MMK')}</TableCell>
                             <TableCell className="text-right">{formatMoney(selectedReceipt.monthlyFee, selectedReceipt.currency || 'MMK')}</TableCell>
@@ -1935,44 +2048,45 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                   </div>
                 </div>
 
-                <div className="space-y-1 text-sm">
+                {selectedReceipt.collectionEvents?.find((event) => event.type === 'plan_change_adjustment')?.planChangeBreakdown && (() => {
+                  const breakdown = selectedReceipt.collectionEvents.find((event) => event.type === 'plan_change_adjustment')!.planChangeBreakdown!;
+                  const currency = selectedReceipt.currency || 'MMK';
+                  return (
+                    <div className="rounded-lg border border-blue-200 bg-blue-50/70 p-4">
+                      <h3 className="font-semibold text-blue-950">Plan Change Calculation</h3>
+                      <p className="mt-1 text-xs text-blue-900">The charge is prorated by active days under each plan.</p>
+                      <div className="mt-3 overflow-x-auto">
+                        <Table>
+                          <TableHeader><TableRow><TableHead>Plan</TableHead><TableHead>Service Dates</TableHead><TableHead className="text-right">Days</TableHead><TableHead className="text-right">Monthly Rate</TableHead><TableHead className="text-right">Prorated Charge</TableHead></TableRow></TableHeader>
+                          <TableBody>{breakdown.segments.map((segment, index) => <TableRow key={`${segment.planName}-${segment.from}-${index}`}><TableCell>{segment.planName}</TableCell><TableCell>{formatDisplayDateRange(segment.from, segment.to)}</TableCell><TableCell className="text-right">{segment.days}</TableCell><TableCell className="text-right">{formatMoney(segment.monthlyFee, currency)}</TableCell><TableCell className="text-right">{formatMoney(segment.amount, currency)}</TableCell></TableRow>)}</TableBody>
+                        </Table>
+                      </div>
+                      <div className="ml-auto mt-3 max-w-sm space-y-1 text-right text-sm">
+                        <p>Previously billed: <span className="font-medium">{formatMoney(breakdown.previouslyBilledAmount, currency)}</span></p>
+                        <p>Recalculated period total: <span className="font-medium">{formatMoney(breakdown.recalculatedPeriodTotal, currency)}</span></p>
+                        <p className="border-t border-blue-200 pt-2 font-semibold text-blue-950">Remaining amount: {formatMoney(breakdown.balanceDue, currency)}</p>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div className="rounded-xl border border-slate-200 p-5">
                   {(() => {
                     const paymentSummary = getLatestCollectionPaymentSummary(selectedReceipt);
                     return (
                       <>
-                        <p className="mb-2 text-sm font-semibold">Payment Information</p>
-                        <p>
-                          Payment Method:{' '}
-                          <span className="font-medium">
-                            {selectedReceipt.paymentMethod || paymentSummary?.paymentMethod || '—'}
-                          </span>
-                        </p>
-                        <p>
-                          Payment Account:{' '}
-                          <span className="font-medium">{paymentSummary?.paymentAccount || '—'}</span>
-                        </p>
+                        <h3 className="font-semibold text-slate-900">Payment Information</h3>
+                        <div className="mt-3 grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                          <div><p className="text-xs uppercase tracking-wide text-slate-500">Method</p><p className="mt-1 font-medium">{selectedReceipt.paymentMethod || paymentSummary?.paymentMethod || '—'}</p></div>
+                          <div><p className="text-xs uppercase tracking-wide text-slate-500">Account</p><p className="mt-1 font-medium">{paymentSummary?.paymentAccount || '—'}</p></div>
+                          <div><p className="text-xs uppercase tracking-wide text-slate-500">Status</p><p className="mt-1 font-medium">{getReceiptStatusLabel(selectedReceipt)}</p></div>
+                          <div><p className="text-xs uppercase tracking-wide text-slate-500">Paid on</p><p className="mt-1 font-medium">{formatDisplayDate(selectedReceipt.paidAt)}</p></div>
+                        </div>
                       </>
                     );
                   })()}
-                  <p>
-                    Payment Status:{' '}
-                    <span className="font-medium">{getReceiptStatusLabel(selectedReceipt)}</span>
-                  </p>
-                  <p>
-                    Collection Status:{' '}
-                    <span className="font-medium">
-                      {formatCollectionStatus(selectedReceipt.collectionStatus)}
-                    </span>
-                  </p>
-                  <p>
-                    Payment Date:{' '}
-                    <span className="font-medium">{formatDisplayDate(selectedReceipt.paidAt)}</span>
-                  </p>
-                  <p>
-                    Receipt No:{' '}
-                    <span className="font-medium">{selectedReceipt.receiptNo || '__________'}</span>
-                  </p>
-                  <div className="pt-3">
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
+                    <p className="text-sm text-slate-500">Collection status: <span className="font-medium text-slate-700">{formatCollectionStatus(selectedReceipt.collectionStatus)}</span></p>
                     <Button
                       type="button"
                       variant="outline"
@@ -1989,9 +2103,15 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                   </div>
                 </div>
 
-                {branding.footerText && (
-                  <p className="text-center text-sm text-slate-500">{branding.footerText}</p>
-                )}
+                <div className="mt-16 grid gap-5 border-t border-slate-200 pt-5 sm:grid-cols-2 sm:items-end">
+                  <p className="font-serif text-4xl italic text-indigo-950">Thank you</p>
+                  <div className="border-l-2 border-indigo-900 pl-4 text-sm text-slate-600">
+                    <p className="mb-2 font-bold uppercase tracking-wide text-rose-700">Terms &amp; Conditions</p>
+                    {branding.footerText ? <p>{branding.footerText}</p> : <p>Receipt issued by {branding.receiptCompanyName || branding.systemName}.</p>}
+                  </div>
+                </div>
+              </div>
+              </div>
               </div>
             )}
           </DialogContent>

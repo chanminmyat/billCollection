@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -35,6 +36,7 @@ import {
 } from '@/lib/billing-config';
 import { formatDisplayDate, formatDisplayDateRange } from '@/lib/date-format';
 import { appendActivityLog } from '@/lib/activity-log';
+import { useSystemBranding } from '@/lib/use-system-branding';
 import ExcelBulkActions from '../../components/excel-bulk-actions';
 import type { ExcelImportRow, ExcelTemplateColumn } from '@/lib/excel-template';
 
@@ -632,6 +634,7 @@ export default function CustomersPage({
   const { user, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
+  const branding = useSystemBranding();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
@@ -682,7 +685,6 @@ export default function CustomersPage({
   const [customerViewDialogOpen, setCustomerViewDialogOpen] = useState(false);
   const [viewCustomerDetail, setViewCustomerDetail] = useState<CustomerViewDetail | null>(null);
   const [latestInvoiceByCustomerId, setLatestInvoiceByCustomerId] = useState<Record<string, GeneratedInvoice>>({});
-  const [isUpdatingStatus, setIsUpdatingStatus] = useState<Record<string, boolean>>({});
   const [isAssigningCollector, setIsAssigningCollector] = useState<Record<string, boolean>>({});
   const [isGeneratingInvoice, setIsGeneratingInvoice] = useState<Record<string, boolean>>({});
   const [plans, setPlans] = useState<PlanOption[]>([]);
@@ -692,11 +694,13 @@ export default function CustomersPage({
   const [plansError, setPlansError] = useState('');
   const [billingRulesError, setBillingRulesError] = useState('');
   const [selectedPlanCode, setSelectedPlanCode] = useState('');
+  const [planEffectiveDate, setPlanEffectiveDate] = useState(() => formatDateToIso(new Date()));
   const [manualInvoiceSelectedRuleId, setManualInvoiceSelectedRuleId] = useState('');
   const [manualInvoiceFixedFirstChargeMode, setManualInvoiceFixedFirstChargeMode] =
     useState<FixedFirstInvoiceChargeMode>('full_month');
   const [customerType, setCustomerType] = useState<'individual' | 'business'>('individual');
   const [userStatus, setUserStatus] = useState<'enable' | 'disable' | 'takeoff'>('enable');
+  const [customerStatusNote, setCustomerStatusNote] = useState('');
   const [nrcState, setNrcState] = useState('');
   const [nrcTownship, setNrcTownship] = useState('');
   const [nrcType, setNrcType] = useState('');
@@ -1188,6 +1192,12 @@ export default function CustomersPage({
   const selectedPlan = useMemo(
     () => activePlans.find((plan) => plan.planCode === selectedPlanCode),
     [activePlans, selectedPlanCode]
+  );
+  const editingOriginalPlanCode = editingCustomer
+    ? String(customerSummaryById[editingCustomer.id]?.subscription?.plan?.planCode ?? editingCustomer.package ?? '')
+    : '';
+  const isEditingPlanChanged = Boolean(
+    editingCustomer && selectedPlanCode && selectedPlanCode !== editingOriginalPlanCode
   );
 
   const monthlyFee =
@@ -2080,13 +2090,27 @@ export default function CustomersPage({
     return status === 'active' ? 'enable' : 'disable';
   };
 
-  const updateRemoteCustomerStatus = (id: string, status: 'enable' | 'disable' | 'takeoff') => {
-    setRemoteCustomers((prev) =>
-      prev.map((customer) =>
-        customer.id === id ? { ...customer, status: normalizeStatus(status) } : customer
-      )
+  const normalizeCustomerStatusForAudit = (status: unknown) => {
+    const normalized = String(status ?? '').trim().toLowerCase();
+    if (normalized === 'active' || normalized === 'enabled') return 'enable';
+    if (normalized === 'inactive' || normalized === 'disabled') return 'disable';
+    return normalized || 'disable';
+  };
+
+  const getCustomerStatusValue = (customer: CustomerListRow) => {
+    const status = customerSummaryById[customer.id]?.status ?? customer.status;
+    return toSelectStatus(
+      (status as 'active' | 'inactive' | 'enable' | 'disable' | 'takeoff') ?? 'inactive'
     );
   };
+  const currentEditingCustomerStatus = editingCustomer
+    ? normalizeCustomerStatusForAudit(
+        customerSummaryById[editingCustomer.id]?.status ?? editingCustomer.status
+      )
+    : userStatus;
+  const isEditingCustomerStatusChanged = Boolean(
+    editingCustomer && userStatus !== currentEditingCustomerStatus
+  );
 
   const updateRemoteCustomerCollector = (id: string, collectorId: string) => {
     setRemoteCustomers((prev) =>
@@ -2188,62 +2212,6 @@ export default function CustomersPage({
         : null,
     [customersSource, postCreateInvoiceCustomerId]
   );
-
-  const canChangeCustomerStatus = (customer: CustomerListRow) => {
-    const invoiceCompleted = Boolean(customerSummaryById[customer.id]?.firstInvoiceCompleted);
-    const currentStatus = String(customer.status ?? '').trim().toLowerCase();
-    return invoiceCompleted || currentStatus === 'active' || currentStatus === 'enable';
-  };
-
-  const handleStatusChange = async (id: string, status: 'enable' | 'disable' | 'takeoff') => {
-    if (isUpdatingStatus[id]) return;
-    const customerRow = customersSource.find((item) => item.id === id) as CustomerListRow | undefined;
-    if (!customerRow || !canChangeCustomerStatus(customerRow)) {
-      toast({
-        title: 'Status is locked',
-        description: 'Customer status can be changed only after first invoice is completed.',
-        variant: 'destructive'
-      });
-      return;
-    }
-    setIsUpdatingStatus((prev) => ({ ...prev, [id]: true }));
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/customers/${id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ status })
-      });
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        const message = data?.message ?? 'Failed to update status';
-        console.error(message, data);
-        toast({
-          title: 'Update status failed',
-          description: String(message),
-          variant: 'destructive'
-        });
-      } else {
-        updateRemoteCustomerStatus(id, status);
-        const customerName = customersSource.find((item) => item.id === id)?.name;
-        logAdminActivity(
-          'customer_status_changed',
-          `Customer status changed to ${status}.`,
-          'customer',
-          id,
-          customerName,
-          { status }
-        );
-      }
-    } catch (error) {
-      console.error('Failed to update status', error);
-    } finally {
-      setIsUpdatingStatus((prev) => ({ ...prev, [id]: false }));
-    }
-  };
 
   const handleAssignCollector = async (customerId: string, collectorCode: string) => {
     if (isAssigningCollector[customerId]) return;
@@ -4085,6 +4053,7 @@ export default function CustomersPage({
     setErrors({});
     setCustomerType(resolvedCustomerType);
     setUserStatus(resolvedStatus);
+    setCustomerStatusNote('');
 
     setNrcState(personalNrc.state);
     setNrcTownship(personalNrc.township);
@@ -4158,6 +4127,7 @@ export default function CustomersPage({
     );
     setPackageName(resolvedPlanName);
     setSelectedPlanCode(resolvedPlanCode);
+    setPlanEffectiveDate(formatDateToIso(new Date()));
     setBandwidthPlan(resolvedBandwidth);
     setServiceStartDate(
       resolveServiceDateValue(
@@ -4471,6 +4441,21 @@ export default function CustomersPage({
   const handleUpdateCustomer = async () => {
     if (!editingCustomer || isUpdatingCustomer) return;
 
+    const previousSummary = customerSummaryById[editingCustomer.id] ?? {};
+    const originalStatus = normalizeCustomerStatusForAudit(
+      previousSummary.status ?? editingCustomer.status
+    );
+    const hasStatusChanged = normalizeCustomerStatusForAudit(userStatus) !== originalStatus;
+    if (hasStatusChanged && !customerStatusNote.trim()) {
+      setErrors((current) => ({ ...current, statusChangeNote: 'Add a reason for changing customer status.' }));
+      toast({
+        title: 'Status change reason required',
+        description: 'Enter a note explaining why the customer status is changing.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
     const customerCodeNumber = editingCustomerCodeNumber.replace(/\D/g, '');
     if (!customerCodeNumber || Number(customerCodeNumber) < 1) {
       toast({
@@ -4492,12 +4477,19 @@ export default function CustomersPage({
       return `${state}/${township}(${type})${number}`;
     };
 
-    const previousSummary = customerSummaryById[editingCustomer.id] ?? {};
     const previousPlanCode = String(
       previousSummary?.subscription?.plan?.planCode ?? editingCustomer.package ?? ''
     );
     const nextPlanCode = selectedPlanCode || serviceId || '';
     const planChanged = Boolean(nextPlanCode && nextPlanCode !== previousPlanCode);
+    if (planChanged && !/^\d{4}-\d{2}-\d{2}$/.test(planEffectiveDate)) {
+      toast({
+        title: 'Effective date required',
+        description: 'Choose the date the new plan starts. The new plan applies from that day.',
+        variant: 'destructive'
+      });
+      return;
+    }
     const collectionFeeValue = collectionService === 'yes' ? toNumber(collectionFee) : 0;
     const nextCollectorCode =
       collectionService === 'yes' ? newCustomer.collectorId || null : null;
@@ -4555,6 +4547,7 @@ export default function CustomersPage({
       customerCode: nextCustomerCode,
       customerType,
       status: userStatus,
+      statusChangeNote: hasStatusChanged ? customerStatusNote.trim() : undefined,
       collectorCode: nextCollectorCode,
       collectionServiceEnabled: collectionService === 'yes',
       collectionFee: collectionFeeValue,
@@ -4584,6 +4577,7 @@ export default function CustomersPage({
     };
     const servicesPatchRaw: Record<string, unknown> = {
       serviceId: nextPlanCode || undefined,
+      planEffectiveDate: planChanged ? planEffectiveDate : undefined,
       serviceType: serviceType.trim() || undefined,
       packageName: packageName.trim() || undefined,
       bandwidthPlan: bandwidthPlan.trim() || undefined,
@@ -4767,12 +4761,10 @@ export default function CustomersPage({
         editingCustomer.id,
         customerNameForLog
       );
-
       if (planChanged) {
-        await handleGenerateInvoice(editingCustomer.id);
         toast({
           title: 'Customer updated',
-          description: 'Customer updated and a new invoice was generated for package change.'
+          description: 'Plan updated. Any open bill for the active period is recalculated; if already paid, only the remaining prorated balance is billed separately. Future bills use the new plan.'
         });
       } else {
         toast({
@@ -4789,6 +4781,7 @@ export default function CustomersPage({
       }
 
       setEditingCustomer(null);
+      setCustomerStatusNote('');
       setEditingCustomerCodePrefix('');
       setEditingCustomerCodeNumber('');
       setCustomerType('individual');
@@ -4932,12 +4925,38 @@ export default function CustomersPage({
           <SearchableSelect
             id="userStatus"
             value={userStatus}
-            onValueChange={(value) => setUserStatus(value as 'enable' | 'disable' | 'takeoff')}
+            onValueChange={(value) => {
+              setUserStatus(value as 'enable' | 'disable' | 'takeoff');
+              setCustomerStatusNote('');
+              setErrors((current) => ({ ...current, statusChangeNote: '' }));
+            }}
             options={userStatusSelectOptions}
             placeholder="Select status"
           />
           {errors.userStatus && (
             <p className="text-xs text-rose-600">{errors.userStatus}</p>
+          )}
+          {isEditingCustomerStatusChanged && (
+            <div className="space-y-2">
+              <Label htmlFor="customerStatusNote">
+                Reason for status change <span className="text-rose-600">*</span>
+              </Label>
+              <Textarea
+                id="customerStatusNote"
+                value={customerStatusNote}
+                onChange={(event) => {
+                  setCustomerStatusNote(event.target.value);
+                  if (event.target.value.trim()) {
+                    setErrors((current) => ({ ...current, statusChangeNote: '' }));
+                  }
+                }}
+                placeholder="Explain why the customer status is changing"
+                rows={3}
+              />
+              {errors.statusChangeNote && (
+                <p className="text-xs text-rose-600">{errors.statusChangeNote}</p>
+              )}
+            </div>
           )}
         </div>
 
@@ -5610,6 +5629,23 @@ export default function CustomersPage({
               <p className="text-xs text-rose-600">{plansError}</p>
             )}
           </div>
+          {isEditingPlanChanged && (
+            <div className="space-y-2 rounded-md border border-blue-200 bg-blue-50 p-3">
+              <Label htmlFor="planEffectiveDate" className="text-sm font-medium text-slate-700">
+                New Plan Effective Date
+              </Label>
+              <Input
+                id="planEffectiveDate"
+                type="date"
+                value={planEffectiveDate}
+                onChange={(event) => setPlanEffectiveDate(event.target.value)}
+                required
+              />
+              <p className="text-xs text-slate-600">
+                The new plan applies starting on this date. The previous plan is charged through the day before.
+              </p>
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="bandwidthPlan" className="text-sm font-medium text-slate-700">
               Bandwidth (Download / Upload) Mbps <span className="text-rose-600">*</span>
@@ -6698,34 +6734,19 @@ export default function CustomersPage({
                                   Draft
                                 </Badge>
                               ) : (() => {
-                                const statusValue = toSelectStatus(
-                                  customer.status as 'active' | 'inactive' | 'enable' | 'disable' | 'takeoff'
-                                );
+                                const statusValue = getCustomerStatusValue(customerRow);
                                 const statusClass =
                                   statusValue === 'enable'
                                     ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                     : statusValue === 'disable'
                                     ? 'bg-rose-50 text-rose-700 border-rose-200'
                                     : 'bg-amber-50 text-amber-700 border-amber-200';
+                                const statusLabel =
+                                  userStatusOptions.find((option) => option.value === statusValue)?.label ?? statusValue;
                                 return (
-                                  <Select
-                                    value={statusValue}
-                                    onValueChange={(value) =>
-                                      handleStatusChange(customer.id, value as 'enable' | 'disable' | 'takeoff')
-                                    }
-                                    disabled={isUpdatingStatus[customer.id] || !canChangeCustomerStatus(customerRow)}
-                                  >
-                                    <SelectTrigger className={`h-8 w-32 ${statusClass}`}>
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {userStatusOptions.map((option) => (
-                                        <SelectItem key={option.value} value={option.value}>
-                                          {option.label}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
+                                  <Badge variant="outline" className={`${statusClass} font-medium`}>
+                                    {statusLabel}
+                                  </Badge>
                                 );
                               })()}
                             </TableCell>
@@ -6812,9 +6833,7 @@ export default function CustomersPage({
                     : !collectionServiceEnabled
                     ? 'Collection service off'
                     : 'Assign collector';
-                  const statusValue = toSelectStatus(
-                    customer.status as 'active' | 'inactive' | 'enable' | 'disable' | 'takeoff'
-                  );
+                  const statusValue = getCustomerStatusValue(customerRow);
                   const statusClass =
                     statusValue === 'enable'
                       ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
@@ -6917,24 +6936,9 @@ export default function CustomersPage({
                                 Draft
                               </div>
                             ) : (
-                              <Select
-                                value={statusValue}
-                                onValueChange={(value) =>
-                                  handleStatusChange(customer.id, value as 'enable' | 'disable' | 'takeoff')
-                                }
-                                disabled={isUpdatingStatus[customer.id]}
-                              >
-                                <SelectTrigger className={`h-9 w-full ${statusClass}`}>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {userStatusOptions.map((option) => (
-                                    <SelectItem key={option.value} value={option.value}>
-                                      {option.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                              <Badge variant="outline" className={`${statusClass} font-medium`}>
+                                {userStatusOptions.find((option) => option.value === statusValue)?.label ?? statusValue}
+                              </Badge>
                             )}
                           </div>
 
@@ -7839,10 +7843,10 @@ export default function CustomersPage({
                       <h2 className="text-center text-3xl font-semibold">Invoice</h2>
 
                       <div className="mt-8 space-y-1 text-sm">
-                        <p>Company Name: ABC Internet Service Provider</p>
-                        <p>Address: No. 123, Main Road, Yangon</p>
-                        <p>Phone: 09-xxxxxxx</p>
-                        <p>Email:</p>
+                        <p>Company Name: {branding.receiptCompanyName || branding.systemName}</p>
+                        {branding.receiptAddress && <p>Address: {branding.receiptAddress}</p>}
+                        {branding.receiptPhone && <p>Phone: {branding.receiptPhone}</p>}
+                        {branding.receiptEmail && <p>Email: {branding.receiptEmail}</p>}
                       </div>
 
                       <div className="mt-8 grid gap-6 md:grid-cols-2">
