@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,7 +16,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from './contexts/auth-context';
 import { useRouter } from 'next/navigation';
-import { Building2, Eye, EyeOff } from 'lucide-react';
+import { AlertCircle, Building2, Eye, EyeOff, Loader2 } from 'lucide-react';
 import {
   fetchSystemBranding,
   readSystemBranding,
@@ -32,6 +32,15 @@ export default function LoginPage() {
   });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<{
+    identifier?: string;
+    password?: string;
+  }>({});
+  const [capsLockOn, setCapsLockOn] = useState(false);
+  const loginInFlight = useRef(false);
+  const identifierRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const loginErrorRef = useRef<HTMLDivElement>(null);
   const [isForgotOpen, setIsForgotOpen] = useState(false);
   const [resetChoice, setResetChoice] = useState<'email' | 'security'>('email');
   const [forgotData, setForgotData] = useState({
@@ -92,24 +101,49 @@ export default function LoginPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (errorMessage) loginErrorRef.current?.focus();
+  }, [errorMessage]);
+
+  const updateCredential = (
+    field: 'identifier' | 'password',
+    value: string,
+  ) => {
+    setCredentials((current) => ({ ...current, [field]: value }));
+    setFieldErrors((current) => ({ ...current, [field]: undefined }));
+    setErrorMessage(null);
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loginInFlight.current) return;
+
+    const identifier = credentials.identifier.trim();
+    const errors: { identifier?: string; password?: string } = {};
+    if (!identifier) errors.identifier = 'Enter your email, username or phone.';
+    if (!credentials.password) errors.password = 'Enter your password.';
+    setFieldErrors(errors);
     setErrorMessage(null);
-    if (!credentials.identifier || !credentials.password) {
-      setErrorMessage('Please enter your login details.');
+
+    if (errors.identifier || errors.password) {
+      (errors.identifier ? identifierRef : passwordRef).current?.focus();
       return;
     }
 
+    loginInFlight.current = true;
     setIsSubmitting(true);
     try {
-      await login(credentials.identifier, credentials.password);
+      // Keep the form locked while the existing auth flow opens the dashboard.
+      await login(identifier, credentials.password);
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : 'Unable to login. Please try again.';
-      setErrorMessage(message);
-    } finally {
+      setErrorMessage(
+        error instanceof TypeError
+          ? 'Unable to connect. Please try again.'
+          : error instanceof Error
+            ? error.message
+            : 'Unable to sign in. Please try again.',
+      );
+      loginInFlight.current = false;
       setIsSubmitting(false);
     }
   };
@@ -299,113 +333,217 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background px-4 py-10 sm:px-6">
-      <Card className="w-full max-w-[400px] rounded-2xl shadow-[0_12px_40px_-16px_rgba(24,34,31,0.16)]">
-        <CardHeader className="px-7 pb-7 pt-8 sm:px-8">
-          <div className="mb-7 flex items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-              {branding.logoDataUrl ? (
-                <img
-                  src={branding.logoDataUrl}
-                  alt=""
-                  className="h-8 w-8 rounded-lg bg-white object-contain p-1"
-                />
-              ) : (
-                <Building2 className="h-5 w-5" strokeWidth={1.7} />
-              )}
-            </div>
-            <span className="text-lg font-semibold tracking-tight">
-              {branding.systemName}
-            </span>
-          </div>
-          <CardTitle className="text-2xl font-semibold tracking-tight">
-            Sign in
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="px-7 pb-8 sm:px-8">
-          <form onSubmit={handleLogin} className="space-y-5">
-            <div className="space-y-2">
-              <Label htmlFor="identifier">Email / Username / Phone</Label>
-              <Input
-                id="identifier"
-                type="text"
-                placeholder="Email, username or phone"
-                value={credentials.identifier}
-                onChange={(e) =>
-                  setCredentials({
-                    ...credentials,
-                    identifier: e.target.value,
-                  })
-                }
-                className="h-11"
-                autoComplete="username"
-                required
+    <main className="flex min-h-screen items-center justify-center bg-background px-4 py-10 supports-[height:100svh]:min-h-[100svh] sm:px-6">
+      <div className="w-full max-w-[420px]">
+        <div className="mb-7 flex min-w-0 items-center justify-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+            {branding.logoDataUrl ? (
+              <img
+                src={branding.logoDataUrl}
+                alt=""
+                className="h-8 w-8 rounded-lg bg-white object-contain p-1"
               />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={passwordVisible.login ? 'text' : 'password'}
-                  placeholder="Enter password"
-                  value={credentials.password}
-                  onChange={(e) =>
-                    setCredentials({
-                      ...credentials,
-                      password: e.target.value,
-                    })
-                  }
-                  autoComplete="current-password"
-                  required
-                  className="h-11 pr-11"
-                />
-                <button
-                  type="button"
-                  onClick={() =>
-                    setPasswordVisible((prev) => ({
-                      ...prev,
-                      login: !prev.login,
-                    }))
-                  }
-                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-md text-muted-foreground hover:text-foreground"
-                  aria-label={
-                    passwordVisible.login ? 'Hide password' : 'Show password'
-                  }
-                >
-                  {passwordVisible.login ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
-                </button>
-              </div>
-            </div>
-            {errorMessage && (
-              <div
-                role="alert"
-                className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700"
-              >
-                {errorMessage}
-              </div>
+            ) : (
+              <Building2
+                className="h-5 w-5"
+                strokeWidth={1.7}
+                aria-hidden="true"
+              />
             )}
-            <Button
-              type="submit"
-              className="h-11 w-full"
-              disabled={isSubmitting}
+          </div>
+          <span className="min-w-0 break-words text-xl font-semibold tracking-tight">
+            {branding.systemName}
+          </span>
+        </div>
+        <Card className="rounded-2xl border-border/80 shadow-[0_2px_4px_rgba(24,34,31,0.02),0_16px_48px_-20px_rgba(24,34,31,0.16)]">
+          <CardHeader className="px-6 pb-6 pt-7 sm:px-8 sm:pt-8">
+            <h1
+              id="sign-in-heading"
+              className="text-[26px] font-semibold leading-tight tracking-tight"
             >
-              {isSubmitting ? 'Signing In...' : 'Sign In'}
-            </Button>
-            <button
-              type="button"
-              className="w-full text-xs font-medium text-primary hover:underline"
-              onClick={() => handleForgotOpenChange(true)}
+              Sign in
+            </h1>
+          </CardHeader>
+          <CardContent className="px-6 pb-7 sm:px-8 sm:pb-8">
+            <form
+              onSubmit={handleLogin}
+              noValidate
+              aria-labelledby="sign-in-heading"
+              aria-busy={isSubmitting}
+              className="space-y-5"
             >
-              Forgot password?
-            </button>
-          </form>
-        </CardContent>
-      </Card>
+              <div className="space-y-2">
+                <Label htmlFor="identifier" className="text-[13px] font-medium">
+                  Email, username or phone
+                </Label>
+                <Input
+                  ref={identifierRef}
+                  id="identifier"
+                  name="username"
+                  type="text"
+                  placeholder="Email, username or phone"
+                  value={credentials.identifier}
+                  onChange={(e) =>
+                    updateCredential('identifier', e.target.value)
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !credentials.password) {
+                      e.preventDefault();
+                      passwordRef.current?.focus();
+                    }
+                  }}
+                  className="h-12 rounded-lg px-3.5 text-base aria-[invalid=true]:border-destructive aria-[invalid=true]:focus-visible:ring-destructive/20"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  enterKeyHint={credentials.password ? 'go' : 'next'}
+                  aria-invalid={Boolean(fieldErrors.identifier)}
+                  aria-describedby={
+                    fieldErrors.identifier ? 'identifier-error' : undefined
+                  }
+                  disabled={isSubmitting}
+                  required
+                />
+                {fieldErrors.identifier && (
+                  <p
+                    id="identifier-error"
+                    className="text-xs leading-relaxed text-destructive"
+                  >
+                    {fieldErrors.identifier}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <div className="flex h-7 items-center justify-between gap-2">
+                  <Label htmlFor="password" className="text-[13px] font-medium">
+                    Password
+                  </Label>
+                  <button
+                    type="button"
+                    onClick={() => handleForgotOpenChange(true)}
+                    disabled={isSubmitting}
+                    className="inline-flex min-h-[44px] shrink-0 items-center rounded-md px-1 text-xs font-medium text-primary underline-offset-4 hover:underline disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+                <div className="relative">
+                  <Input
+                    ref={passwordRef}
+                    id="password"
+                    name="password"
+                    type={passwordVisible.login ? 'text' : 'password'}
+                    placeholder="Enter password"
+                    value={credentials.password}
+                    onChange={(e) =>
+                      updateCredential('password', e.target.value)
+                    }
+                    onKeyDown={(e) =>
+                      setCapsLockOn(e.getModifierState('CapsLock'))
+                    }
+                    onKeyUp={(e) =>
+                      setCapsLockOn(e.getModifierState('CapsLock'))
+                    }
+                    onBlur={() => setCapsLockOn(false)}
+                    autoComplete="current-password"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    enterKeyHint="go"
+                    aria-invalid={Boolean(fieldErrors.password)}
+                    aria-describedby={
+                      [
+                        fieldErrors.password ? 'password-error' : '',
+                        capsLockOn ? 'caps-lock-hint' : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ') || undefined
+                    }
+                    disabled={isSubmitting}
+                    required
+                    className="h-12 rounded-lg pl-3.5 pr-12 text-base aria-[invalid=true]:border-destructive aria-[invalid=true]:focus-visible:ring-destructive/20"
+                  />
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() =>
+                      setPasswordVisible((current) => ({
+                        ...current,
+                        login: !current.login,
+                      }))
+                    }
+                    className="absolute inset-y-0 right-0 flex w-12 items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                    aria-label={
+                      passwordVisible.login ? 'Hide password' : 'Show password'
+                    }
+                    aria-pressed={passwordVisible.login}
+                    aria-controls="password"
+                  >
+                    {passwordVisible.login ? (
+                      <EyeOff
+                        className="h-[18px] w-[18px]"
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <Eye className="h-[18px] w-[18px]" aria-hidden="true" />
+                    )}
+                  </button>
+                </div>
+                {fieldErrors.password && (
+                  <p
+                    id="password-error"
+                    className="text-xs leading-relaxed text-destructive"
+                  >
+                    {fieldErrors.password}
+                  </p>
+                )}
+                {capsLockOn && (
+                  <p
+                    id="caps-lock-hint"
+                    role="status"
+                    className="text-xs text-muted-foreground"
+                  >
+                    Caps Lock is on.
+                  </p>
+                )}
+              </div>
+              {errorMessage && (
+                <div
+                  ref={loginErrorRef}
+                  id="login-error"
+                  role="alert"
+                  tabIndex={-1}
+                  className="flex items-start gap-2 rounded-lg border border-destructive/15 bg-destructive/5 px-3 py-3 text-xs leading-relaxed text-destructive focus:outline-none focus:ring-2 focus:ring-destructive/25"
+                >
+                  <AlertCircle
+                    className="mt-0.5 h-4 w-4 shrink-0"
+                    aria-hidden="true"
+                  />
+                  <span>{errorMessage}</span>
+                </div>
+              )}
+              <Button
+                type="submit"
+                className="!mt-6 h-12 w-full rounded-lg text-sm font-semibold shadow-[0_2px_3px_rgba(0,0,0,0.08)] active:translate-y-px motion-reduce:transform-none"
+                disabled={isSubmitting}
+              >
+                {isSubmitting && (
+                  <Loader2
+                    className="h-4 w-4 animate-spin motion-reduce:animate-none"
+                    aria-hidden="true"
+                  />
+                )}
+                {isSubmitting ? 'Signing in…' : 'Sign in'}
+              </Button>
+            </form>
+            <span className="sr-only" role="status">
+              {isSubmitting ? 'Signing in. Please wait.' : ''}
+            </span>
+          </CardContent>
+        </Card>
+      </div>
 
       <Dialog open={isForgotOpen} onOpenChange={handleForgotOpenChange}>
         <DialogContent>
