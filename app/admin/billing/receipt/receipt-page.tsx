@@ -1873,7 +1873,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                   <div>
                     <p className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Service Address</p>
                     <p className="text-sm text-slate-700">{selectedReceipt.customer?.installationAddress || '—'}</p>
-                    {selectedReceipt.invoiceType === 'plan_change_adjustment' && <p className="mt-2 text-xs font-semibold text-emerald-800">Plan Change Adjustment</p>}
+                    {selectedReceipt.invoiceType === 'plan_change_adjustment' && <p className="mt-2 text-xs font-semibold text-slate-700">Plan Change Adjustment</p>}
                   </div>
                   <div>
                     <p className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Receipt Details</p>
@@ -1989,7 +1989,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                   return (
                     <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4">
                       <h3 className="font-semibold text-emerald-950">Plan Change Calculation</h3>
-                      <p className="mt-1 text-xs text-emerald-900">The charge is prorated by active days under each plan.</p>
+                      <p className="mt-1 text-xs text-slate-900">The charge is prorated by active days under each plan.</p>
                       <div className="mt-3 overflow-x-auto">
                         <Table>
                           <TableHeader><TableRow><TableHead>Plan</TableHead><TableHead>Service Dates</TableHead><TableHead className="text-right">Days</TableHead><TableHead className="text-right">Monthly Rate</TableHead><TableHead className="text-right">Prorated Charge</TableHead></TableRow></TableHeader>
@@ -2039,7 +2039,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                 </div>
 
                 <div className="mt-8 grid gap-5 border-t border-slate-200 pt-5 sm:grid-cols-2 sm:items-end">
-                  <p className="text-lg font-semibold text-emerald-900">Thank you for staying connected.</p>
+                  <p className="text-lg font-semibold text-slate-900">Thank you for staying connected.</p>
                   <div className="text-xs leading-relaxed text-slate-500">
                     <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Terms &amp; Conditions</p>
                     {branding.footerText ? <p>{branding.footerText}</p> : <p>Receipt issued by {branding.receiptCompanyName || branding.systemName}.</p>}

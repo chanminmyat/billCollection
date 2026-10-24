@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import {
   LayoutDashboard,
@@ -18,6 +19,7 @@ import {
   Globe,
   ChevronRight,
   PanelLeftClose,
+  PanelLeftOpen,
   CalendarDays,
 } from 'lucide-react';
 import { useAuth } from '../contexts/auth-context';
@@ -55,10 +57,23 @@ interface LayoutProps {
   children: React.ReactNode;
 }
 
+function NavHint({ label, enabled, children }: { label: string; enabled: boolean; children: React.ReactElement }) {
+  if (!enabled) return children;
+  return <Tooltip><TooltipTrigger asChild>{children}</TooltipTrigger><TooltipContent side="right" sideOffset={12}>{label}</TooltipContent></Tooltip>;
+}
+
 export default function Layout({ children }: LayoutProps) {
   const { user, logout, isLoading } = useAuth();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpenState] = useState(false);
   const [isDesktop, setIsDesktop] = useState(false);
+  const desktopPreference = useRef(true);
+  const setSidebarOpen = useCallback((open: boolean) => {
+    setSidebarOpenState(open);
+    if (isDesktop) {
+      desktopPreference.current = open;
+      try { localStorage.setItem('billflow_sidebar_expanded', String(open)); } catch { /* Storage may be unavailable. */ }
+    }
+  }, [isDesktop]);
   const [uiLanguage, setUiLanguage] = useState<UiLanguage>('en');
   const [customersMenuOpen, setCustomersMenuOpen] = useState<boolean | null>(
     null,
@@ -81,6 +96,7 @@ export default function Layout({ children }: LayoutProps) {
   );
   const sidebarRef = useRef<HTMLDivElement>(null);
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -224,9 +240,10 @@ export default function Layout({ children }: LayoutProps) {
 
   useEffect(() => {
     const desktop = window.matchMedia('(min-width: 1024px)');
+    try { desktopPreference.current = localStorage.getItem('billflow_sidebar_expanded') !== 'false'; } catch { /* Use expanded navigation by default. */ }
     const updateSidebar = () => {
       setIsDesktop(desktop.matches);
-      setSidebarOpen(desktop.matches);
+      setSidebarOpenState(desktop.matches && desktopPreference.current);
     };
     updateSidebar();
     desktop.addEventListener('change', updateSidebar);
@@ -379,7 +396,7 @@ export default function Layout({ children }: LayoutProps) {
     document.addEventListener('pointerdown', closeOnOutsideClick);
     return () =>
       document.removeEventListener('pointerdown', closeOnOutsideClick);
-  }, [sidebarOpen, isDesktop]);
+  }, [sidebarOpen, isDesktop, isLoading, setSidebarOpen]);
 
   useEffect(() => {
     if (!sidebarOpen || isDesktop) return;
@@ -407,22 +424,26 @@ export default function Layout({ children }: LayoutProps) {
         }
       }
     };
+    const content = contentRef.current;
+    const toggle = sidebarToggleRef.current;
+    content?.setAttribute('inert', '');
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     document.addEventListener('keydown', handleKeyDown);
     return () => {
+      content?.removeAttribute('inert');
       document.body.style.overflow = previousOverflow;
       document.removeEventListener('keydown', handleKeyDown);
       if (previousFocus?.isConnected) previousFocus.focus();
-      else sidebarToggleRef.current?.focus();
+      else toggle?.focus();
     };
-  }, [sidebarOpen, isDesktop]);
+  }, [sidebarOpen, isDesktop, isLoading, setSidebarOpen]);
 
   useEffect(() => {
     const sidebar = sidebarRef.current;
     if (!sidebarOpen && !isDesktop) sidebar?.setAttribute('inert', '');
     else sidebar?.removeAttribute('inert');
-  }, [sidebarOpen, isDesktop, isLoading]);
+  }, [sidebarOpen, isDesktop, isLoading, setSidebarOpen]);
 
   const closeSidebarOnMobile = () => {
     if (typeof window === 'undefined') return;
@@ -452,6 +473,7 @@ export default function Layout({ children }: LayoutProps) {
     .toUpperCase();
 
   return (
+    <TooltipProvider delayDuration={150}>
     <div className="app-shell">
       <a
         href="#main-content"
@@ -468,6 +490,9 @@ export default function Layout({ children }: LayoutProps) {
       )}
       <aside
         ref={sidebarRef}
+        id="workspace-sidebar"
+        role={!isDesktop && sidebarOpen ? "dialog" : undefined}
+        aria-modal={!isDesktop && sidebarOpen ? true : undefined}
         aria-label="Main navigation"
         aria-hidden={!sidebarOpen && !isDesktop}
         className={`app-sidebar ${sidebarOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full lg:w-[76px] lg:translate-x-0'}`}
@@ -493,15 +518,17 @@ export default function Layout({ children }: LayoutProps) {
               </span>
             )}
           </div>
-          {sidebarOpen && (
+          {sidebarOpen && !isDesktop && (
             <button
               type="button"
               onClick={() => setSidebarOpen(false)}
-              aria-label="Close sidebar"
-              title="Collapse navigation"
-              className="ml-2 rounded-md p-1.5 text-[#a8b9b0] hover:bg-white/10 hover:text-white"
+              aria-label={isDesktop ? "Collapse sidebar" : "Close navigation"}
+              aria-controls="workspace-sidebar"
+              aria-expanded={true}
+              title={isDesktop ? "Collapse navigation" : "Close navigation"}
+              className="ml-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[#a8b9b0] hover:bg-white/10 hover:text-white"
             >
-              <PanelLeftClose className="h-4 w-4" />
+              {isDesktop ? <PanelLeftClose className="h-5 w-5" /> : <X className="h-5 w-5" />}
             </button>
           )}
         </div>
@@ -550,6 +577,7 @@ export default function Layout({ children }: LayoutProps) {
               };
               return (
                 <div key={item.label}>
+                  <NavHint label={item.label} enabled={!sidebarOpen && isDesktop}>
                   <button
                     type="button"
                     className={`app-nav-item ${!sidebarOpen ? 'justify-center px-0' : ''}`}
@@ -570,6 +598,7 @@ export default function Layout({ children }: LayoutProps) {
                       </>
                     )}
                   </button>
+                  </NavHint>
                   {sidebarOpen && isMenuExpanded && (
                     <div
                       id={`nav-${menuKey}`}
@@ -616,6 +645,7 @@ export default function Layout({ children }: LayoutProps) {
             const classes = `app-nav-item ${!sidebarOpen ? 'justify-center px-0' : ''}`;
             if (isCollectorViewLink && collectorTargetView) {
               return (
+                <NavHint key={item.href} label={item.label} enabled={!sidebarOpen && isDesktop}>
                 <button
                   key={item.href}
                   type="button"
@@ -639,9 +669,11 @@ export default function Layout({ children }: LayoutProps) {
                   <Icon className="h-[18px] w-[18px] shrink-0" />
                   {sidebarOpen && <span>{item.label}</span>}
                 </button>
+                </NavHint>
               );
             }
             return (
+              <NavHint key={item.href} label={item.label} enabled={!sidebarOpen && isDesktop}>
               <Link
                 key={item.href}
                 href={item.href}
@@ -655,10 +687,17 @@ export default function Layout({ children }: LayoutProps) {
                 <Icon className="h-[18px] w-[18px] shrink-0" />
                 {sidebarOpen && <span>{item.label}</span>}
               </Link>
+              </NavHint>
             );
           })}
         </nav>
         <div className="shrink-0 border-t border-white/[0.08] p-3">
+          {isDesktop && <NavHint label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} enabled={!sidebarOpen}>
+            <button type="button" onClick={() => setSidebarOpen(!sidebarOpen)} className={`app-nav-item mb-2 ${!sidebarOpen ? 'justify-center px-0' : ''}`} aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} aria-expanded={sidebarOpen} aria-controls="workspace-sidebar">
+              {sidebarOpen ? <PanelLeftClose className="h-[18px] w-[18px]" /> : <PanelLeftOpen className="h-[18px] w-[18px]" />}
+              {sidebarOpen && <span>Collapse sidebar</span>}
+            </button>
+          </NavHint>}
           <Link
             href="/profile"
             className={`app-nav-item ${sidebarOpen ? 'px-2' : 'justify-center px-0'}`}
@@ -703,22 +742,25 @@ export default function Layout({ children }: LayoutProps) {
         </div>
       </aside>
       <div
+        ref={contentRef}
         className={`app-content min-w-0 transition-[margin] duration-200 ${sidebarOpen ? 'lg:ml-64' : 'lg:ml-[76px]'}`}
       >
         <header className="app-topbar flex h-[76px] items-center justify-between gap-3 border-b bg-card px-4 sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
-            {!sidebarOpen && (
+            <NavHint label={sidebarOpen ? "Collapse sidebar" : "Open navigation"} enabled={isDesktop}>
               <Button
                 ref={sidebarToggleRef}
                 variant="ghost"
                 size="icon"
-                onClick={() => setSidebarOpen(true)}
-                aria-label="Open sidebar"
-                aria-expanded={false}
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                aria-label={sidebarOpen ? "Collapse sidebar" : "Open navigation"}
+                aria-controls="workspace-sidebar"
+                aria-expanded={sidebarOpen}
+                className="h-11 w-11 shrink-0"
               >
-                <Menu className="h-5 w-5" />
+                {isDesktop ? (sidebarOpen ? <PanelLeftClose className="h-5 w-5" /> : <PanelLeftOpen className="h-5 w-5" />) : <Menu className="h-5 w-5" />}
               </Button>
-            )}
+            </NavHint>
             <div className="flex min-w-0 items-center gap-2 text-xs">
               <span className="hidden text-muted-foreground sm:inline">
                 Workspace
@@ -766,5 +808,6 @@ export default function Layout({ children }: LayoutProps) {
         </main>
       </div>
     </div>
+    </TooltipProvider>
   );
 }

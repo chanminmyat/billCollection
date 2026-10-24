@@ -26,14 +26,7 @@ export function ReceiptHeader({
   amount,
   amountLabel = 'Total amount',
 }: ReceiptHeaderProps) {
-  const normalized = (status || '').toLowerCase();
-  const tone = normalized.includes('cancel')
-    ? 'bg-slate-100 text-slate-700'
-    : normalized === 'paid' || normalized === 'issued'
-      ? 'bg-emerald-50 text-emerald-800'
-      : normalized === 'overdue'
-        ? 'bg-rose-50 text-rose-800'
-        : 'bg-amber-50 text-amber-800';
+  const tone = 'bg-slate-100 text-slate-700 ring-1 ring-slate-200';
   return (
     <header className="receipt-header">
       <div className="flex flex-col justify-between gap-7 sm:flex-row">
@@ -45,12 +38,12 @@ export function ReceiptHeader({
               className="h-12 w-12 shrink-0 rounded-lg object-contain"
             />
           ) : (
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-400/15 text-emerald-300">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
               <Wifi className="h-5 w-5" aria-hidden="true" />
             </div>
           )}
-          <div className="min-w-0 space-y-1 text-xs leading-relaxed text-slate-400">
-            <p className="break-words text-base font-semibold text-white">
+          <div className="min-w-0 space-y-1 text-xs leading-relaxed text-slate-500">
+            <p className="break-words text-base font-semibold text-slate-900">
               {company}
             </p>
             {address && (
@@ -63,14 +56,14 @@ export function ReceiptHeader({
           </div>
         </div>
         <div className="min-w-0 sm:text-right">
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300">Internet services</p>
-          <h2 className="text-3xl font-semibold tracking-tight text-white">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">Internet services</p>
+          <h2 className="text-3xl font-semibold tracking-tight text-slate-900">
             Payment receipt
           </h2>
-          <p className="mt-2 break-all font-mono text-xs text-slate-400">
+          <p className="mt-2 break-all font-mono text-xs text-slate-500">
             {number}
           </p>
-          <p className="mt-1 text-xs text-slate-400">Issued {date}</p>
+          <p className="mt-1 text-xs text-slate-500">Issued {date}</p>
           {status && (
             <span
               className={`mt-3 inline-flex rounded-full px-2.5 py-1 text-[11px] font-medium capitalize ${tone}`}
@@ -81,11 +74,11 @@ export function ReceiptHeader({
         </div>
       </div>
       {amount !== undefined && (
-        <div className="mt-7 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-5 py-4">
+        <div className="mt-7 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-5 py-4">
           <span className="text-xs font-medium text-slate-300">
             {amountLabel}
           </span>
-          <span className="break-words text-2xl font-semibold tracking-tight text-white tabular-nums">
+          <span className="break-words text-2xl font-semibold tracking-tight text-slate-900 tabular-nums">
             {amount}
           </span>
         </div>

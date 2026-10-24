@@ -102,7 +102,7 @@
     @apply bg-[#244b3d] text-[#dcf5e7];
   }
   .app-nav-child {
-    @apply block rounded-md px-3 py-2 text-xs font-medium leading-relaxed text-[#a8b9b0] transition-colors hover:bg-white/5 hover:text-white;
+    @apply flex min-h-[44px] items-center rounded-md px-3 py-2 text-xs font-medium leading-relaxed text-[#a8b9b0] transition-colors hover:bg-white/5 hover:text-white;
   }
   .app-nav-child[aria-current='page'] {
     @apply bg-white/[0.08] text-[#a8ebc9];
@@ -211,8 +211,7 @@
     @apply mx-auto w-full max-w-5xl overflow-hidden rounded-xl border border-border bg-white text-slate-900 shadow-[0_8px_36px_-20px_rgba(24,34,31,0.2)];
   }
   .receipt-document .receipt-header {
-    @apply border-b border-emerald-400/30 bg-slate-900 px-5 py-6 sm:px-9 sm:py-8;
-    background-image: radial-gradient(ellipse at top right, rgba(16,185,129,.18), transparent 65%);
+    @apply border-b border-slate-200 bg-white px-5 py-6 sm:px-9 sm:py-8;
   }
   .receipt-document .receipt-body > .mt-8:first-child {
     margin-top: 0;
@@ -231,7 +230,7 @@
   }
   .receipt-document tr:has(.receipt-total),
   .receipt-document tr.receipt-total {
-    @apply border-t border-emerald-100 bg-emerald-50/50 text-emerald-900;
+    @apply border-t border-slate-200 bg-slate-50 text-slate-900;
   }
   .receipt-document .receipt-total {
     @apply py-4 text-sm font-semibold;
