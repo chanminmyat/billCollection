@@ -24,6 +24,8 @@ import { Search, Edit, Phone, MapPin, FilePlus2, Plus, Minus, Trash2, CalendarDa
 import { useData, Customer } from '../../contexts/data-context';
 import { useAuth } from '../../contexts/auth-context';
 import Layout from '../../components/layout';
+import { CustomerFormWorkspace } from '@/components/customers/form-workspace';
+import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
 import { useRouter } from 'next/navigation';
 import nrcData from '@/lib/nrc-data.json';
 import townshipData from '@/lib/township.json';
@@ -1516,6 +1518,82 @@ export default function CustomersPage({
       // ignore malformed draft data
     }
   }, [inlineForm, editingCustomer, toast]);
+
+  const editingCustomerId = editingCustomer?.id ?? null;
+  const editSnapshot = JSON.stringify({
+        customerType,
+        userStatus,
+        newCustomer,
+        nrcState,
+        nrcTownship,
+        nrcType,
+        nrcNumber,
+        companyName,
+        businessRegNo,
+        taxId,
+        contactPerson,
+        contactNrcState,
+        contactNrcTownship,
+        contactNrcType,
+        contactNrcNumber,
+        primaryPhone,
+        secondaryPhone,
+        contactEmail,
+        installationRegion,
+        installationDistrict,
+        installationTownship,
+        installationCity,
+        installationWard,
+        installationPostalCode,
+        installationStreet,
+        installationBuilding,
+        installationMapLink,
+        billingSameAsInstallation,
+        billingRegion,
+        billingDistrict,
+        billingTownship,
+        billingCity,
+        billingWard,
+        billingPostalCode,
+        billingStreet,
+        billingBuilding,
+        billingMapLink,
+        serviceId,
+        serviceType,
+        packageName,
+        selectedPlanCode,
+        bandwidthPlan,
+        serviceStartDate,
+        contractStartDate,
+        contractEndDate,
+        installationDate,
+        ipType,
+        staticIpAddress,
+        routerId,
+        macAddress,
+        onuSerial,
+        vlanPort,
+        networkZone,
+        billingCycle,
+        customBillingMonths,
+        billingRuleId: customerCreateBillingRuleId,
+        firstInvoiceMode: customerFirstInvoiceMode,
+        fixedFirstInvoiceChargeMode: customerFixedFirstInvoiceChargeMode,
+        installationFee,
+        additionalFees,
+        collectionService,
+        collectionFee,
+        discountApplied,
+        discountAmount,
+        discountPeriod, monthlyFee, customerStatusNote, editingCustomerCodeNumber });
+  const latestEditSnapshot = useRef(editSnapshot);
+  latestEditSnapshot.current = editSnapshot;
+  const [editBaseline, setEditBaseline] = useState<string | null>(null);
+  useEffect(() => {
+    setEditBaseline(editingCustomerId ? latestEditSnapshot.current : null);
+  }, [editingCustomerId]);
+  const editIsDirty = Boolean(editingCustomerId && editBaseline !== null && editBaseline !== editSnapshot);
+  const { confirmLeave, discardDialog } = useUnsavedChanges(editIsDirty, isUpdatingCustomer);
 
   useEffect(() => {
     if (!inlineForm || editingCustomer || typeof window === 'undefined') return;
@@ -4861,11 +4939,9 @@ export default function CustomersPage({
   };
 
   const formContent = (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-200 bg-sky-50 px-6 py-4">
-        <h3 className="text-lg font-semibold text-slate-900">User Information</h3>
-      </div>
-      <div className="grid gap-6 px-6 py-6 md:grid-cols-2">
+    <div className="customer-form-sections space-y-5">
+      <section id="customer-account" className="customer-form-section"><div className="customer-section-heading"><span className="customer-section-number">01</span><div><h2>Account details</h2><p>Choose the customer type and account status.</p></div></div>
+      <div className="grid gap-5 md:grid-cols-2">
         {editingCustomer && (
           <div className="space-y-3 md:col-span-2">
             <Label htmlFor="customerCodeNumber" className="text-sm font-medium text-slate-700">
@@ -4914,7 +4990,7 @@ export default function CustomersPage({
             </div>
           </RadioGroup>
           {errors.customerType && (
-            <p className="text-xs text-rose-600">{errors.customerType}</p>
+            <p data-field-error className="text-xs text-rose-600">{errors.customerType}</p>
           )}
         </div>
 
@@ -4934,7 +5010,7 @@ export default function CustomersPage({
             placeholder="Select status"
           />
           {errors.userStatus && (
-            <p className="text-xs text-rose-600">{errors.userStatus}</p>
+            <p data-field-error className="text-xs text-rose-600">{errors.userStatus}</p>
           )}
           {isEditingCustomerStatusChanged && (
             <div className="space-y-2">
@@ -4954,20 +5030,18 @@ export default function CustomersPage({
                 rows={3}
               />
               {errors.statusChangeNote && (
-                <p className="text-xs text-rose-600">{errors.statusChangeNote}</p>
+                <p data-field-error className="text-xs text-rose-600">{errors.statusChangeNote}</p>
               )}
             </div>
           )}
         </div>
 
-      </div>
+      </div></section>
 
       {customerType === 'individual' && (
-        <div className="border-t border-slate-200 px-6 py-6">
-          <h4 className="text-sm font-semibold text-slate-600 mb-4 border-l-4 border-sky-400 pl-3">
-            Personal Information
-          </h4>
-          <div className="grid gap-6 md:grid-cols-2">
+        <section id="customer-identity" className="customer-form-section">
+          <div className="customer-section-heading"><span className="customer-section-number">02</span><div><h2>Personal details</h2><p>Identity information for this individual account.</p></div></div>
+          <div className="grid gap-5 md:grid-cols-2">
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="individual-name" className="text-sm font-medium text-slate-700">
                 Customer Name <span className="text-rose-600">*</span>
@@ -4979,14 +5053,14 @@ export default function CustomersPage({
                 placeholder="Aung Aung"
               />
               {errors.individualName && (
-                <p className="text-xs text-rose-600">{errors.individualName}</p>
+                <p data-field-error className="text-xs text-rose-600">{errors.individualName}</p>
               )}
             </div>
             <div className="md:col-span-2 space-y-3 rounded-lg border border-slate-200 bg-slate-100 p-4">
               <div className="text-sm font-medium text-slate-700">
                 NRC <span className="text-rose-600">*</span>
               </div>
-              <div className="grid gap-3 md:grid-cols-4">
+              <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
                 <div className="space-y-1">
                   <SearchableSelect
                     id="nrcState"
@@ -4999,7 +5073,7 @@ export default function CustomersPage({
                     placeholder="State"
                   />
                   {errors.nrcState && (
-                    <p className="text-xs text-rose-600">{errors.nrcState}</p>
+                    <p data-field-error className="text-xs text-rose-600">{errors.nrcState}</p>
                   )}
                 </div>
                 <div className="space-y-1">
@@ -5011,7 +5085,7 @@ export default function CustomersPage({
                     placeholder="Township"
                   />
                   {errors.nrcTownship && (
-                    <p className="text-xs text-rose-600">{errors.nrcTownship}</p>
+                    <p data-field-error className="text-xs text-rose-600">{errors.nrcTownship}</p>
                   )}
                 </div>
                 <div className="space-y-1">
@@ -5023,7 +5097,7 @@ export default function CustomersPage({
                     placeholder="Type"
                   />
                   {errors.nrcType && (
-                    <p className="text-xs text-rose-600">{errors.nrcType}</p>
+                    <p data-field-error className="text-xs text-rose-600">{errors.nrcType}</p>
                   )}
                 </div>
                 <div className="space-y-1">
@@ -5038,21 +5112,19 @@ export default function CustomersPage({
                     inputMode="numeric"
                   />
                   {errors.nrcNumber && (
-                    <p className="text-xs text-rose-600">{errors.nrcNumber}</p>
+                    <p data-field-error className="text-xs text-rose-600">{errors.nrcNumber}</p>
                   )}
                 </div>
               </div>
             </div>
           </div>
-        </div>
+        </section>
       )}
 
       {customerType === 'business' && (
-        <div className="border-t border-slate-200 px-6 py-6">
-          <h4 className="text-sm font-semibold text-slate-600 mb-4 border-l-4 border-emerald-400 pl-3">
-            Business Information
-          </h4>
-          <div className="grid gap-6 md:grid-cols-2">
+        <section id="customer-identity" className="customer-form-section">
+          <div className="customer-section-heading"><span className="customer-section-number">02</span><div><h2>Business details</h2><p>Company registration and authorized contact information.</p></div></div>
+          <div className="grid gap-5 md:grid-cols-2">
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="companyName" className="text-sm font-medium text-slate-700">
                 Company Name <span className="text-rose-600">*</span>
@@ -5064,7 +5136,7 @@ export default function CustomersPage({
                 placeholder="Company name"
               />
               {errors.companyName && (
-                <p className="text-xs text-rose-600">{errors.companyName}</p>
+                <p data-field-error className="text-xs text-rose-600">{errors.companyName}</p>
               )}
             </div>
             <div className="space-y-2">
@@ -5078,7 +5150,7 @@ export default function CustomersPage({
                 placeholder="Registration number"
               />
               {errors.businessRegNo && (
-                <p className="text-xs text-rose-600">{errors.businessRegNo}</p>
+                <p data-field-error className="text-xs text-rose-600">{errors.businessRegNo}</p>
               )}
             </div>
             <div className="space-y-2">
@@ -5092,7 +5164,7 @@ export default function CustomersPage({
                 placeholder="VAT/GST number"
               />
               {errors.taxId && (
-                <p className="text-xs text-rose-600">{errors.taxId}</p>
+                <p data-field-error className="text-xs text-rose-600">{errors.taxId}</p>
               )}
             </div>
             <div className="space-y-2 md:col-span-2">
@@ -5106,14 +5178,14 @@ export default function CustomersPage({
                 placeholder="Contact person name"
               />
               {errors.contactPerson && (
-                <p className="text-xs text-rose-600">{errors.contactPerson}</p>
+                <p data-field-error className="text-xs text-rose-600">{errors.contactPerson}</p>
               )}
             </div>
             <div className="md:col-span-2 space-y-3 rounded-lg border border-slate-200 bg-slate-100 p-4">
               <div className="text-sm font-medium text-slate-700">
                 Contact Person NRC <span className="text-rose-600">*</span>
               </div>
-              <div className="grid gap-3 md:grid-cols-4">
+              <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
                 <div className="space-y-2">
                   <SearchableSelect
                     id="contactNrcState"
@@ -5126,7 +5198,7 @@ export default function CustomersPage({
                     placeholder="State"
                   />
                   {errors.contactNrcState && (
-                    <p className="text-xs text-rose-600">{errors.contactNrcState}</p>
+                    <p data-field-error className="text-xs text-rose-600">{errors.contactNrcState}</p>
                   )}
                 </div>
                 <div className="space-y-2">
@@ -5138,7 +5210,7 @@ export default function CustomersPage({
                     placeholder="Township"
                   />
                   {errors.contactNrcTownship && (
-                    <p className="text-xs text-rose-600">{errors.contactNrcTownship}</p>
+                    <p data-field-error className="text-xs text-rose-600">{errors.contactNrcTownship}</p>
                   )}
                 </div>
                 <div className="space-y-2">
@@ -5150,7 +5222,7 @@ export default function CustomersPage({
                     placeholder="Type"
                   />
                   {errors.contactNrcType && (
-                    <p className="text-xs text-rose-600">{errors.contactNrcType}</p>
+                    <p data-field-error className="text-xs text-rose-600">{errors.contactNrcType}</p>
                   )}
                 </div>
                 <div className="space-y-2">
@@ -5165,20 +5237,18 @@ export default function CustomersPage({
                     inputMode="numeric"
                   />
                   {errors.contactNrcNumber && (
-                    <p className="text-xs text-rose-600">{errors.contactNrcNumber}</p>
+                    <p data-field-error className="text-xs text-rose-600">{errors.contactNrcNumber}</p>
                   )}
                 </div>
               </div>
             </div>
           </div>
-        </div>
+        </section>
       )}
 
-      <div className="border-t border-slate-200 px-6 py-6">
-        <h4 className="text-sm font-semibold text-slate-600 mb-4 border-l-4 border-violet-400 pl-3">
-          Contact Information
-        </h4>
-        <div className="grid gap-6 md:grid-cols-2">
+      <section id="customer-contact" className="customer-form-section">
+        <div className="customer-section-heading"><span className="customer-section-number">03</span><div><h2>Contact details</h2><p>How to reach the customer about their service and billing.</p></div></div>
+        <div className="grid gap-5 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="primaryPhone" className="text-sm font-medium text-slate-700">
               Primary Phone Number <span className="text-rose-600">*</span>
@@ -5199,7 +5269,7 @@ export default function CustomersPage({
               />
             </div>
             {errors.primaryPhone && (
-              <p className="text-xs text-rose-600">{errors.primaryPhone}</p>
+              <p data-field-error className="text-xs text-rose-600">{errors.primaryPhone}</p>
             )}
           </div>
           <div className="space-y-2">
@@ -5234,17 +5304,15 @@ export default function CustomersPage({
               placeholder="example@domain.com"
             />
             {errors.contactEmail && (
-              <p className="text-xs text-rose-600">{errors.contactEmail}</p>
+              <p data-field-error className="text-xs text-rose-600">{errors.contactEmail}</p>
             )}
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="border-t border-slate-200 px-6 py-6">
-        <h4 className="text-sm font-semibold text-slate-600 mb-4 border-l-4 border-amber-400 pl-3">
-          Address Information (Installation Address)
-        </h4>
-        <div className="grid gap-6 md:grid-cols-2">
+      <section id="customer-address" className="customer-form-section">
+        <div className="customer-section-heading"><span className="customer-section-number">04</span><div><h2>Addresses</h2><p>Installation location and the optional separate billing address.</p></div></div>
+        <div className="grid gap-5 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="installationRegion" className="text-sm font-medium text-slate-700">
               Region <span className="text-rose-600">*</span>
@@ -5261,7 +5329,7 @@ export default function CustomersPage({
               placeholder="Select region"
             />
             {errors.installationRegion && (
-              <p className="text-xs text-rose-600">{errors.installationRegion}</p>
+              <p data-field-error className="text-xs text-rose-600">{errors.installationRegion}</p>
             )}
           </div>
           <div className="space-y-2">
@@ -5282,7 +5350,7 @@ export default function CustomersPage({
               placeholder="Select district"
             />
             {errors.installationDistrict && (
-              <p className="text-xs text-rose-600">{errors.installationDistrict}</p>
+              <p data-field-error className="text-xs text-rose-600">{errors.installationDistrict}</p>
             )}
           </div>
           <div className="space-y-2">
@@ -5303,7 +5371,7 @@ export default function CustomersPage({
               placeholder="Select township"
             />
             {errors.installationTownship && (
-              <p className="text-xs text-rose-600">{errors.installationTownship}</p>
+              <p data-field-error className="text-xs text-rose-600">{errors.installationTownship}</p>
             )}
           </div>
           <div className="space-y-2">
@@ -5339,7 +5407,7 @@ export default function CustomersPage({
               placeholder="Ward"
             />
             {errors.installationWard && (
-              <p className="text-xs text-rose-600">{errors.installationWard}</p>
+              <p data-field-error className="text-xs text-rose-600">{errors.installationWard}</p>
             )}
           </div>
           <div className="space-y-2">
@@ -5415,7 +5483,7 @@ export default function CustomersPage({
         </div>
 
       {billingSameAsInstallation === 'no' && (
-        <div className="mt-6 grid gap-6 md:grid-cols-2">
+        <div className="mt-6 grid gap-5 md:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="billingRegion" className="text-sm font-medium text-slate-700">
                 Region <span className="text-rose-600">*</span>
@@ -5432,7 +5500,7 @@ export default function CustomersPage({
                 placeholder="Select region"
               />
               {errors.billingRegion && (
-                <p className="text-xs text-rose-600">{errors.billingRegion}</p>
+                <p data-field-error className="text-xs text-rose-600">{errors.billingRegion}</p>
               )}
             </div>
             <div className="space-y-2">
@@ -5453,7 +5521,7 @@ export default function CustomersPage({
                 placeholder="Select district"
               />
               {errors.billingDistrict && (
-                <p className="text-xs text-rose-600">{errors.billingDistrict}</p>
+                <p data-field-error className="text-xs text-rose-600">{errors.billingDistrict}</p>
               )}
             </div>
             <div className="space-y-2">
@@ -5474,7 +5542,7 @@ export default function CustomersPage({
                 placeholder="Select township"
               />
               {errors.billingTownship && (
-                <p className="text-xs text-rose-600">{errors.billingTownship}</p>
+                <p data-field-error className="text-xs text-rose-600">{errors.billingTownship}</p>
               )}
             </div>
             <div className="space-y-2">
@@ -5510,7 +5578,7 @@ export default function CustomersPage({
                 placeholder="Ward"
               />
               {errors.billingWard && (
-                <p className="text-xs text-rose-600">{errors.billingWard}</p>
+                <p data-field-error className="text-xs text-rose-600">{errors.billingWard}</p>
               )}
             </div>
             <div className="space-y-2">
@@ -5563,13 +5631,11 @@ export default function CustomersPage({
             </div>
           </div>
         )}
-      </div>
+      </section>
 
-      <div className="border-t border-slate-200 px-6 py-6">
-        <h4 className="text-sm font-semibold text-slate-600 mb-4 border-l-4 border-teal-400 pl-3">
-          Services & Subscription Details
-        </h4>
-        <div className="grid gap-6 md:grid-cols-2">
+      <section id="customer-service" className="customer-form-section">
+        <div className="customer-section-heading"><span className="customer-section-number">05</span><div><h2>Service & plan</h2><p>Package, service dates and subscription settings.</p></div></div>
+        <div className="grid gap-5 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="serviceId" className="text-sm font-medium text-slate-700">
               Service ID
@@ -5601,7 +5667,7 @@ export default function CustomersPage({
               placeholder="Select service type"
             />
             {errors.serviceType && (
-              <p className="text-xs text-rose-600">{errors.serviceType}</p>
+              <p data-field-error className="text-xs text-rose-600">{errors.serviceType}</p>
             )}
           </div>
           <div className="space-y-2">
@@ -5623,10 +5689,10 @@ export default function CustomersPage({
               disabled={plansLoading}
             />
             {errors.packageName && (
-              <p className="text-xs text-rose-600">{errors.packageName}</p>
+              <p data-field-error className="text-xs text-rose-600">{errors.packageName}</p>
             )}
             {plansError && (
-              <p className="text-xs text-rose-600">{plansError}</p>
+              <p data-field-error className="text-xs text-rose-600">{plansError}</p>
             )}
           </div>
           {isEditingPlanChanged && (
@@ -5658,7 +5724,7 @@ export default function CustomersPage({
               className="bg-slate-50"
             />
             {errors.bandwidthPlan && (
-              <p className="text-xs text-rose-600">{errors.bandwidthPlan}</p>
+              <p data-field-error className="text-xs text-rose-600">{errors.bandwidthPlan}</p>
             )}
             <p className="text-xs text-slate-500">Bandwidth is auto-filled from the selected plan and cannot be edited.</p>
           </div>
@@ -5730,7 +5796,7 @@ export default function CustomersPage({
               </Popover>
             </div>
             {errors.serviceStartDate && (
-              <p className="text-xs text-rose-600">{errors.serviceStartDate}</p>
+              <p data-field-error className="text-xs text-rose-600">{errors.serviceStartDate}</p>
             )}
           </div>
           <div className="space-y-2">
@@ -5801,7 +5867,7 @@ export default function CustomersPage({
               </Popover>
             </div>
             {errors.contractStartDate && (
-              <p className="text-xs text-rose-600">{errors.contractStartDate}</p>
+              <p data-field-error className="text-xs text-rose-600">{errors.contractStartDate}</p>
             )}
           </div>
           <div className="space-y-2">
@@ -5872,7 +5938,7 @@ export default function CustomersPage({
               </Popover>
             </div>
             {errors.contractEndDate && (
-              <p className="text-xs text-rose-600">{errors.contractEndDate}</p>
+              <p data-field-error className="text-xs text-rose-600">{errors.contractEndDate}</p>
             )}
           </div>
           <div className="space-y-2">
@@ -5943,7 +6009,7 @@ export default function CustomersPage({
               </Popover>
             </div>
             {errors.installationDate && (
-              <p className="text-xs text-rose-600">{errors.installationDate}</p>
+              <p data-field-error className="text-xs text-rose-600">{errors.installationDate}</p>
             )}
           </div>
           <div className="space-y-2">
@@ -5980,17 +6046,15 @@ export default function CustomersPage({
               placeholder="Static IP address"
             />
             {errors.staticIpAddress && (
-              <p className="text-xs text-rose-600">{errors.staticIpAddress}</p>
+              <p data-field-error className="text-xs text-rose-600">{errors.staticIpAddress}</p>
             )}
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="border-t border-slate-200 px-6 py-6">
-        <h4 className="text-sm font-semibold text-slate-600 mb-4 border-l-4 border-indigo-400 pl-3">
-          Network and Technical Details
-        </h4>
-        <div className="grid gap-6 md:grid-cols-2">
+      <section id="customer-network" className="customer-form-section">
+        <div className="customer-section-heading"><span className="customer-section-number">06</span><div><h2>Network details</h2><p>Equipment and connection details for the installation.</p></div></div>
+        <div className="grid gap-5 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="routerId" className="text-sm font-medium text-slate-700">
               Router / CPE ID
@@ -6047,13 +6111,11 @@ export default function CustomersPage({
             />
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="border-t border-slate-200 px-6 py-6">
-        <h4 className="text-sm font-semibold text-slate-600 mb-4 border-l-4 border-rose-400 pl-3">
-          Billing Information
-        </h4>
-        <div className="grid gap-6 md:grid-cols-2">
+      <section id="customer-billing" className="customer-form-section">
+        <div className="customer-section-heading"><span className="customer-section-number">07</span><div><h2>Billing & fees</h2><p>Billing rules, charges and any applicable discounts.</p></div></div>
+        <div className="grid gap-5 md:grid-cols-2">
           <div className="space-y-2 md:col-span-2">
             <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
               First invoice mode is selected when you create invoice from the popup.
@@ -6096,9 +6158,9 @@ export default function CustomersPage({
                 </SelectContent>
               </Select>
               {errors.billingRuleId && (
-                <p className="text-xs text-rose-600">{errors.billingRuleId}</p>
+                <p data-field-error className="text-xs text-rose-600">{errors.billingRuleId}</p>
               )}
-              {billingRulesError && <p className="text-xs text-rose-600">{billingRulesError}</p>}
+              {billingRulesError && <p data-field-error className="text-xs text-rose-600">{billingRulesError}</p>}
             </div>
           )}
           {!editingCustomer &&
@@ -6183,7 +6245,7 @@ export default function CustomersPage({
               inputMode="numeric"
             />
             {errors.installationFee && (
-              <p className="text-xs text-rose-600">{errors.installationFee}</p>
+              <p data-field-error className="text-xs text-rose-600">{errors.installationFee}</p>
             )}
           </div>
           <>
@@ -6220,7 +6282,7 @@ export default function CustomersPage({
                   inputMode="numeric"
                 />
                 {errors.collectionFee && (
-                  <p className="text-xs text-rose-600">{errors.collectionFee}</p>
+                  <p data-field-error className="text-xs text-rose-600">{errors.collectionFee}</p>
                 )}
               </div>
             )}
@@ -6261,7 +6323,7 @@ export default function CustomersPage({
                   inputMode="numeric"
                 />
                 {errors.discountAmount && (
-                  <p className="text-xs text-rose-600">{errors.discountAmount}</p>
+                  <p data-field-error className="text-xs text-rose-600">{errors.discountAmount}</p>
                 )}
               </div>
               <div className="space-y-2">
@@ -6279,18 +6341,16 @@ export default function CustomersPage({
                   inputMode="numeric"
                 />
                 {errors.discountPeriod && (
-                  <p className="text-xs text-rose-600">{errors.discountPeriod}</p>
+                  <p data-field-error className="text-xs text-rose-600">{errors.discountPeriod}</p>
                 )}
               </div>
             </>
           )}
         </div>
-      </div>
+      </section>
 
-      <div className="border-t border-slate-200 px-6 py-6">
-        <h4 className="text-sm font-semibold text-slate-600 mb-4 border-l-4 border-indigo-400 pl-3">
-          Assign Collector
-        </h4>
+      <section id="customer-collection" className="customer-form-section">
+        <div className="customer-section-heading"><span className="customer-section-number">08</span><div><h2>Collection</h2><p>Assign a collector when collection service is enabled.</p></div></div>
         <div className="space-y-3 max-w-md">
           <Label htmlFor="assignedCollector" className="text-sm font-medium text-slate-700">
             Collector
@@ -6318,31 +6378,34 @@ export default function CustomersPage({
             </p>
           )}
           {collectorsError && (
-            <p className="text-xs text-rose-600">{collectorsError}</p>
+            <p data-field-error className="text-xs text-rose-600">{collectorsError}</p>
           )}
           {!collectorsLoading && hasFetchedCollectors && collectorSelectOptions.length === 0 && (
             <p className="text-xs text-slate-500">No collectors available.</p>
           )}
         </div>
-      </div>
+      </section>
     </div>
   );
 
   return (
     <Layout>
       <div className="space-y-6">
+        {discardDialog}
         {inlineForm ? (
           <div className="space-y-6">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">New Customer</h1>
-              <p className="text-gray-600">Create a new customer record</p>
+              <p className="page-eyebrow">Customer accounts</p><h1>Create customer</h1>
+              <p className="text-gray-600">Set up account details, service and billing.</p>
             </div>
-            <Card>
-              <CardHeader>
-                <CardTitle>Customer Details</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 md:flex-row md:items-center md:justify-between">
+            <CustomerFormWorkspace errorCount={Object.values(errors).filter(Boolean).length} summary={[
+  { label: 'Customer type', value: customerType === 'business' ? 'Business' : 'Individual' },
+  { label: 'Status', value: userStatus },
+  { label: 'Package', value: packageName || selectedPlanCode },
+  { label: 'Monthly fee', value: toNumber(monthlyFee).toLocaleString() + ' MMK' },
+  { label: 'Collection', value: collectionService === 'yes' ? 'Enabled' : 'Disabled' },
+]}
+              notice={<div className="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 md:flex-row md:items-center md:justify-between">
                   <span>
                     {draftRestoredAt
                       ? `Draft restored (${formatDisplayDate(draftRestoredAt)}).`
@@ -6363,57 +6426,31 @@ export default function CustomersPage({
                   >
                     Clear Draft
                   </Button>
-                </div>
-                {formContent}
-                <div className="flex justify-end space-x-2">
-                  <Button variant="outline" onClick={saveDraftAndReturnToList}>
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={handleAddCustomer}
-                    disabled={isAddingCustomer || !customerCreateBillingRuleId.trim()}
-                  >
-                    {isAddingCustomer ? 'Adding...' : 'Add Customer'}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+                </div>}
+              actions={<><Button variant="outline" disabled={isAddingCustomer} onClick={saveDraftAndReturnToList}>Save draft & close</Button><Button onClick={handleAddCustomer} disabled={isAddingCustomer || !customerCreateBillingRuleId.trim()}>{isAddingCustomer ? 'Creating…' : 'Create customer'}</Button></>}
+            >{formContent}</CustomerFormWorkspace>
           </div>
         ) : (
           <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div>
               <p className="page-eyebrow">Customer accounts</p>
-              <h1>Customers</h1>
-              <p>Manage your customer database</p>
+              <h1>{editingCustomer ? 'Edit customer' : 'Customers'}</h1>
+              <p>{editingCustomer ? 'Review and update this customer’s account details.' : 'Manage your customer database'}</p>
             </div>
-            <Button onClick={() => router.push('/admin/customers/new-customer')} className="self-start"><Plus className="h-4 w-4" />Add customer</Button>
+            <Button onClick={() => confirmLeave(() => router.push('/admin/customers/new-customer'))} className="self-start"><Plus className="h-4 w-4" />Add customer</Button>
           </div>
         )}
 
         {!inlineForm && editingCustomer && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Update Customer</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {formContent}
-              <div className="flex justify-end space-x-2">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setEditingCustomer(null);
-                    setEditingCustomerCodePrefix('');
-                    setEditingCustomerCodeNumber('');
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button onClick={handleUpdateCustomer} disabled={isUpdatingCustomer}>
-                  {isUpdatingCustomer ? 'Updating...' : 'Update Customer'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          <CustomerFormWorkspace errorCount={Object.values(errors).filter(Boolean).length} editing dirty={editIsDirty} summary={[
+  { label: 'Customer type', value: customerType === 'business' ? 'Business' : 'Individual' },
+  { label: 'Status', value: userStatus },
+  { label: 'Package', value: packageName || selectedPlanCode },
+  { label: 'Monthly fee', value: toNumber(monthlyFee).toLocaleString() + ' MMK' },
+  { label: 'Collection', value: collectionService === 'yes' ? 'Enabled' : 'Disabled' },
+]}
+            actions={<><Button variant="outline" disabled={isUpdatingCustomer} onClick={() => confirmLeave(() => { setEditingCustomer(null); setEditingCustomerCodePrefix(''); setEditingCustomerCodeNumber(''); })}>Cancel</Button><Button onClick={handleUpdateCustomer} disabled={isUpdatingCustomer}>{isUpdatingCustomer ? 'Saving…' : 'Save changes'}</Button></>}
+          >{formContent}</CustomerFormWorkspace>
         )}
 
         {!inlineForm && !editingCustomer && (

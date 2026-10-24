@@ -1,5 +1,8 @@
 'use client';
 
+import { ReceiptHeader } from '@/components/billing/receipt-header';
+import { RECEIPT_PRINT_STYLES, renderReceiptPrintWindow } from '@/lib/receipt-print-style';
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -1002,6 +1005,13 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
           ? target.id
           : selectedReceipt?.id;
     if (!invoiceId) return;
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast({ title: 'Popup blocked', description: 'Please allow popups to open the receipt print preview.', variant: 'destructive' });
+      return;
+    }
+    printWindow.document.title = 'Preparing receipt';
+    if (printWindow.document.body) printWindow.document.body.textContent = 'Preparing receipt…';
     setIsDownloadingReceipt(true);
     try {
       const detail = await fetchReceiptDetail(invoiceId);
@@ -1115,78 +1125,29 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
 
       const html = `
         <!doctype html>
-        <html>
+        <html lang="en">
           <head>
-            <meta charset="utf-8" />
+            <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
             <title>${escapeHtml(receiptNo)} - Receipt</title>
-            <style>
-              * { box-sizing: border-box; }
-              body { font-family: Arial, sans-serif; margin: 0; padding: 24px; color: #172033; background: #fff; }
-              .page { max-width: 900px; min-height: 1100px; margin: 0 auto; padding: 28px 0; background: #fff; }
-              .masthead { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; padding: 0 0 26px; border-bottom: 0; }
-              .company-header { display: flex; flex-direction: row-reverse; gap: 16px; align-items: flex-start; min-width: 0; }
-              .company-logo { width: 92px; height: 92px; flex: 0 0 92px; object-fit: contain; border-radius: 50%; background: #f8fafc; padding: 8px; }
-              .company-meta { color: #334155; font-size: 13px; line-height: 1.65; }
-              .company-name { color: #172554; font-size: 16px; font-weight: 700; }
-              .receipt-heading { text-align: left; }
-              .eyebrow { color: #172554; font-size: 42px; font-weight: 800; letter-spacing: -1px; text-transform: uppercase; }
-              .receipt-no { margin-top: 10px; color: #334155; font-size: 13px; font-weight: 700; }
-              .issued { margin-top: 4px; color: #475569; font-size: 12px; }
-              .amount-band { display: none; }
-              .amount-label { color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; }
-              .amount { color: #172554; font-size: 27px; font-weight: 700; }
-              .status { display: inline-block; margin-top: 5px; color: #047857; font-size: 11px; font-weight: 700; }
-              .status.cancelled { color: #be123c; }
-              .content { padding: 4px 0 0; }
-              .section { margin-top: 24px; font-size: 13px; line-height: 1.6; }
-              .title { margin-bottom: 10px; color: #172554; font-size: 12px; font-weight: 800; text-transform: uppercase; }
-              .grid { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 24px; }
-              .info-card { padding: 0; border: 0; border-radius: 0; background: #fff; }
-              .info-card div + div { margin-top: 4px; }
-              table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
-              th { padding: 11px 10px; color: #172554; background: #fff; border-top: 2px solid #d9685b; border-bottom: 2px solid #d9685b; font-size: 11px; text-align: left; text-transform: uppercase; }
-              td { padding: 11px 10px; border-bottom: 0; }
-              .right { text-align: right; }
-              .bold { font-weight: 700; }
-              .total { color: #172554; background: #fff; font-size: 16px; font-weight: 700; }
-              .calculation { padding: 17px; border: 1px solid #bfdbfe; border-radius: 12px; background: #eff6ff; }
-              .totals { margin-top: 12px; color: #475569; text-align: right; line-height: 1.9; }
-              .due { color: #1d4ed8; font-size: 15px; font-weight: 700; }
-              .payment-card { padding: 14px 0; border: 0; border-top: 1px solid #dbe3ee; border-radius: 0; background: #fff; }
-              .footer { display: grid; grid-template-columns: 1fr 1.2fr; align-items: end; gap: 18px; margin-top: 80px; padding-top: 0; border-top: 0; color: #475569; text-align: left; font-size: 12px; }
-              .thank-you { color: #172554; font-family: Georgia, serif; font-size: 38px; font-style: italic; }
-              .terms { padding-left: 14px; border-left: 2px solid #172554; }
-              .terms strong { display: block; margin-bottom: 14px; color: #d9685b; font-size: 12px; text-transform: uppercase; }
-              @media (max-width: 640px) { body { padding: 12px; } .masthead { align-items: flex-start; flex-direction: column-reverse; } .receipt-heading { text-align: left; } .content { padding: 0; } .grid { grid-template-columns: 1fr; } .company-header { flex-direction: row; } .footer { grid-template-columns: 1fr; margin-top: 36px; } .terms { padding-left: 0; border-left: 0; } }
-              @media print { body { padding: 0; background: #fff; } .page { min-height: 0; margin: 0; } }
-            </style>
+            <style>${RECEIPT_PRINT_STYLES}</style>
           </head>
           <body>
             <div class="page">
               <div class="masthead">
-                <div class="receipt-heading">
-                  <div class="eyebrow">Receipt</div>
-                  <div class="company-meta">
-                    <div class="company-name">${escapeHtml(receiptCompanyName)}</div>
-                    <div>${escapeHtml(receiptAddress)}</div>
-                    <div>${escapeHtml(receiptPhone)}${receiptEmail ? ` · ${escapeHtml(receiptEmail)}` : ''}</div>
-                  </div>
-                </div>
-                <div class="company-header">
-                  ${receiptLogoHtml}
-                </div>
+                <div class="company-header">${receiptLogoHtml}<div class="company-meta"><div class="company-name">${escapeHtml(receiptCompanyName)}</div><div>${escapeHtml(receiptAddress)}</div><div>${escapeHtml(receiptPhone)}</div>${receiptEmail ? `<div>${escapeHtml(receiptEmail)}</div>` : ''}</div></div>
+                <div class="receipt-heading"><div class="eyebrow">Receipt</div><div class="receipt-no">${escapeHtml(receiptNo)}</div><div class="issued">Issued ${escapeHtml(formatDisplayDate(detail.paidAt || detail.invoiceDate))}</div><span class="status ${getReceiptStatusLabel(detail) === 'cancelled receipt' ? 'cancelled' : ''}">${escapeHtml(getReceiptStatusLabel(detail))}</span></div>
               </div>
+              <div class="amount-band"><span class="amount-label">${getReceiptStatusLabel(detail) === 'issued' ? 'Amount received' : 'Receipt amount'}</span><span class="amount">${escapeHtml(formatMoney(detail.totalAmount, currency))}</span></div>
               <div class="content">
-              <div class="section grid">
+              <div class="section grid receipt-grid">
                 <div class="info-card">
-                  <div class="title">Bill To</div>
+                  <div class="title">Received from</div>
                   <div class="bold">${escapeHtml(customerName)}</div>
                   <div>Customer ID: ${escapeHtml(customerCode)}</div>
                   <div>Phone: ${escapeHtml(customerPhone)}</div>
                 </div>
                 <div class="info-card">
                   <div class="title">Service Address</div>
-                  <div class="bold">${escapeHtml(customerName)}</div>
                   <div>${escapeHtml(customerAddress)}</div>
                 </div>
                 <div class="info-card">
@@ -1196,7 +1157,6 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                   <div>Invoice: <span class="bold">${escapeHtml(invoiceNo)}</span></div>
                   <div>Invoice date: ${escapeHtml(formatDisplayDate(detail.invoiceDate))}</div>
                   <div>Due date: ${escapeHtml(formatDisplayDate(detail.dueDate))}</div>
-                  <div class="status ${detail.status === 'cancelled' ? 'cancelled' : ''}">${escapeHtml(formatStatus(detail.status))}</div>
                 </div>
               </div>
 
@@ -1217,7 +1177,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                   <tbody>
                     ${rows.join('')}
                     <tr>
-                      <td colspan="4" class="right total">Total Paid</td>
+                      <td colspan="4" class="right total">${getReceiptStatusLabel(detail) === 'issued' ? 'Total paid' : 'Receipt total'}</td>
                       <td class="right total">${escapeHtml(formatMoney(detail.totalAmount, currency))}</td>
                     </tr>
                   </tbody>
@@ -1225,13 +1185,13 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
               </div>
 
               <div class="section payment-card">
-                <div class="title">Payment Information</div>
+                <div class="title">Payment Information</div><div class="payment-grid">
                 <div>Payment Method: ${escapeHtml(resolvedPaymentMethod)}</div>
                 <div>Payment Account: ${escapeHtml(resolvedPaymentAccount)}</div>
-                <div>Payment Status: ${escapeHtml(formatStatus(detail.status))}</div>
+                <div>Payment Status: ${escapeHtml(getReceiptStatusLabel(detail))}</div>
                 <div>Collection Status: ${escapeHtml(formatCollectionStatus(detail.collectionStatus))}</div>
                 <div>Payment Date: ${escapeHtml(formatDisplayDate(detail.paidAt))}</div>
-                <div>Receipt No: ${escapeHtml(receiptNo)}</div>
+                <div>Receipt No: ${escapeHtml(receiptNo)}</div></div>
               </div>
               <div class="footer"><div class="thank-you">Thank you</div><div class="terms"><strong>Terms &amp; Conditions</strong><div>Payment method: ${escapeHtml(resolvedPaymentMethod)}${resolvedPaymentAccount !== '—' ? ` · ${escapeHtml(resolvedPaymentAccount)}` : ''}</div><div>Collection status: ${escapeHtml(formatCollectionStatus(detail.collectionStatus))}</div>${receiptFooterText ? `<div>${escapeHtml(receiptFooterText)}</div>` : ''}</div></div>
               </div>
@@ -1240,23 +1200,9 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
         </html>
       `;
 
-      const printWindow = window.open('', '_blank');
-      if (!printWindow) {
-        toast({
-          title: 'Popup blocked',
-          description: 'Please allow popups to export receipt as PDF.',
-          variant: 'destructive',
-        });
-        return;
-      }
-      printWindow.document.open();
-      printWindow.document.write(html);
-      printWindow.document.close();
-      printWindow.focus();
-      setTimeout(() => {
-        printWindow.print();
-      }, 250);
+      await renderReceiptPrintWindow(printWindow, html);
     } catch (error) {
+      if (!printWindow.closed) printWindow.close();
       toast({
         title: 'Export failed',
         description: error instanceof Error ? error.message : 'Failed to export receipt.',
@@ -1280,9 +1226,9 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
       <div className="space-y-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900">Receipt Management</h1>
+            <p className="page-eyebrow">Billing workspace</p><h1>{mode === 'create' ? 'Create receipt' : 'Receipts'}</h1>
             <p className="text-slate-600">
-              Generate and track receipts. For unpaid invoices, confirm payment here and create receipt in one step.
+              Review payments and their receipts. Confirm payment before issuing a receipt.
             </p>
           </div>
           <Button variant="outline" onClick={() => void refreshAll()} disabled={isLoadingData}>
@@ -1906,42 +1852,31 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
 
             {!isLoadingReceiptDetail && selectedReceipt && (
               <div className="min-h-0 flex-1 overflow-y-auto pb-8">
-              <div className="mx-auto w-full max-w-5xl overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-900 shadow-lg shadow-slate-200/60">
-                <div className="flex justify-end border-b border-slate-100 bg-slate-50 px-6 py-3">
+              <div className="receipt-document">
+                <div className="receipt-toolbar">
                   <Button variant="outline" size="sm" onClick={() => void exportReceiptPdf()} disabled={isDownloadingReceipt}>
                     <Download className="mr-2 h-4 w-4" />
-                    {isDownloadingReceipt ? 'Exporting...' : 'Export as PDF'}
+                    {isDownloadingReceipt ? 'Exporting...' : 'Print / save PDF'}
                   </Button>
                 </div>
 
-                <div className="flex items-start justify-between gap-6 px-6 pb-2 pt-6 sm:px-9 sm:pt-7">
-                  <div>
-                    <h2 className="text-4xl font-extrabold uppercase tracking-tight text-indigo-950 sm:text-5xl">Receipt</h2>
-                    <div className="mt-4 space-y-1 text-sm text-slate-600">
-                      <p className="font-bold text-slate-900">{branding.receiptCompanyName || branding.systemName}</p>
-                      {branding.receiptAddress && <p>{branding.receiptAddress}</p>}
-                      {branding.receiptPhone && <p>{branding.receiptPhone}</p>}
-                      {branding.receiptEmail && <p>{branding.receiptEmail}</p>}
-                    </div>
-                  </div>
-                  {branding.logoDataUrl && <img src={branding.logoDataUrl} alt={`${branding.receiptCompanyName || branding.systemName} logo`} className="h-20 w-20 rounded-full border border-slate-200 bg-white p-2 object-contain sm:h-24 sm:w-24" />}
-                </div>
+                <ReceiptHeader number={selectedReceipt.receiptNo || '—'} date={formatDisplayDate(selectedReceipt.paidAt || selectedReceipt.invoiceDate)} company={branding.receiptCompanyName || branding.systemName} address={branding.receiptAddress} phone={branding.receiptPhone} email={branding.receiptEmail} logo={branding.logoDataUrl} status={getReceiptStatusLabel(selectedReceipt)} amount={formatMoney(selectedReceipt.totalAmount, selectedReceipt.currency || 'MMK')} amountLabel={getReceiptStatusLabel(selectedReceipt) === 'issued' ? 'Amount received' : 'Receipt amount'} />
 
-                <div className="space-y-6 px-6 pb-7 pt-3 sm:px-9 sm:pt-3">
+                <div className="receipt-body">
                 <div className="grid gap-6 border-b border-slate-200 pb-5 md:grid-cols-3">
                   <div>
-                    <p className="mb-2 text-sm font-extrabold uppercase text-indigo-950">Bill To</p>
+                    <p className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Received from</p>
                     <p className="text-lg font-semibold text-slate-900">{getCustomerName(selectedReceipt)}</p>
                     <p className="mt-1 font-mono text-sm text-slate-600">{selectedReceipt.customer?.customerCode || '—'}</p>
                     <p className="text-sm text-slate-600">{selectedReceipt.customer?.primaryPhone || '—'}</p>
                   </div>
                   <div>
-                    <p className="mb-2 text-sm font-extrabold uppercase text-indigo-950">Service Address</p>
+                    <p className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Service Address</p>
                     <p className="text-sm text-slate-700">{selectedReceipt.customer?.installationAddress || '—'}</p>
-                    {selectedReceipt.invoiceType === 'plan_change_adjustment' && <p className="mt-2 text-xs font-semibold text-indigo-700">Plan Change Adjustment</p>}
+                    {selectedReceipt.invoiceType === 'plan_change_adjustment' && <p className="mt-2 text-xs font-semibold text-emerald-800">Plan Change Adjustment</p>}
                   </div>
                   <div>
-                    <p className="mb-2 text-sm font-extrabold uppercase text-indigo-950">Receipt Details</p>
+                    <p className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Receipt Details</p>
                     <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
                       <dt className="text-slate-500">Receipt #</dt><dd className="text-right font-medium text-slate-800">{selectedReceipt.receiptNo || '—'}</dd>
                       <dt className="text-slate-500">Date</dt><dd className="text-right font-medium text-slate-800">{formatDisplayDate(selectedReceipt.paidAt || selectedReceipt.invoiceDate)}</dd>
@@ -2038,8 +1973,8 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                         ))}
 
                         <TableRow>
-                          <TableCell colSpan={4} className="text-right text-base font-bold">Total Amount</TableCell>
-                          <TableCell className="text-right text-base font-bold">
+                          <TableCell colSpan={4} className="receipt-total text-right">Total Amount</TableCell>
+                          <TableCell className="receipt-total text-right">
                             {formatMoney(selectedReceipt.totalAmount, selectedReceipt.currency || 'MMK')}
                           </TableCell>
                         </TableRow>
@@ -2053,7 +1988,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                   const currency = selectedReceipt.currency || 'MMK';
                   return (
                     <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4">
-                      <h3 className="font-semibold text-blue-950">Plan Change Calculation</h3>
+                      <h3 className="font-semibold text-emerald-950">Plan Change Calculation</h3>
                       <p className="mt-1 text-xs text-emerald-900">The charge is prorated by active days under each plan.</p>
                       <div className="mt-3 overflow-x-auto">
                         <Table>
@@ -2064,7 +1999,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                       <div className="ml-auto mt-3 max-w-sm space-y-1 text-right text-sm">
                         <p>Previously billed: <span className="font-medium">{formatMoney(breakdown.previouslyBilledAmount, currency)}</span></p>
                         <p>Recalculated period total: <span className="font-medium">{formatMoney(breakdown.recalculatedPeriodTotal, currency)}</span></p>
-                        <p className="border-t border-emerald-200 pt-2 font-semibold text-blue-950">Remaining amount: {formatMoney(breakdown.balanceDue, currency)}</p>
+                        <p className="border-t border-emerald-200 pt-2 font-semibold text-emerald-950">Remaining amount: {formatMoney(breakdown.balanceDue, currency)}</p>
                       </div>
                     </div>
                   );
@@ -2103,10 +2038,10 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                   </div>
                 </div>
 
-                <div className="mt-16 grid gap-5 border-t border-slate-200 pt-5 sm:grid-cols-2 sm:items-end">
-                  <p className="font-serif text-4xl italic text-indigo-950">Thank you</p>
-                  <div className="border-l-2 border-indigo-900 pl-4 text-sm text-slate-600">
-                    <p className="mb-2 font-bold uppercase tracking-wide text-rose-700">Terms &amp; Conditions</p>
+                <div className="mt-8 grid gap-5 border-t border-slate-200 pt-5 sm:grid-cols-2 sm:items-end">
+                  <p className="text-lg font-semibold text-emerald-900">Thank you</p>
+                  <div className="text-xs leading-relaxed text-slate-500">
+                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Terms &amp; Conditions</p>
                     {branding.footerText ? <p>{branding.footerText}</p> : <p>Receipt issued by {branding.receiptCompanyName || branding.systemName}.</p>}
                   </div>
                 </div>

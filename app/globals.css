@@ -180,3 +180,69 @@
     background: white;
   }
 }
+
+@layer components {
+  .customer-form-section {
+    @apply scroll-mt-6 rounded-xl border bg-card p-5 shadow-[0_2px_6px_-3px_rgba(24,34,31,0.08)] sm:p-6;
+  }
+  .customer-section-heading {
+    @apply mb-5 flex items-start gap-3 border-b border-border/60 pb-5;
+  }
+  .customer-section-number {
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-[11px] font-semibold text-emerald-800;
+  }
+  .customer-section-heading h2 {
+    @apply text-sm font-semibold text-foreground;
+  }
+  .customer-section-heading p {
+    @apply mt-1 text-xs leading-relaxed text-muted-foreground;
+  }
+  .customer-form-section label {
+    @apply text-[13px] leading-relaxed;
+  }
+  .customer-form-section input:not([type='checkbox']):not([type='radio']),
+  .customer-form-section button[role='combobox'] {
+    min-height: 44px;
+  }
+  .customer-form-section .grid > div {
+    min-width: 0;
+  }
+  .receipt-document {
+    @apply mx-auto w-full max-w-5xl overflow-hidden rounded-xl border border-border bg-white text-slate-900 shadow-[0_8px_36px_-20px_rgba(24,34,31,0.2)];
+  }
+  .receipt-document .receipt-header {
+    @apply border-b border-slate-100 px-5 py-6 sm:px-9 sm:py-8;
+  }
+  .receipt-document .receipt-body > .mt-8:first-child {
+    margin-top: 0;
+  }
+  .receipt-document .receipt-body {
+    @apply space-y-6 px-5 py-6 sm:px-9 sm:py-7;
+  }
+  .receipt-document table {
+    @apply text-xs tabular-nums;
+  }
+  .receipt-document th {
+    @apply h-10 border-b border-slate-200 bg-slate-50 text-[11px] font-medium text-slate-500;
+  }
+  .receipt-document td {
+    @apply border-slate-100 py-3;
+  }
+  .receipt-document tr:has(.receipt-total),
+  .receipt-document tr.receipt-total {
+    @apply border-t border-emerald-100 bg-emerald-50/50 text-emerald-900;
+  }
+  .receipt-document .receipt-total {
+    @apply py-4 text-sm font-semibold;
+  }
+  .receipt-toolbar {
+    @apply flex flex-wrap items-center justify-end gap-2 border-b border-border/60 bg-slate-50/60 px-5 py-3;
+  }
+}
+
+@media (max-width: 1023px) {
+  .customer-form-section input,
+  .customer-form-section textarea {
+    font-size: 16px;
+  }
+}
