@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Building2 } from 'lucide-react';
+import { Wifi } from 'lucide-react';
 
 interface ReceiptHeaderProps {
   number: string;
@@ -45,12 +45,12 @@ export function ReceiptHeader({
               className="h-12 w-12 shrink-0 rounded-lg object-contain"
             />
           ) : (
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-800">
-              <Building2 className="h-5 w-5" aria-hidden="true" />
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-400/15 text-emerald-300">
+              <Wifi className="h-5 w-5" aria-hidden="true" />
             </div>
           )}
-          <div className="min-w-0 space-y-1 text-xs leading-relaxed text-slate-500">
-            <p className="break-words text-base font-semibold text-slate-900">
+          <div className="min-w-0 space-y-1 text-xs leading-relaxed text-slate-400">
+            <p className="break-words text-base font-semibold text-white">
               {company}
             </p>
             {address && (
@@ -63,13 +63,14 @@ export function ReceiptHeader({
           </div>
         </div>
         <div className="min-w-0 sm:text-right">
-          <h2 className="text-3xl font-semibold tracking-tight text-slate-900">
-            Receipt
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300">Internet services</p>
+          <h2 className="text-3xl font-semibold tracking-tight text-white">
+            Payment receipt
           </h2>
-          <p className="mt-2 break-all font-mono text-xs text-slate-500">
+          <p className="mt-2 break-all font-mono text-xs text-slate-400">
             {number}
           </p>
-          <p className="mt-1 text-xs text-slate-500">Issued {date}</p>
+          <p className="mt-1 text-xs text-slate-400">Issued {date}</p>
           {status && (
             <span
               className={`mt-3 inline-flex rounded-full px-2.5 py-1 text-[11px] font-medium capitalize ${tone}`}
@@ -80,11 +81,11 @@ export function ReceiptHeader({
         </div>
       </div>
       {amount !== undefined && (
-        <div className="mt-7 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-100 bg-emerald-50/50 px-5 py-4">
-          <span className="text-xs font-medium text-emerald-900">
+        <div className="mt-7 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-5 py-4">
+          <span className="text-xs font-medium text-slate-300">
             {amountLabel}
           </span>
-          <span className="break-words text-2xl font-semibold tracking-tight text-emerald-950 tabular-nums">
+          <span className="break-words text-2xl font-semibold tracking-tight text-white tabular-nums">
             {amount}
           </span>
         </div>

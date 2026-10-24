@@ -211,7 +211,8 @@
     @apply mx-auto w-full max-w-5xl overflow-hidden rounded-xl border border-border bg-white text-slate-900 shadow-[0_8px_36px_-20px_rgba(24,34,31,0.2)];
   }
   .receipt-document .receipt-header {
-    @apply border-b border-slate-100 px-5 py-6 sm:px-9 sm:py-8;
+    @apply border-b border-emerald-400/30 bg-slate-900 px-5 py-6 sm:px-9 sm:py-8;
+    background-image: radial-gradient(ellipse at top right, rgba(16,185,129,.18), transparent 65%);
   }
   .receipt-document .receipt-body > .mt-8:first-child {
     margin-top: 0;

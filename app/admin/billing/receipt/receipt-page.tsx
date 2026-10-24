@@ -1135,7 +1135,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
             <div class="page">
               <div class="masthead">
                 <div class="company-header">${receiptLogoHtml}<div class="company-meta"><div class="company-name">${escapeHtml(receiptCompanyName)}</div><div>${escapeHtml(receiptAddress)}</div><div>${escapeHtml(receiptPhone)}</div>${receiptEmail ? `<div>${escapeHtml(receiptEmail)}</div>` : ''}</div></div>
-                <div class="receipt-heading"><div class="eyebrow">Receipt</div><div class="receipt-no">${escapeHtml(receiptNo)}</div><div class="issued">Issued ${escapeHtml(formatDisplayDate(detail.paidAt || detail.invoiceDate))}</div><span class="status ${getReceiptStatusLabel(detail) === 'cancelled receipt' ? 'cancelled' : ''}">${escapeHtml(getReceiptStatusLabel(detail))}</span></div>
+                <div class="receipt-heading"><div class="service-label">Internet services</div><div class="eyebrow">Payment receipt</div><div class="receipt-no">${escapeHtml(receiptNo)}</div><div class="issued">Issued ${escapeHtml(formatDisplayDate(detail.paidAt || detail.invoiceDate))}</div><span class="status ${getReceiptStatusLabel(detail) === 'cancelled receipt' ? 'cancelled' : ''}">${escapeHtml(getReceiptStatusLabel(detail))}</span></div>
               </div>
               <div class="amount-band"><span class="amount-label">${getReceiptStatusLabel(detail) === 'issued' ? 'Amount received' : 'Receipt amount'}</span><span class="amount">${escapeHtml(formatMoney(detail.totalAmount, currency))}</span></div>
               <div class="content">
@@ -1163,7 +1163,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
               ${planChangeBreakdownHtml}
 
               <div class="section">
-                <div class="title">Charges Details</div>
+                <div class="title">Internet service charges</div>
                 <table>
                   <thead>
                     <tr>
@@ -1193,7 +1193,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                 <div>Payment Date: ${escapeHtml(formatDisplayDate(detail.paidAt))}</div>
                 <div>Receipt No: ${escapeHtml(receiptNo)}</div></div>
               </div>
-              <div class="footer"><div class="thank-you">Thank you</div><div class="terms"><strong>Terms &amp; Conditions</strong><div>Payment method: ${escapeHtml(resolvedPaymentMethod)}${resolvedPaymentAccount !== '—' ? ` · ${escapeHtml(resolvedPaymentAccount)}` : ''}</div><div>Collection status: ${escapeHtml(formatCollectionStatus(detail.collectionStatus))}</div>${receiptFooterText ? `<div>${escapeHtml(receiptFooterText)}</div>` : ''}</div></div>
+              <div class="footer"><div class="thank-you">Thank you for staying connected.<div class="receipt-signoff">Your internet service payment record</div></div><div class="terms"><strong>Terms &amp; Conditions</strong><div>Payment method: ${escapeHtml(resolvedPaymentMethod)}${resolvedPaymentAccount !== '—' ? ` · ${escapeHtml(resolvedPaymentAccount)}` : ''}</div><div>Collection status: ${escapeHtml(formatCollectionStatus(detail.collectionStatus))}</div>${receiptFooterText ? `<div>${escapeHtml(receiptFooterText)}</div>` : ''}</div></div>
               </div>
             </div>
           </body>
@@ -2039,7 +2039,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                 </div>
 
                 <div className="mt-8 grid gap-5 border-t border-slate-200 pt-5 sm:grid-cols-2 sm:items-end">
-                  <p className="text-lg font-semibold text-emerald-900">Thank you</p>
+                  <p className="text-lg font-semibold text-emerald-900">Thank you for staying connected.</p>
                   <div className="text-xs leading-relaxed text-slate-500">
                     <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Terms &amp; Conditions</p>
                     {branding.footerText ? <p>{branding.footerText}</p> : <p>Receipt issued by {branding.receiptCompanyName || branding.systemName}.</p>}

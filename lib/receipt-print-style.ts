@@ -20,7 +20,21 @@ export const RECEIPT_PRINT_STYLES = `
   .amount-band { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 24px; padding: 16px 18px; border: 1px solid #dceadf; border-radius: 10px; background: #f3f8f4; }
   .amount-label { font-size: 11px; font-weight: 700; color: #315640; }
   .amount { font-size: 24px; line-height: 1.3; font-weight: 700; color: #1c5036; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-  .content { padding: 0; }
+  /* The masthead and payment strip form one distinctive ISP receipt identity. */
+  .page { border: 1px solid #dfe6e0; border-radius: 4px; padding: 0; overflow: hidden; }
+  .masthead { padding: 24px 28px 22px; background: #142831; border-bottom: 0; color: #fff; }
+  .company-header { flex: 1; }
+  .company-meta { color: #c0cdd0; }
+  .company-name { color: #fff; font-size: 17px; }
+  .receipt-heading { min-width: 225px; flex: 0 0 225px; }
+  .service-label { color: #7cddbc; font-size: 9px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+  .eyebrow { color: #fff; margin-top: 7px; font-size: 24px; letter-spacing: -.6px; }
+  .receipt-no, .issued { color: #c0cdd0; }
+  .status { color: #a2efd2; border-color: #638778; }
+  .status.cancelled { color: #ffd1cd; border-color: #d49a94; }
+  .amount-band { margin: 0; border: 0; border-bottom: 1px solid #d5e7de; border-radius: 0; padding: 16px 28px; background: #edf7f2; }
+  .amount { flex: 0 0 auto; white-space: nowrap; font-size: 26px; letter-spacing: -.7px; }
+  .content { padding: 0 28px 20px; }
   .section { margin-top: 24px; line-height: 1.7; }
   .title { margin-bottom: 10px; color: #65736a; font-size: 10px; letter-spacing: .8px; font-weight: 700; text-transform: uppercase; break-after: avoid; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
@@ -43,10 +57,11 @@ export const RECEIPT_PRINT_STYLES = `
   .payment-card { padding: 16px; border: 1px solid #e1e7e1; border-radius: 10px; break-inside: avoid; }
   .payment-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 20px; }
   .footer { display: grid; grid-template-columns: 1fr 2fr; gap: 20px; align-items: start; margin-top: 30px; padding-top: 16px; border-top: 1px solid #e1e7e1; color: #65736a; font-size: 10px; break-inside: avoid; }
-  .thank-you { margin-bottom: 8px; color: #315640; font-size: 15px; font-weight: 600; }
+  .thank-you { margin-bottom: 8px; color: #315640; font-size: 14px; font-weight: 600; }
+  .receipt-signoff { margin-top: 6px; color: #65736a; font-size: 10px; font-weight: 400; }
   .terms strong { display: block; margin-bottom: 4px; color: #526157; font-size: 10px; }
-  @media screen and (max-width: 640px) { body { padding: 12px; } .page { padding: 20px; } .masthead { flex-direction: column; } .receipt-heading { text-align: left; } .grid, .receipt-grid { grid-template-columns: 1fr; gap: 18px; } .amount-band { flex-wrap: wrap; } .footer { grid-template-columns: 1fr; } }
-  @media print { th, td { padding: 8px; } .section { margin-top: 20px; } .footer { margin-top: 20px; padding-top: 12px; } body { padding: 0; background: #fff; } .page { max-width: none; margin: 0; padding: 0; border: 0; border-radius: 0; } a { color: inherit; text-decoration: none; } }
+  @media screen and (max-width: 640px) { body { padding: 12px; } .page { padding: 0; } .masthead { padding: 24px; } .content { padding: 0 20px 24px; } .amount-band { padding: 18px 20px; } .masthead { flex-direction: column; } .receipt-heading { text-align: left; } .grid, .receipt-grid { grid-template-columns: 1fr; gap: 18px; } .amount-band { flex-wrap: wrap; } .footer { grid-template-columns: 1fr; } }
+  @media print { body { font-size: 11px; line-height: 1.5; } .section { line-height: 1.5; } th, td { padding: 6px 8px; } .section { margin-top: 16px; } .payment-card { padding: 12px; } .title { margin-bottom: 7px; } .footer { margin-top: 20px; padding-top: 12px; } body { padding: 0; background: #fff; print-color-adjust: exact; -webkit-print-color-adjust: exact; } .page { max-width: none; margin: 0; padding: 0; border: 1px solid #dfe6e0; border-radius: 0; overflow: visible; } a { color: inherit; text-decoration: none; } }
 `;
 
 /** Wait for document assets so logos do not disappear from a fast print request. */
