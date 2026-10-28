@@ -1,6 +1,7 @@
 'use client';
 
 import { ReceiptHeader } from '@/components/billing/receipt-header';
+import ViewOnlyModulePage from '@/app/admin/view-only-module-page';
 import { RECEIPT_PRINT_STYLES, renderReceiptPrintWindow } from '@/lib/receipt-print-style';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -1214,6 +1215,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
     return <div className="min-h-screen bg-gray-50" />;
   }
 
+  if (user?.role === 'viewer' && mode === 'list' && user.permissions?.includes('receipts')) return <ViewOnlyModulePage module="receipts" />;
   if (!user || user.role !== 'admin') {
     return <div>Access denied</div>;
   }

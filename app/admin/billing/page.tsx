@@ -74,6 +74,7 @@ import {
   readBillingRuleAssignments,
 } from '@/lib/billing-rule-assignments';
 import { useSystemBranding } from '@/lib/use-system-branding';
+import ViewOnlyModulePage from '@/app/admin/view-only-module-page';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 const BILLING_ENGINE_SCHEDULE_STORAGE_KEY = 'billing_next_invoice_manual_schedule_v1';
@@ -4636,6 +4637,8 @@ export default function BillingPage() {
     return <div className="min-h-screen bg-gray-50" />;
   }
 
+  if (user?.role === 'viewer' && searchParams.get('tab') === 'rule-config' && user.permissions?.includes('billing_rules')) return <ViewOnlyModulePage module="billing_rules" />;
+  if (user?.role === 'viewer' && user.permissions?.includes('invoices')) return <ViewOnlyModulePage module="invoices" />;
   if (!user || user.role !== 'admin') {
     return <div>Access denied</div>;
   }

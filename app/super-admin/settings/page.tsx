@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -20,6 +21,7 @@ import {
   saveSystemBranding,
   writeSystemBranding,
 } from '@/lib/system-branding';
+import { DEFAULT_PLAN_CHANGE_REASONS, fetchPlanChangeReasons, savePlanChangeReasons } from '@/lib/plan-change-reasons';
 
 export default function SuperAdminSettingsPage() {
   const { toast } = useToast();
@@ -37,6 +39,7 @@ export default function SuperAdminSettingsPage() {
   const [collectorNotice, setCollectorNotice] = useState('');
   const [customerBanner, setCustomerBanner] = useState('');
   const [footerText, setFooterText] = useState('');
+  const [planChangeReasonsText, setPlanChangeReasonsText] = useState(DEFAULT_PLAN_CHANGE_REASONS.join('\n'));
   const [fixedStartDay, setFixedStartDay] = useState<string>(
     String(DEFAULT_FIXED_BILLING_WINDOW.startDay)
   );
@@ -76,6 +79,10 @@ export default function SuperAdminSettingsPage() {
       .catch(() => {
         // Keep cached/local defaults when the backend is unavailable.
       });
+
+    fetchPlanChangeReasons()
+      .then((reasons) => setPlanChangeReasonsText(reasons.join('\n')))
+      .catch(() => setPlanChangeReasonsText(DEFAULT_PLAN_CHANGE_REASONS.join('\n')));
   }, []);
 
   const handleLogoChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -171,8 +178,12 @@ export default function SuperAdminSettingsPage() {
         receiptEmail,
         footerText,
       });
+      const savedPlanChangeReasons = await savePlanChangeReasons(
+        planChangeReasonsText.split('\n').map((reason) => reason.trim()).filter(Boolean),
+      );
 
       applyBrandingToForm(savedBranding);
+      setPlanChangeReasonsText(savedPlanChangeReasons.join('\n'));
       setFixedStartDay(String(saved.startDay));
       setFixedDueDay(String(saved.dueDay));
 
@@ -355,6 +366,26 @@ export default function SuperAdminSettingsPage() {
               onChange={(event) => setFooterText(event.target.value)}
             />
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Customer Plan Change Reasons</CardTitle>
+          <p className="text-sm text-slate-500">
+            Enter one reason per line. These appear in the customer edit form; admins can also select “Other” and type a custom reason.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <Label htmlFor="planChangeReasons">Predefined reasons</Label>
+          <Textarea
+            id="planChangeReasons"
+            value={planChangeReasonsText}
+            onChange={(event) => setPlanChangeReasonsText(event.target.value)}
+            placeholder={'Customer requested upgrade\nCustomer requested downgrade\nPromotion or discount'}
+            rows={6}
+          />
+          <p className="text-xs text-slate-500">Removing all lines leaves admins able to enter a custom reason for each plan change.</p>
         </CardContent>
       </Card>
 

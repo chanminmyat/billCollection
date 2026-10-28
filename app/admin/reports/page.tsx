@@ -6,11 +6,26 @@ import { useAuth } from '@/app/contexts/auth-context';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Download, RefreshCw } from 'lucide-react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import townshipData from '@/lib/township.json';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 type ReportType = 'headcount' | 'collection' | 'invoice-history' | 'plans' | 'plan-history' | 'rules' | 'payment-terms' | 'status-history';
 type AnyRow = Record<string, any>;
+type ChartPoint = { name: string; value: number };
+type ReportChart = { title: string; metric: string; data: ChartPoint[]; currency?: boolean; kind?: 'bar' | 'pie' };
 type StatusHistory = {
   id: string; entityType: string; entityId: string; entityCode?: string; entityName?: string;
   previousStatus: string; status: string; reason: string; source: string; actorName: string; changedAt: string;
@@ -19,6 +34,7 @@ type PlanHistory = {
   id: string; customerId: string; customerCode: string; customerName: string; customerPhone?: string;
   previousPlanId?: string; previousPlanCode?: string; previousPlanName?: string; previousMonthlyFee?: string | number;
   newPlanId?: string; newPlanCode?: string; newPlanName?: string; newMonthlyFee?: string | number;
+  reason?: string | null;
   effectiveDate?: string; actorId?: string; actorRole?: string; actorName: string; source: string; changedAt: string;
 };
 
@@ -27,7 +43,7 @@ const REPORTS: Array<{ id: ReportType; label: string; description: string }> = [
   { id: 'collection', label: 'Collection', description: 'Invoice collection, paid amounts, outstanding balances and payment methods. Date range uses payment date for paid invoices, otherwise invoice date.' },
   { id: 'invoice-history', label: 'Invoice Revisions', description: 'Invoices revised by an admin, with the previous and replacement invoice numbers, revision date, reason, and customer details. Date range uses the revision date.' },
   { id: 'plans', label: 'Plans', description: 'Customer counts and recurring plan fees by subscribed plan. Date range uses customer creation date.' },
-  { id: 'plan-history', label: 'Plan Changes', description: 'Customer-by-customer plan changes with previous and new plans, fee changes, date, and the admin who made the update. History is recorded from the time this backend feature is deployed.' },
+  { id: 'plan-history', label: 'Plan Changes', description: 'Customer-by-customer plan changes, including saved reason, previous and new plans, fee changes, date, and the admin who made the update. Older entries may not include a reason.' },
   { id: 'rules', label: 'Billing Rules', description: 'Customers grouped by assigned billing rule and rule configuration.' },
   { id: 'payment-terms', label: 'Payment Terms', description: 'Customer counts by prepaid/postpaid timing and billing schedule.' },
   { id: 'status-history', label: 'Status Changes', description: 'Customer and collector status changes, including the saved reason and automatic system transitions. Date range uses change date.' },
@@ -94,10 +110,10 @@ const inRange = (value: unknown, from: string, to: string) => {
 const unique = (items: string[]) => Array.from(new Set(items.filter(Boolean))).sort((a, b) => a.localeCompare(b));
 const columnsByReport: Record<ReportType, string[]> = {
   headcount: ['Customer ID', 'Customer Name', 'Phone No', 'Address', 'Region', 'City', 'Installation Township', 'Installation Plan', 'Current Township', 'Current Plan', 'Installation Date', 'Collect Day', 'Amount', 'Status', 'Status Date', 'Remark', 'Collector', 'Billing Rule'],
-  collection: ['Invoice No', 'Customer ID', 'Customer Name', 'Phone No', 'Township', 'Billing Period', 'Invoice Date', 'Due Date', 'Paid Date', 'Amount', 'Status', 'Payment Method', 'Receipt No', 'Collector', 'Billing Rule'],
+  collection: ['Invoice No', 'Customer ID', 'Customer Name', 'Phone No', 'Township', 'Billing Period', 'Invoice Date', 'Due Date', 'Paid Date', 'Amount', 'Paid Amount', 'Outstanding Amount', 'Status', 'Payment Method', 'Receipt No', 'Collector', 'Billing Rule'],
   'invoice-history': ['Revision Date', 'Previous Invoice No', 'New Invoice No', 'Customer ID', 'Customer Name', 'Phone No', 'Region', 'Township', 'Reason for Edit', 'Changed By'],
   plans: ['Customer ID', 'Customer Name', 'Phone No', 'Region', 'Township', 'Current Plan', 'Plan Code', 'Monthly Fee (MMK)', 'Plan Start Date', 'Billing Rule', 'Customer Status'],
-  'plan-history': ['Change Date', 'Customer ID', 'Customer Name', 'Phone No', 'Region', 'Township', 'Previous Plan', 'Previous Plan Code', 'Previous Fee (MMK)', 'New Plan', 'New Plan Code', 'New Fee (MMK)', 'Current Plan', 'Billing Rule', 'Changed By', 'Actor ID', 'Actor Role', 'Source'],
+  'plan-history': ['Change Date', 'Customer ID', 'Customer Name', 'Phone No', 'Region', 'Township', 'Previous Plan', 'Previous Plan Code', 'Previous Fee (MMK)', 'New Plan', 'New Plan Code', 'New Fee (MMK)', 'Reason for Change', 'Current Plan', 'Billing Rule', 'Changed By', 'Actor ID', 'Actor Role', 'Source'],
   rules: ['Billing Rule', 'Billing Model', 'Billing Type', 'Payment Timing', 'Billing Mode', 'Due After Days', 'Active', 'Customers'],
   'payment-terms': ['Payment Timing', 'Billing Model', 'Billing Mode', 'Customers', 'Monthly Fees (MMK)'],
   'status-history': ['Date', 'Type', 'Customer / Collector ID', 'Name', 'Phone No', 'Region', 'Township', 'Current Plan', 'Previous Status', 'New Status', 'Current Status', 'Reason / Note', 'Change Source', 'Changed By'],
@@ -229,7 +245,7 @@ export default function ReportsPage() {
     const keyword = search.trim().toLowerCase();
     return inRange(entry.effectiveDate ?? entry.changedAt, from, to)
       && matchesCustomer(newPlanView)
-      && (!keyword || [entry.customerCode, entry.customerName, entry.customerPhone, entry.previousPlanName, entry.previousPlanCode, entry.newPlanName, entry.newPlanCode, entry.actorName].join(' ').toLowerCase().includes(keyword));
+      && (!keyword || [entry.customerCode, entry.customerName, entry.customerPhone, entry.previousPlanName, entry.previousPlanCode, entry.newPlanName, entry.newPlanCode, entry.reason, entry.actorName].join(' ').toLowerCase().includes(keyword));
   }), [planHistory, customerById, from, to, matchesCustomer, search]);
 
   const rows: AnyRow[] = useMemo(() => {
@@ -258,12 +274,18 @@ export default function ReportsPage() {
       const customer = invoice.customer ?? customerById.get(String(invoice.customerId ?? '')) ?? {};
       const c = collectorByCode.get(String(customer.collectorCode ?? invoice.collectorCode ?? ''));
       const statusValue = String(invoice.status ?? 'unpaid').toLowerCase();
+      const totalAmount = amountOf(invoice.totalAmount ?? invoice.amount);
+      const paidAmount = amountOf(invoice.paidAmount ?? invoice.amountPaid ?? (statusValue === 'paid' ? totalAmount : 0));
+      const outstandingAmount = statusValue === 'cancelled'
+        ? 0
+        : amountOf(invoice.outstandingAmount ?? invoice.remainingAmount ?? invoice.balanceDue ?? Math.max(0, totalAmount - paidAmount));
       return {
         'Invoice No': invoice.invoiceNo ?? invoice.id, 'Customer ID': customer.customerCode ?? '',
         'Customer Name': nameOf(customer), 'Phone No': customer.primaryPhone ?? '', Township: locationOf(customer, 'township'),
         'Billing Period': invoice.billingPeriodFrom && invoice.billingPeriodTo ? `${invoice.billingPeriodFrom} - ${invoice.billingPeriodTo}` : invoice.billingMonth ?? '',
         'Invoice Date': invoice.invoiceDate ?? invoice.issuedAt ?? '', 'Due Date': invoice.dueDate ?? '',
-        'Paid Date': invoice.paidAt ?? invoice.paidDate ?? '', Amount: amountOf(invoice.totalAmount ?? invoice.amount),
+        'Paid Date': invoice.paidAt ?? invoice.paidDate ?? '', Amount: totalAmount,
+        'Paid Amount': paidAmount, 'Outstanding Amount': outstandingAmount,
         Status: statusValue, 'Payment Method': invoice.paymentMethod ?? '', 'Receipt No': invoice.receiptNo ?? '',
         Collector: c?.user?.name ?? c?.name ?? customer.collectorCode ?? '', 'Billing Rule': invoice.billingRuleName ?? customer.billingRuleName ?? '',
       };
@@ -320,7 +342,8 @@ export default function ReportsPage() {
         'Previous Plan': entry.previousPlanName || (entry.previousPlanCode ? '' : 'No previous plan'),
         'Previous Plan Code': entry.previousPlanCode ?? '', 'Previous Fee (MMK)': amountOf(entry.previousMonthlyFee),
         'New Plan': entry.newPlanName ?? '', 'New Plan Code': entry.newPlanCode ?? '',
-        'New Fee (MMK)': amountOf(entry.newMonthlyFee), 'Current Plan': currentPlan.planName ?? currentPlan.planCode ?? '',
+        'New Fee (MMK)': amountOf(entry.newMonthlyFee), 'Reason for Change': entry.reason || 'Reason not recorded',
+        'Current Plan': currentPlan.planName ?? currentPlan.planCode ?? '',
         'Billing Rule': customer.billingRuleName ?? assignedRule?.name ?? '',
         'Changed By': entry.actorName, 'Actor ID': entry.actorId ?? '', 'Actor Role': entry.actorRole ?? '', Source: entry.source,
       };
@@ -344,10 +367,100 @@ export default function ReportsPage() {
   }, [report, filteredCustomers, filteredInvoices, filteredInvoiceRevisions, filteredHistory, filteredPlanHistory, rules, rule, ruleById, collectorByCode, customerById, collectors, latestStatusByCustomer]);
 
   const reportTotal = useMemo(() => {
-    if (report === 'collection') return rows.reduce((sum, row) => sum + (String(row.Status).toLowerCase() === 'paid' ? amountOf(row.Amount) : 0), 0);
+    if (report === 'collection') return rows.reduce((sum, row) => sum + amountOf(row['Paid Amount']), 0);
     if (report === 'headcount') return rows.length;
     if (report === 'status-history' || report === 'plan-history' || report === 'invoice-history') return rows.length;
     return rows.reduce((sum, row) => sum + amountOf(row['Monthly Fees (MMK)'] ?? row['Monthly Fee (MMK)']), 0);
+  }, [report, rows]);
+
+  const charts = useMemo<ReportChart[]>(() => {
+    const grouped = (
+      title: string,
+      metric: string,
+      keyOf: (row: AnyRow) => unknown,
+      valueOf: (row: AnyRow) => number = () => 1,
+      currency = false,
+      kind: 'bar' | 'pie' = 'bar',
+    ): ReportChart => {
+      const totals = new Map<string, number>();
+      rows.forEach((row) => {
+        const key = String(keyOf(row) ?? '').trim() || 'Unassigned';
+        totals.set(key, (totals.get(key) ?? 0) + valueOf(row));
+      });
+      return {
+        title,
+        metric,
+        currency,
+        kind,
+        data: Array.from(totals, ([name, value]) => ({ name, value: Number(value.toFixed(2)) }))
+          .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name))
+          .slice(0, 8),
+      };
+    };
+    const trend = (title: string, metric: string, dateKey: string): ReportChart => {
+      const totals = new Map<string, number>();
+      rows.forEach((row) => {
+        const date = safeDate(row[dateKey]);
+        if (!date) return;
+        const month = date.slice(0, 7);
+        totals.set(month, (totals.get(month) ?? 0) + 1);
+      });
+      return { title, metric, data: Array.from(totals, ([name, value]) => ({ name, value })).sort((a, b) => a.name.localeCompare(b.name)).slice(-12) };
+    };
+    const paidAmount = (row: AnyRow) => amountOf(row['Paid Amount']);
+
+    switch (report) {
+      case 'headcount':
+        return [
+          grouped('Customers by township', 'Customer count', (row) => row['Current Township'] || row['Installation Township']),
+          grouped('Customers by status', 'Customer count', (row) => row.Status, () => 1, false, 'pie'),
+        ];
+      case 'collection':
+        return [
+          {
+            title: 'Collected vs outstanding balance',
+            metric: 'Amount (MMK)',
+            currency: true,
+            data: [
+              { name: 'Collected', value: Number(rows.reduce((sum, row) => sum + paidAmount(row), 0).toFixed(2)) },
+              { name: 'Outstanding', value: Number(rows.reduce((sum, row) => sum + amountOf(row['Outstanding Amount']), 0).toFixed(2)) },
+            ],
+          },
+          grouped('Collected by payment method', 'Paid amount (MMK)', (row) => String(row['Payment Method'] || '').trim() || 'Unspecified', paidAmount, true, 'pie'),
+        ];
+      case 'invoice-history':
+        return [
+          trend('Invoice revisions over time', 'Revision count by month', 'Revision Date'),
+          grouped('Revisions by reason', 'Revision count', (row) => row['Reason for Edit'], () => 1, false, 'pie'),
+        ];
+      case 'plans':
+        return [
+          grouped('Customers by plan', 'Customer count', (row) => row['Current Plan'], () => 1, false, 'pie'),
+          grouped('Monthly fees by plan', 'Monthly fees (MMK)', (row) => row['Current Plan'], (row) => amountOf(row['Monthly Fee (MMK)']), true),
+        ];
+      case 'plan-history':
+        return [
+          trend('Plan changes over time', 'Plan changes by month', 'Change Date'),
+          grouped('Plan changes by reason', 'Share of plan changes', (row) => row['Reason for Change'], () => 1, false, 'pie'),
+        ];
+      case 'rules':
+        return [
+          grouped('Customers by billing rule', 'Customer count', (row) => row['Billing Rule'], (row) => amountOf(row.Customers)),
+          grouped('Customers by billing model', 'Customer count', (row) => row['Billing Model'], (row) => amountOf(row.Customers), false, 'pie'),
+        ];
+      case 'payment-terms':
+        return [
+          grouped('Customers by payment timing', 'Customer count', (row) => row['Payment Timing'], (row) => amountOf(row.Customers), false, 'pie'),
+          grouped('Monthly fees by payment timing', 'Monthly fees (MMK)', (row) => row['Payment Timing'], (row) => amountOf(row['Monthly Fees (MMK)']), true),
+        ];
+      case 'status-history':
+        return [
+          trend('Status changes over time', 'Status changes by month', 'Date'),
+          grouped('Status changes by reason', 'Share of status changes', (row) => row['Reason / Note'], () => 1, false, 'pie'),
+        ];
+      default:
+        return [];
+    }
   }, [report, rows]);
 
   const exportExcel = async () => {
@@ -385,7 +498,7 @@ export default function ReportsPage() {
   };
 
   if (isLoading) return <div className="min-h-screen bg-slate-50" />;
-  if (!user || user.role !== 'admin') return <div>Access denied</div>;
+  if (!user || (user.role !== 'admin' && !(user.role === 'viewer' && user.permissions?.includes('reports')))) return <div>Access denied</div>;
   const activeDescription = REPORTS.find((item) => item.id === report)?.description;
   const filterSelect = (label: string, value: string, setValue: (value: string) => void, values: string[]) => (
     <label className="flex min-w-36 flex-col gap-1 text-xs font-medium text-slate-600">{label}
@@ -396,7 +509,7 @@ export default function ReportsPage() {
   );
   const formatCell = (header: string, value: unknown) => {
     if (value == null || value === '') return '—';
-    if (header === 'Amount' || header.includes('(MMK)')) return money(value);
+    if (header.includes('Amount') || header.includes('(MMK)')) return money(value);
     if ((header === 'Date' || header === 'Change Date' || header === 'Revision Date') && typeof value === 'string' && value.includes('T')) {
       const date = new Date(value);
       return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
@@ -405,13 +518,14 @@ export default function ReportsPage() {
     return String(value);
   };
   const reportColumnWidth = (header: string) => {
-    if (header === 'Address' || header === 'Reason for Edit' || header === 'Reason / Note') return 260;
+    if (header === 'Address' || header === 'Reason for Edit' || header === 'Reason for Change' || header === 'Reason / Note') return 260;
     if (header === 'Customer Name' || header === 'Billing Period') return 180;
     if (header === 'Region' || header === 'Township' || header === 'Installation Township' || header === 'Current Township') return 150;
     if (header.includes('Date')) return 145;
     if (header.includes('Amount') || header.includes('(MMK)')) return 135;
     return 140;
   };
+  const chartColors = ['#059669', '#2563eb', '#f59e0b', '#8b5cf6', '#ef4444', '#0891b2', '#84cc16', '#64748b'];
 
   return <Layout>
     <div className="space-y-5 p-1 sm:p-2">
@@ -441,6 +555,58 @@ export default function ReportsPage() {
         </div>
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-3 text-sm text-slate-600"><span>{rows.length.toLocaleString()} result{rows.length === 1 ? '' : 's'}</span><span>{report === 'collection' ? `Paid total in results: ${money(reportTotal)}` : report === 'headcount' || report === 'status-history' || report === 'plan-history' || report === 'invoice-history' ? `${reportTotal.toLocaleString()} ${report === 'headcount' ? 'customers' : report === 'plan-history' ? 'plan changes' : report === 'invoice-history' ? 'invoice revisions' : 'status changes'}` : `Monthly total in results: ${money(reportTotal)}`}</span></div>
       </CardContent></Card>
+
+      <div className="grid gap-4 xl:grid-cols-2" aria-label={`${REPORTS.find((item) => item.id === report)?.label ?? 'Report'} charts`}>
+        {charts.map((chart) => (
+          <Card key={chart.title}>
+            <CardHeader className="pb-1">
+              <CardTitle className="text-base">{chart.title}</CardTitle>
+              <p className="text-xs text-slate-500">{chart.metric} · based on current filters</p>
+              {chart.title === 'Plan changes by reason' && <p className="text-xs text-slate-500">Older plan-change history may be listed as “Reason not recorded.”</p>}
+            </CardHeader>
+            <CardContent className="pt-3">
+              {chart.data.length === 0 ? (
+                <div className="flex h-64 items-center justify-center text-sm text-slate-500">No chart data matches these filters.</div>
+              ) : (
+                <div className="h-64 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    {chart.kind === 'pie' ? (
+                      <PieChart>
+                        <Tooltip
+                          formatter={(value: number, name: string) => [
+                            chart.currency ? money(value) : `${value.toLocaleString()} (${Math.round((value / (chart.data.reduce((sum, point) => sum + point.value, 0) || 1)) * 100)}%)`,
+                            name,
+                          ]}
+                          contentStyle={{ borderRadius: 10, borderColor: '#e2e8f0', fontSize: 12 }}
+                        />
+                        <Legend verticalAlign="bottom" height={34} wrapperStyle={{ fontSize: 11 }} />
+                        <Pie data={chart.data} dataKey="value" nameKey="name" cx="50%" cy="44%" outerRadius={82} label={({ percent }: { percent?: number }) => percent && percent >= 0.05 ? `${Math.round(percent * 100)}%` : ''} labelLine={false}>
+                          {chart.data.map((entry, index) => <Cell key={`${entry.name}-${index}`} fill={chartColors[index % chartColors.length]} />)}
+                        </Pie>
+                      </PieChart>
+                    ) : (
+                      <BarChart data={chart.data} layout="vertical" margin={{ top: 4, right: 18, bottom: 4, left: 4 }}>
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                        <XAxis
+                          type="number"
+                          tick={{ fontSize: 11, fill: '#64748b' }}
+                          tickFormatter={(value: number) => chart.currency ? new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(value) : String(value)}
+                        />
+                        <YAxis type="category" dataKey="name" width={148} tick={{ fontSize: 11, fill: '#475569' }} />
+                        <Tooltip
+                          formatter={(value: number) => chart.currency ? money(value) : value.toLocaleString()}
+                          contentStyle={{ borderRadius: 10, borderColor: '#e2e8f0', fontSize: 12 }}
+                        />
+                        <Bar dataKey="value" name={chart.metric} fill="#059669" radius={[0, 5, 5, 0]} maxBarSize={26} />
+                      </BarChart>
+                    )}
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
 
       <Card><CardContent className="p-0"><div className="max-h-[70vh] overflow-auto rounded-lg"><table className="table-fixed border-collapse text-left text-sm" style={{ width: `${columnsByReport[report].reduce((total, header) => total + reportColumnWidth(header), 0)}px`, minWidth: '100%' }}><colgroup>{columnsByReport[report].map((header) => <col key={header} style={{ width: `${reportColumnWidth(header)}px` }} />)}</colgroup><thead className="sticky top-0 z-10 bg-slate-100 text-xs uppercase tracking-wide text-slate-600"><tr>{columnsByReport[report].map((header) => <th key={header} className="overflow-hidden text-ellipsis whitespace-nowrap border-b px-3 py-3 font-semibold" title={header}>{header}</th>)}</tr></thead><tbody>{loading && rows.length === 0 ? <tr><td colSpan={columnsByReport[report].length} className="px-4 py-12 text-center text-slate-500">Loading live report data…</td></tr> : rows.length === 0 ? <tr><td colSpan={columnsByReport[report].length} className="px-4 py-12 text-center text-slate-500">No records match these filters.</td></tr> : rows.map((row, index) => <tr key={String(row['Invoice No'] ?? row['New Invoice No'] ?? row['Customer ID'] ?? row['Billing Rule'] ?? row['Plan'] ?? row.Date ?? index)} className="border-b last:border-0 hover:bg-slate-50">{columnsByReport[report].map((header) => <td key={header} className="overflow-hidden text-ellipsis whitespace-nowrap px-3 py-3 text-slate-700" title={String(row[header] ?? '')}>{formatCell(header, row[header])}</td>)}</tr>)}</tbody></table></div></CardContent></Card>
       <p className="text-xs text-slate-500">Amounts are shown in MMK. Excel export contains this report with the current filters and a summary of the filters used.</p>

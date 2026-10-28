@@ -15,6 +15,7 @@ import { Search, Plus, Edit, Trash2, Phone, Mail, MapPin, Users } from 'lucide-r
 import { useData, Collector } from '../../contexts/data-context';
 import { useAuth } from '../../contexts/auth-context';
 import Layout from '../../components/layout';
+import ViewOnlyModulePage from '@/app/admin/view-only-module-page';
 import nrcData from '@/lib/nrc-data.json';
 import townshipData from '@/lib/township.json';
 import { useToast } from '@/hooks/use-toast';
@@ -1108,6 +1109,7 @@ export default function CollectorsPage({
     return <div className="min-h-screen bg-gray-50" />;
   }
 
+  if (user?.role === 'viewer' && user.permissions?.includes('collectors')) return <ViewOnlyModulePage module="collectors" />;
   if (!user || user.role !== 'admin') {
     return <div>Access denied</div>;
   }

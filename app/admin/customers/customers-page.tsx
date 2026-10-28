@@ -30,6 +30,8 @@ import { useRouter } from 'next/navigation';
 import nrcData from '@/lib/nrc-data.json';
 import townshipData from '@/lib/township.json';
 import { useToast } from '@/hooks/use-toast';
+import { DEFAULT_PLAN_CHANGE_REASONS, fetchPlanChangeReasons } from '@/lib/plan-change-reasons';
+import ViewOnlyModulePage from '@/app/admin/view-only-module-page';
 import {
   DEFAULT_FIXED_BILLING_WINDOW,
   FirstInvoiceMode,
@@ -697,6 +699,9 @@ export default function CustomersPage({
   const [billingRulesError, setBillingRulesError] = useState('');
   const [selectedPlanCode, setSelectedPlanCode] = useState('');
   const [planEffectiveDate, setPlanEffectiveDate] = useState(() => formatDateToIso(new Date()));
+  const [planChangeReasons, setPlanChangeReasons] = useState<string[]>(DEFAULT_PLAN_CHANGE_REASONS);
+  const [planChangeReason, setPlanChangeReason] = useState('');
+  const [planChangeCustomReason, setPlanChangeCustomReason] = useState('');
   const [manualInvoiceSelectedRuleId, setManualInvoiceSelectedRuleId] = useState('');
   const [manualInvoiceFixedFirstChargeMode, setManualInvoiceFixedFirstChargeMode] =
     useState<FixedFirstInvoiceChargeMode>('full_month');
@@ -835,6 +840,10 @@ export default function CustomersPage({
 
   useEffect(() => {
     setCustomerBillingFeeCacheById(readCustomerBillingFeeCache());
+  }, []);
+
+  useEffect(() => {
+    fetchPlanChangeReasons().then(setPlanChangeReasons).catch(() => setPlanChangeReasons(DEFAULT_PLAN_CHANGE_REASONS));
   }, []);
 
   const readCustomerListDrafts = (): CustomerCreateDraft[] => {
@@ -2981,6 +2990,7 @@ export default function CustomersPage({
     return <div className="min-h-screen bg-gray-50" />;
   }
 
+  if (user?.role === 'viewer' && user.permissions?.includes('customers')) return <ViewOnlyModulePage module="customers" />;
   if (!user || user.role !== 'admin') {
     return <div>Access denied</div>;
   }
@@ -4132,6 +4142,8 @@ export default function CustomersPage({
     setCustomerType(resolvedCustomerType);
     setUserStatus(resolvedStatus);
     setCustomerStatusNote('');
+    setPlanChangeReason('');
+    setPlanChangeCustomReason('');
 
     setNrcState(personalNrc.state);
     setNrcTownship(personalNrc.township);
@@ -4560,6 +4572,17 @@ export default function CustomersPage({
     );
     const nextPlanCode = selectedPlanCode || serviceId || '';
     const planChanged = Boolean(nextPlanCode && nextPlanCode !== previousPlanCode);
+    const resolvedPlanChangeReason = planChangeReason === '__custom__'
+      ? planChangeCustomReason.trim()
+      : planChangeReason.trim();
+    if (planChanged && !resolvedPlanChangeReason) {
+      toast({
+        title: 'Plan change reason required',
+        description: 'Select a reason or enter a custom reason for changing the plan.',
+        variant: 'destructive'
+      });
+      return;
+    }
     if (planChanged && !/^\d{4}-\d{2}-\d{2}$/.test(planEffectiveDate)) {
       toast({
         title: 'Effective date required',
@@ -4656,6 +4679,7 @@ export default function CustomersPage({
     const servicesPatchRaw: Record<string, unknown> = {
       serviceId: nextPlanCode || undefined,
       planEffectiveDate: planChanged ? planEffectiveDate : undefined,
+      planChangeReason: planChanged ? resolvedPlanChangeReason : undefined,
       serviceType: serviceType.trim() || undefined,
       packageName: packageName.trim() || undefined,
       bandwidthPlan: bandwidthPlan.trim() || undefined,
@@ -5645,6 +5669,8 @@ export default function CustomersPage({
               value={selectedPlanCode}
               onValueChange={(value) => {
                 setSelectedPlanCode(value);
+                setPlanChangeReason('');
+                setPlanChangeCustomReason('');
                 const plan = activePlans.find((item) => item.planCode === value);
                 setServiceId(plan?.planCode ?? '');
                 setPackageName(plan?.planName ?? '');
@@ -5710,6 +5736,28 @@ export default function CustomersPage({
               <p className="text-xs text-slate-600">
                 The new plan applies starting on this date. The previous plan is charged through the day before.
               </p>
+              <div className="mt-3 space-y-2">
+                <Label htmlFor="planChangeReason">Reason for plan change <span className="text-rose-600">*</span></Label>
+                <Select value={planChangeReason} onValueChange={(value) => {
+                  setPlanChangeReason(value);
+                  if (value !== '__custom__') setPlanChangeCustomReason('');
+                }}>
+                  <SelectTrigger id="planChangeReason"><SelectValue placeholder="Select a reason" /></SelectTrigger>
+                  <SelectContent>
+                    {planChangeReasons.map((reason) => <SelectItem key={reason} value={reason}>{reason}</SelectItem>)}
+                    <SelectItem value="__custom__">Other / enter a custom reason</SelectItem>
+                  </SelectContent>
+                </Select>
+                {planChangeReason === '__custom__' && (
+                  <Textarea
+                    value={planChangeCustomReason}
+                    onChange={(event) => setPlanChangeCustomReason(event.target.value)}
+                    placeholder="Enter the reason for this plan change"
+                    rows={2}
+                    required
+                  />
+                )}
+              </div>
             </div>
           )}
           <div className="space-y-2">

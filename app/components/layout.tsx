@@ -16,6 +16,7 @@ import {
   UserCheck,
   Banknote,
   Activity,
+  Eye,
   Globe,
   ChevronRight,
   PanelLeftClose,
@@ -26,6 +27,7 @@ import { useAuth } from '../contexts/auth-context';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { formatDisplayDate } from '@/lib/date-format';
+import { VIEW_ONLY_MODULES } from '@/lib/view-only-access';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -176,6 +178,7 @@ export default function Layout({ children }: LayoutProps) {
             href: '/admin/activity-log',
           },
           { icon: BarChart3, label: 'Reports', href: '/admin/reports' },
+          { icon: Eye, label: 'View-only Users', href: '/admin/view-only-users' },
         ];
       case 'collector':
         return [
@@ -216,6 +219,15 @@ export default function Layout({ children }: LayoutProps) {
           { icon: LayoutDashboard, label: 'Dashboard', href: '/customer' },
           { icon: FileText, label: 'Bills', href: '/customer/bills' },
           { icon: Banknote, label: 'Payments', href: '/customer/payments' },
+        ];
+      case 'viewer':
+        return [
+          { icon: LayoutDashboard, label: 'Dashboard', href: '/admin' },
+          ...VIEW_ONLY_MODULES.filter((module) => user?.permissions?.includes(module.id)).map((module) => ({
+            icon: module.id === 'reports' ? BarChart3 : module.id === 'payment_config' ? Banknote : module.id === 'customers' || module.id === 'collectors' ? Users : FileText,
+            label: module.label,
+            href: module.href,
+          })),
         ];
       default:
         return [];

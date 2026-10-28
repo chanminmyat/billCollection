@@ -39,6 +39,7 @@ import {
   Cell,
 } from 'recharts';
 import { formatDisplayDate } from '@/lib/date-format';
+import ViewOnlyModulePage from './view-only-module-page';
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
@@ -392,6 +393,7 @@ export default function AdminDashboard() {
     return <div className="min-h-screen bg-gray-50" />;
   }
 
+  if (user?.role === 'viewer') return <ViewOnlyModulePage module="dashboard" />;
   if (!user || user.role !== 'admin') {
     return <div>Access denied</div>;
   }

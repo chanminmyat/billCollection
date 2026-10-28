@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, useLayoutEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { installAuthenticatedFetch, USER_ACCESS_TOKEN_KEY } from '@/lib/api-auth';
+import { getViewOnlyHomePath } from '@/lib/view-only-access';
 
 interface CollectorProfile {
   id?: string;
@@ -35,7 +36,8 @@ interface User {
   username?: string;
   email?: string;
   phone?: string;
-  role: 'admin' | 'collector' | 'customer';
+  role: 'admin' | 'collector' | 'customer' | 'viewer';
+  permissions?: string[];
   name: string;
   status?: string;
   collectorProfile?: CollectorProfile | null;
@@ -116,7 +118,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         window.localStorage.removeItem('billflow_user');
         router.replace('/');
       } else if (user && pathname === '/') {
-        const dashboardPath = user.role === 'admin' ? '/admin' : user.role === 'collector' ? '/collector' : '/customer';
+        const dashboardPath = user.role === 'admin' ? '/admin' : user.role === 'collector' ? '/collector' : user.role === 'viewer' ? getViewOnlyHomePath(user.permissions) : '/customer';
         router.replace(dashboardPath);
       }
     }
@@ -163,7 +165,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ? '/admin'
           : userData.role === 'collector'
             ? '/collector'
-            : '/customer';
+            : userData.role === 'viewer'
+              ? getViewOnlyHomePath(userData.permissions)
+              : '/customer';
 
       router.push(dashboardPath);
     } catch (error) {

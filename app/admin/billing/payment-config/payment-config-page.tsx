@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import ViewOnlyModulePage from '@/app/admin/view-only-module-page';
 
 type PaymentConfigPageProps = {
   mode: 'create' | 'list';
@@ -285,6 +286,7 @@ export default function PaymentConfigPage({ mode }: PaymentConfigPageProps) {
     return <div className="min-h-screen bg-gray-50" />;
   }
 
+  if (user?.role === 'viewer' && mode === 'list' && user.permissions?.includes('payment_config')) return <ViewOnlyModulePage module="payment_config" />;
   if (!user || user.role !== 'admin') {
     return <div>Access denied</div>;
   }
