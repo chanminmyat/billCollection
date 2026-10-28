@@ -510,22 +510,22 @@ export default function Layout({ children }: LayoutProps) {
         className={`app-sidebar ${sidebarOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full lg:w-[76px] lg:translate-x-0'}`}
       >
         <div
-          className={`flex h-[76px] shrink-0 items-center border-b border-white/[0.07] ${sidebarOpen ? 'justify-between px-5' : 'justify-center px-3'}`}
+          className={`flex h-[76px] shrink-0 items-center border-b border-neutral-200 ${sidebarOpen ? 'justify-between px-5' : 'justify-center px-3'}`}
         >
           <div className="flex min-w-0 items-center gap-3">
             {branding.logoDataUrl ? (
               <img
                 src={branding.logoDataUrl}
                 alt={`${branding.systemName} logo`}
-                className="h-9 w-9 shrink-0 rounded-lg bg-white/5 object-contain p-1"
+                className="h-9 w-9 shrink-0 rounded-lg bg-white object-contain p-1"
               />
             ) : (
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-neutral-800 text-neutral-100">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-primary ring-1 ring-neutral-200">
                 <Building2 className="h-5 w-5" />
               </div>
             )}
             {sidebarOpen && (
-              <span className="truncate text-lg font-semibold tracking-tight text-white">
+              <span className="truncate text-lg font-semibold tracking-tight text-neutral-900">
                 {branding.systemName}
               </span>
             )}
@@ -538,7 +538,7 @@ export default function Layout({ children }: LayoutProps) {
               aria-controls="workspace-sidebar"
               aria-expanded={true}
               title={isDesktop ? "Collapse navigation" : "Close navigation"}
-              className="ml-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-neutral-300 hover:bg-white/10 hover:text-white"
+              className="ml-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-neutral-600 hover:bg-primary/10 hover:text-primary"
             >
               {isDesktop ? <PanelLeftClose className="h-5 w-5" /> : <X className="h-5 w-5" />}
             </button>
@@ -614,7 +614,7 @@ export default function Layout({ children }: LayoutProps) {
                   {sidebarOpen && isMenuExpanded && (
                     <div
                       id={`nav-${menuKey}`}
-                      className="mb-2 ml-[21px] mt-1 space-y-0.5 border-l border-white/10 pl-3"
+                      className="mb-2 ml-[21px] mt-1 space-y-0.5 border-l border-neutral-300 pl-3"
                     >
                       {item.children.map((child) => {
                         const [childPath, childQuery] = child.href.split('?');
@@ -703,7 +703,7 @@ export default function Layout({ children }: LayoutProps) {
             );
           })}
         </nav>
-        <div className="shrink-0 border-t border-white/[0.08] p-3">
+        <div className="shrink-0 border-t border-neutral-200 p-3">
           {isDesktop && <NavHint label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} enabled={!sidebarOpen}>
             <button type="button" onClick={() => setSidebarOpen(!sidebarOpen)} className={`app-nav-item mb-2 ${!sidebarOpen ? 'justify-center px-0' : ''}`} aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} aria-expanded={sidebarOpen} aria-controls="workspace-sidebar">
               {sidebarOpen ? <PanelLeftClose className="h-[18px] w-[18px]" /> : <PanelLeftOpen className="h-[18px] w-[18px]" />}
@@ -723,10 +723,10 @@ export default function Layout({ children }: LayoutProps) {
             {sidebarOpen && (
               <>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs font-medium text-white">
+                  <span className="block truncate text-xs font-medium text-neutral-900">
                     {user.name}
                   </span>
-                  <span className="mt-0.5 block text-[11px] capitalize text-neutral-400">
+                  <span className="mt-0.5 block text-[11px] capitalize text-neutral-500">
                     {isCollectorBurmese ? 'ကောက်ခံသူ' : user.role}
                   </span>
                 </span>
