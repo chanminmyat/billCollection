@@ -508,7 +508,7 @@ export default function Layout({ children }: LayoutProps) {
                 className="h-9 w-9 shrink-0 rounded-lg bg-white/5 object-contain p-1"
               />
             ) : (
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#315848] text-emerald-100">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-neutral-800 text-neutral-100">
                 <Building2 className="h-5 w-5" />
               </div>
             )}
@@ -526,14 +526,14 @@ export default function Layout({ children }: LayoutProps) {
               aria-controls="workspace-sidebar"
               aria-expanded={true}
               title={isDesktop ? "Collapse navigation" : "Close navigation"}
-              className="ml-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[#a8b9b0] hover:bg-white/10 hover:text-white"
+              className="ml-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-neutral-300 hover:bg-white/10 hover:text-white"
             >
               {isDesktop ? <PanelLeftClose className="h-5 w-5" /> : <X className="h-5 w-5" />}
             </button>
           )}
         </div>
         <div
-          className={`pt-7 pb-3 text-[10px] font-semibold uppercase tracking-[0.17em] text-[#82998d] ${sidebarOpen ? 'px-7' : 'px-2 text-center'}`}
+          className={`pt-7 pb-3 text-[10px] font-semibold uppercase tracking-[0.17em] text-neutral-500 ${sidebarOpen ? 'px-7' : 'px-2 text-center'}`}
         >
           {sidebarOpen ? 'Workspace' : 'Menu'}
         </div>
@@ -705,7 +705,7 @@ export default function Layout({ children }: LayoutProps) {
             title="Edit profile"
             onClick={closeSidebarOnMobile}
           >
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#d5e9dc] text-xs font-semibold text-[#244b3d]">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-200 text-xs font-semibold text-neutral-800">
               {initials}
             </span>
             {sidebarOpen && (
@@ -714,7 +714,7 @@ export default function Layout({ children }: LayoutProps) {
                   <span className="block truncate text-xs font-medium text-white">
                     {user.name}
                   </span>
-                  <span className="mt-0.5 block text-[11px] capitalize text-[#91a79a]">
+                  <span className="mt-0.5 block text-[11px] capitalize text-neutral-400">
                     {isCollectorBurmese ? 'ကောက်ခံသူ' : user.role}
                   </span>
                 </span>
@@ -797,7 +797,7 @@ export default function Layout({ children }: LayoutProps) {
             <Link
               href="/profile"
               aria-label="View profile"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-50 text-[11px] font-semibold text-emerald-800 ring-1 ring-emerald-100 transition-colors hover:bg-emerald-100"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-100 text-[11px] font-semibold text-neutral-800 ring-1 ring-neutral-200 transition-colors hover:bg-neutral-200"
             >
               {initials}
             </Link>

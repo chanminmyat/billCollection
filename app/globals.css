@@ -89,23 +89,30 @@
     @apply min-h-screen bg-background;
   }
   .app-sidebar {
-    @apply fixed inset-y-0 left-0 z-50 flex h-screen flex-col border-r border-white/5 bg-[#18221f] text-[#c1ccc6];
+    @apply fixed inset-y-0 left-0 z-50 flex h-screen flex-col border-r border-white/5 bg-neutral-950 text-neutral-300;
     height: 100dvh;
     transition:
       width 200ms ease,
       transform 200ms ease;
   }
   .app-nav-item {
-    @apply flex min-h-[44px] w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium text-[#c1ccc6] transition-colors hover:bg-white/[0.06] hover:text-white;
+    @apply flex min-h-[44px] w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium text-neutral-300 transition-colors hover:bg-white/[0.06] hover:text-white;
   }
   .app-nav-item[data-active='true'] {
-    @apply bg-[#244b3d] text-[#dcf5e7];
+    @apply bg-neutral-800 text-white;
   }
   .app-nav-child {
-    @apply flex min-h-[44px] items-center rounded-md px-3 py-2 text-xs font-medium leading-relaxed text-[#a8b9b0] transition-colors hover:bg-white/5 hover:text-white;
+    @apply flex min-h-[44px] items-center rounded-md px-3 py-2 text-xs font-medium leading-relaxed text-neutral-400 transition-colors hover:bg-white/5 hover:text-white;
   }
   .app-nav-child[aria-current='page'] {
-    @apply bg-white/[0.08] text-[#a8ebc9];
+    @apply bg-white/[0.08] text-white;
+  }
+  .app-sidebar :focus-visible {
+    outline-color: #d4d4d4;
+  }
+  .app-sidebar ::selection {
+    background: #525252;
+    color: #fff;
   }
   .app-main {
     @apply min-w-0 px-4 py-6 sm:px-6 lg:px-8 lg:py-8;
