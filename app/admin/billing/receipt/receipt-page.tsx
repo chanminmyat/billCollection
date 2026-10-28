@@ -1135,9 +1135,8 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
             <div class="page">
               <div class="masthead">
                 <div class="company-header">${receiptLogoHtml}<div class="company-meta"><div class="company-name">${escapeHtml(receiptCompanyName)}</div><div>${escapeHtml(receiptAddress)}</div><div>${escapeHtml(receiptPhone)}</div>${receiptEmail ? `<div>${escapeHtml(receiptEmail)}</div>` : ''}</div></div>
-                <div class="receipt-heading"><div class="service-label">Internet services</div><div class="eyebrow">Payment receipt</div><div class="receipt-no">${escapeHtml(receiptNo)}</div><div class="issued">Issued ${escapeHtml(formatDisplayDate(detail.paidAt || detail.invoiceDate))}</div><span class="status ${getReceiptStatusLabel(detail) === 'cancelled receipt' ? 'cancelled' : ''}">${escapeHtml(getReceiptStatusLabel(detail))}</span></div>
+                <div class="receipt-heading"><div class="service-label">Payment confirmation</div><div class="eyebrow">Receipt</div><div class="receipt-no">${escapeHtml(receiptNo)}</div><div class="issued">Issued ${escapeHtml(formatDisplayDate(detail.paidAt || detail.invoiceDate))}</div><span class="status ${getReceiptStatusLabel(detail) === 'cancelled receipt' ? 'cancelled' : ''}">${escapeHtml(getReceiptStatusLabel(detail))}</span></div>
               </div>
-              <div class="amount-band"><span class="amount-label">${getReceiptStatusLabel(detail) === 'issued' ? 'Amount received' : 'Receipt amount'}</span><span class="amount">${escapeHtml(formatMoney(detail.totalAmount, currency))}</span></div>
               <div class="content">
               <div class="section grid receipt-grid">
                 <div class="info-card">
@@ -1151,9 +1150,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                   <div>${escapeHtml(customerAddress)}</div>
                 </div>
                 <div class="info-card">
-                  <div class="title">Receipt Details</div>
-                  <div>Receipt No: <span class="bold">${escapeHtml(receiptNo)}</span></div>
-                  <div>Receipt date: ${escapeHtml(formatDisplayDate(detail.paidAt || detail.invoiceDate))}</div>
+                  <div class="title">Reference</div>
                   <div>Invoice: <span class="bold">${escapeHtml(invoiceNo)}</span></div>
                   <div>Invoice date: ${escapeHtml(formatDisplayDate(detail.invoiceDate))}</div>
                   <div>Due date: ${escapeHtml(formatDisplayDate(detail.dueDate))}</div>
@@ -1193,7 +1190,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                 <div>Payment Date: ${escapeHtml(formatDisplayDate(detail.paidAt))}</div>
                 <div>Receipt No: ${escapeHtml(receiptNo)}</div></div>
               </div>
-              <div class="footer"><div class="thank-you">Thank you for staying connected.<div class="receipt-signoff">Your internet service payment record</div></div><div class="terms"><strong>Terms &amp; Conditions</strong><div>Payment method: ${escapeHtml(resolvedPaymentMethod)}${resolvedPaymentAccount !== '—' ? ` · ${escapeHtml(resolvedPaymentAccount)}` : ''}</div><div>Collection status: ${escapeHtml(formatCollectionStatus(detail.collectionStatus))}</div>${receiptFooterText ? `<div>${escapeHtml(receiptFooterText)}</div>` : ''}</div></div>
+              <div class="footer"><div class="thank-you">Thank you.<div class="receipt-signoff">We appreciate your continued trust.</div></div><div class="terms"><strong>Payment receipt</strong>${receiptFooterText ? `<div>${escapeHtml(receiptFooterText)}</div>` : ''}</div></div>
               </div>
             </div>
           </body>
@@ -1860,7 +1857,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                   </Button>
                 </div>
 
-                <ReceiptHeader number={selectedReceipt.receiptNo || '—'} date={formatDisplayDate(selectedReceipt.paidAt || selectedReceipt.invoiceDate)} company={branding.receiptCompanyName || branding.systemName} address={branding.receiptAddress} phone={branding.receiptPhone} email={branding.receiptEmail} logo={branding.logoDataUrl} status={getReceiptStatusLabel(selectedReceipt)} amount={formatMoney(selectedReceipt.totalAmount, selectedReceipt.currency || 'MMK')} amountLabel={getReceiptStatusLabel(selectedReceipt) === 'issued' ? 'Amount received' : 'Receipt amount'} />
+                <ReceiptHeader number={selectedReceipt.receiptNo || '—'} date={formatDisplayDate(selectedReceipt.paidAt || selectedReceipt.invoiceDate)} company={branding.receiptCompanyName || branding.systemName} address={branding.receiptAddress} phone={branding.receiptPhone} email={branding.receiptEmail} logo={branding.logoDataUrl} status={getReceiptStatusLabel(selectedReceipt)} />
 
                 <div className="receipt-body">
                 <div className="grid gap-6 border-b border-slate-200 pb-5 md:grid-cols-3">
@@ -1973,7 +1970,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                         ))}
 
                         <TableRow>
-                          <TableCell colSpan={4} className="receipt-total text-right">Total Amount</TableCell>
+                          <TableCell colSpan={4} className="receipt-total text-right">{getReceiptStatusLabel(selectedReceipt) === 'issued' ? 'Total paid' : 'Receipt total'}</TableCell>
                           <TableCell className="receipt-total text-right">
                             {formatMoney(selectedReceipt.totalAmount, selectedReceipt.currency || 'MMK')}
                           </TableCell>
@@ -2039,7 +2036,7 @@ export default function ReceiptPage({ mode }: ReceiptPageProps) {
                 </div>
 
                 <div className="mt-8 grid gap-5 border-t border-slate-200 pt-5 sm:grid-cols-2 sm:items-end">
-                  <p className="text-lg font-semibold text-slate-900">Thank you for staying connected.</p>
+                  <p className="text-lg font-medium text-slate-900">Thank you for your continued trust.</p>
                   <div className="text-xs leading-relaxed text-slate-500">
                     <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Terms &amp; Conditions</p>
                     {branding.footerText ? <p>{branding.footerText}</p> : <p>Receipt issued by {branding.receiptCompanyName || branding.systemName}.</p>}

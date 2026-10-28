@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react';
 import { Wifi } from 'lucide-react';
 
 interface ReceiptHeaderProps {
@@ -10,8 +9,6 @@ interface ReceiptHeaderProps {
   email?: string | null;
   logo?: string | null;
   status?: string | null;
-  amount?: ReactNode;
-  amountLabel?: string;
 }
 
 export function ReceiptHeader({
@@ -23,8 +20,6 @@ export function ReceiptHeader({
   email,
   logo,
   status,
-  amount,
-  amountLabel = 'Total amount',
 }: ReceiptHeaderProps) {
   const tone = 'bg-slate-100 text-slate-700 ring-1 ring-slate-200';
   return (
@@ -38,7 +33,7 @@ export function ReceiptHeader({
               className="h-12 w-12 shrink-0 rounded-lg object-contain"
             />
           ) : (
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white text-slate-700">
               <Wifi className="h-5 w-5" aria-hidden="true" />
             </div>
           )}
@@ -56,9 +51,9 @@ export function ReceiptHeader({
           </div>
         </div>
         <div className="min-w-0 sm:text-right">
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">Internet services</p>
-          <h2 className="text-3xl font-semibold tracking-tight text-slate-900">
-            Payment receipt
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">Payment confirmation</p>
+          <h2 className="text-3xl font-medium tracking-tight text-slate-900">
+            Receipt
           </h2>
           <p className="mt-2 break-all font-mono text-xs text-slate-500">
             {number}
@@ -73,16 +68,6 @@ export function ReceiptHeader({
           )}
         </div>
       </div>
-      {amount !== undefined && (
-        <div className="mt-7 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-5 py-4">
-          <span className="text-xs font-medium text-slate-300">
-            {amountLabel}
-          </span>
-          <span className="break-words text-2xl font-semibold tracking-tight text-slate-900 tabular-nums">
-            {amount}
-          </span>
-        </div>
-      )}
     </header>
   );
 }
